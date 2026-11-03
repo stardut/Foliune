@@ -1,0 +1,35 @@
+.settings-workspace { max-width: 1050px; margin-inline: auto; }
+.settings-sections { display: grid; gap: 42px; }
+.settings-sections > section { padding: 0; }
+.settings-section-title { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; }
+.settings-section-title h2 { font-size: 16px; font-weight: 500; margin: 0; }
+.settings-section-title > span { color: var(--muted); font-size: 12px; }
+.library-options article { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 15px 0; }
+.library-options article > div { min-width: 0; }
+.library-options article > svg { color: var(--accent); flex-shrink: 0; }
+.library-options h3 { font-size: 13px; font-weight: 400; margin: 0 0 9px; }
+.library-options h3 span { color: var(--muted); margin-left: 14px; font-size: 12px; }
+.library-options p { font-size: 12px; color: var(--muted); margin: 0; overflow-wrap: anywhere; }
+.backup-actions { display: flex; gap: 12px; margin-top: 22px; }
+.provider-form { padding: 12px 0 0; margin-top: 24px; }
+.provider-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.provider-heading h3 { font-size: 13px; font-weight: 500; margin: 0; }
+.provider-heading > span { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
+.provider-fields { display: grid; grid-template-columns: 1fr 1.5fr; gap: 20px; }
+.provider-actions { display: flex; align-items: center; justify-content: flex-end; gap: 15px; margin-top: 20px; }
+.provider-actions label { flex-direction: row; align-items: center; margin-right: auto; gap: 7px; font-size: 12px; }
+.provider-form .form-error { margin-top: 15px; }
+.settings-feedback { border: 1px solid var(--line); font-size: 12px; line-height: 1.8; margin-bottom: 25px; padding: 12px 15px; background: var(--soft); border-radius: 4px; overflow-wrap: anywhere; }
+.capability-source { font-size: 12px; color: var(--muted); line-height: 1.8; margin-top: 20px; }
+.capability-source a { margin-left: 10px; color: inherit; text-decoration: underline; }
+.ai-analysis { padding-top: 20px; }
+.ai-analysis-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.ai-analysis-title h3 { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 400; margin: 0; }
+.ai-analysis-title .text-button { font-size: 12px; }
+.ai-analysis label { margin-bottom: 12px; }
+.ai-analysis .muted { font-size: 12px; }
+.ai-analysis > .form-error { margin-top: 12px; }
+.ai-results article { margin-top: 20px; padding-top: 10px; }
+.ai-results article > p { color: var(--muted); font-size: 12px; line-height: 1.8; margin: 0 0 12px; }
+.ai-results article > p > span { display: block; }
+.ai-results article > div { font-size: 12px; line-height: 1.9; white-space: pre-wrap; }

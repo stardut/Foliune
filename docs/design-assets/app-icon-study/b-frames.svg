@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Foliune B · 叠影</title>
+  <desc id="desc">错位照片边框与实心几何 F 交叠，负空间保留取景和收藏的线索。</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#2a3037"/><stop offset="1" stop-color="#11151a"/></linearGradient>
+    <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#949fa9"/><stop offset="1" stop-color="#4a535d"/></linearGradient>
+    <linearGradient id="silver" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#eef1f4"/><stop offset="1" stop-color="#c5cdd5"/></linearGradient>
+  </defs>
+  <rect x="80" y="87" width="864" height="864" rx="190" fill="#000000" opacity=".16"/>
+  <rect x="80" y="80" width="864" height="864" rx="190" fill="url(#tile)"/>
+  <rect x="82" y="82" width="860" height="860" rx="188" fill="none" stroke="#ffffff" stroke-opacity=".14" stroke-width="2"/>
+  <!-- One offset photograph and an open front plate share the F's rhythm. -->
+  <path fill="url(#frame)" fill-rule="evenodd" d="M274 262H654Q678 262 678 286V666Q678 690 654 690H274Q250 690 250 666V286Q250 262 274 262Z M280 292V660H648V292Z"/>
+  <path d="M314 334H756L732 422H410V502H650L626 590H410V750H314Z" fill="#000000" opacity=".2" transform="translate(0 6)"/>
+  <path d="M314 328H756L732 416H410V496H650L626 584H410V744H314Z" fill="url(#silver)"/>
+  <path d="M316 330H752" fill="none" stroke="#ffffff" stroke-opacity=".6" stroke-width="2"/>
+</svg>

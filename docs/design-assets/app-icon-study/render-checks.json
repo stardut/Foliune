@@ -1,0 +1,89 @@
+{
+  "renderer": "sharp 0.34.5 / librsvg 2.61.2",
+  "checks": [
+    {
+      "name": "a-fold",
+      "size": 1024,
+      "channels": 4,
+      "transparentCorners": true,
+      "centerAlpha": 255
+    },
+    {
+      "name": "a-fold",
+      "size": 128,
+      "channels": 4,
+      "transparentCorners": true,
+      "centerAlpha": 255
+    },
+    {
+      "name": "a-fold",
+      "size": 64,
+      "channels": 4,
+      "transparentCorners": true,
+      "centerAlpha": 255
+    },
+    {
+      "name": "a-fold",
+      "size": 32,
+      "channels": 4,
+      "transparentCorners": true,
+      "centerAlpha": 255
+    },
+    {
+      "name": "b-frames",
+      "size": 1024,
+      "channels": 4,
+      "transparentCorners": true,
+      "centerAlpha": 255
+    },
+    {
+      "name": "b-frames",
+      "size": 128,
+      "channels": 4,
+      "transparentCorners": true,
+      "centerAlpha": 255
+    },
+    {
+      "name": "b-frames",
+      "size": 64,
+      "channels": 4,
+      "transparentCorners": true,
+      "centerAlpha": 255
+    },
+    {
+      "name": "b-frames",
+      "size": 32,
+      "channels": 4,
+      "transparentCorners": true,
+      "centerAlpha": 255
+    },
+    {
+      "name": "c-monogram",
+      "size": 1024,
+      "channels": 4,
+      "transparentCorners": true,
+      "centerAlpha": 255
+    },
+    {
+      "name": "c-monogram",
+      "size": 128,
+      "channels": 4,
+      "transparentCorners": true,
+      "centerAlpha": 255
+    },
+    {
+      "name": "c-monogram",
+      "size": 64,
+      "channels": 4,
+      "transparentCorners": true,
+      "centerAlpha": 255
+    },
+    {
+      "name": "c-monogram",
+      "size": 32,
+      "channels": 4,
+      "transparentCorners": true,
+      "centerAlpha": 255
+    }
+  ]
+}

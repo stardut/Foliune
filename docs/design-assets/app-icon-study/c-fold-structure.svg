@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Foliune C · 折面结构稿</title>
+  <desc id="desc">宽正面与窄侧面由同一 24×18 几何投影连接，顶帽、臂根与底端对应收口；近黑底，无阴影或描边。</desc>
+  <rect x="80" y="80" width="864" height="864" rx="190" fill="#15171a"/>
+  <!-- Side: a 24px plane, joined to the 100px frontal shaft.
+       Its top and bottom vertices close on the same (-24,-18) projection. -->
+  <path d="M328 266L352 284V742L328 724Z" fill="#b2b2af"/>
+  <!-- Narrow turning planes: upper cap and arm-root cap share the exact
+       projection, rather than painting a stripe onto the frontal silhouette. -->
+  <path d="M328 266H716L740 284H352Z M428 460H610L634 478H470Q452 478 452 460Z" fill="#cececa"/>
+  <!-- Wide front: unbroken F, with a 100px shaft and 92px arms.
+       The softly returned inner corners belong to this surface, not a bevel. -->
+  <path d="M352 284H740L716 376H470Q452 376 452 394V460Q452 478 470 478H634L610 570H470Q452 570 452 588V742H352Z" fill="#e5e5e2"/>
+</svg>

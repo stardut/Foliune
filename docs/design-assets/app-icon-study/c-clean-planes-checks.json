@@ -1,0 +1,35 @@
+{
+  "renderer": "sharp 0.34.5 / librsvg 2.61.2",
+  "unchangedSilhouette": true,
+  "base": "#15171a",
+  "planes": [
+    "#e7e7e4",
+    "#b4b4b2"
+  ],
+  "offsets": false,
+  "shadows": false,
+  "gradients": false,
+  "strokes": false,
+  "checks": [
+    {
+      "size": 1024,
+      "rgba": true,
+      "transparentCorners": true
+    },
+    {
+      "size": 128,
+      "rgba": true,
+      "transparentCorners": true
+    },
+    {
+      "size": 64,
+      "rgba": true,
+      "transparentCorners": true
+    },
+    {
+      "size": 32,
+      "rgba": true,
+      "transparentCorners": true
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Foliune",
+  "version": "0.1.0",
+  "identifier": "app.foliune.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Foliune",
+        "theme": "Dark",
+        "backgroundColor": "#232423",
+        "width": 1320,
+        "height": 880,
+        "minWidth": 920,
+        "minHeight": 620
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost ws://127.0.0.1:1420",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/originals/**",
+          "$APPDATA/thumbnails/**",
+          "$APPDATA/staging/**",
+          "$APPDATA/audio/**",
+          "$APPDATA/libraries/*/originals/**",
+          "$APPDATA/libraries/*/thumbnails/**",
+          "$APPDATA/libraries/*/staging/**"
+        ]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  }
+}

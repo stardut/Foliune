@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Foliune C · 材质层次稿</title>
+  <desc id="desc">保留 C 的一体 F，柔银正面、连续臂根切面、薄侧缘与近距离投影；背景保持单一近黑。</desc>
+  <defs>
+    <path id="glyph" d="M344 270H726Q738 270 734 282L714 350Q710 362 698 362H446Q424 362 424 384V442Q424 464 446 464H622Q634 464 630 476L610 544Q606 556 594 556H446Q424 556 424 578V722Q424 740 406 740H346Q328 740 328 722V286Q328 270 344 270Z"/>
+    <clipPath id="face-clip"><use href="#glyph"/></clipPath>
+    <linearGradient id="face" gradientUnits="userSpaceOnUse" x1="360" y1="270" x2="520" y2="740">
+      <stop stop-color="#f0f2f5"/><stop offset=".46" stop-color="#dce1e7"/><stop offset="1" stop-color="#bbc5d0"/>
+    </linearGradient>
+    <linearGradient id="side" gradientUnits="userSpaceOnUse" x1="420" y1="300" x2="520" y2="760">
+      <stop stop-color="#8995a3"/><stop offset="1" stop-color="#586473"/>
+    </linearGradient>
+    <linearGradient id="root-bevel" gradientUnits="userSpaceOnUse" x1="412" y1="352" x2="520" y2="476">
+      <stop stop-color="#a6b2bf"/><stop offset=".58" stop-color="#b6c1ce"/><stop offset="1" stop-color="#edf1f5"/>
+    </linearGradient>
+    <filter id="contact-shadow" filterUnits="userSpaceOnUse" x="280" y="230" width="540" height="590" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+  </defs>
+  <rect x="80" y="87" width="864" height="864" rx="190" fill="#000000" opacity=".12"/>
+  <rect x="80" y="80" width="864" height="864" rx="190" fill="#15171a"/>
+  <!-- Thickness projects only 8px right / 18px down; the front outline is unchanged. -->
+  <use href="#glyph" transform="translate(10 26)" fill="#000000" opacity=".48" filter="url(#contact-shadow)"/>
+  <use href="#glyph" transform="translate(8 18)" fill="url(#side)"/>
+  <use href="#glyph" fill="url(#face)"/>
+  <!-- A continuous narrow bevel follows the upper-arm/shaft/middle-arm turn,
+       rather than laying an unrelated highlight band across the letter. -->
+  <g clip-path="url(#face-clip)">
+    <path d="M748 350H446Q412 350 412 384V442Q412 476 446 476H652L656 464H446Q424 464 424 442V384Q424 362 446 362H748Z" fill="url(#root-bevel)" opacity=".7"/>
+    <path d="M344 272H724M330 286V720" fill="none" stroke="#ffffff" stroke-opacity=".35" stroke-width="2"/>
+  </g>
+</svg>

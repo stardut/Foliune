@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Foliune A · 折页</title>
+  <desc id="desc">烟黑圆角底上的银色折页，镂空几何 F 连接照片页与画册。</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#30353c"/><stop offset="1" stop-color="#11151a"/></linearGradient>
+    <linearGradient id="silver" x1="0" y1="0" x2="0.75" y2="1"><stop stop-color="#f1f3f5"/><stop offset="1" stop-color="#c5cbd2"/></linearGradient>
+    <linearGradient id="fold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#a5afb9"/><stop offset="1" stop-color="#d5dbe1"/></linearGradient>
+  </defs>
+  <rect x="80" y="87" width="864" height="864" rx="190" fill="#000000" opacity=".16"/>
+  <rect x="80" y="80" width="864" height="864" rx="190" fill="url(#tile)"/>
+  <rect x="82" y="82" width="860" height="860" rx="188" fill="none" stroke="#ffffff" stroke-opacity=".15" stroke-width="2"/>
+  <!-- The F is a cutout in the plate, not a text glyph. -->
+  <path fill="url(#silver)" fill-rule="evenodd" d="M318 250H626L738 362V710Q738 742 706 742H318Q286 742 286 710V282Q286 250 318 250Z M386 370V650L460 630V550H596V484H460V436H638V370Z"/>
+  <path d="M626 250V334Q626 362 654 362H738Z" fill="url(#fold)"/>
+  <path d="M318 252H624" fill="none" stroke="#ffffff" stroke-opacity=".6" stroke-width="2"/>
+</svg>

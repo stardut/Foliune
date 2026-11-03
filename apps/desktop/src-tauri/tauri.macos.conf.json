@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "title": "Foliune",
+        "theme": "Dark",
+        "transparent": true,
+        "backgroundColor": "#00000000",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "windowEffects": {
+          "effects": ["popover"],
+          "state": "active"
+        },
+        "width": 1320,
+        "height": 880,
+        "minWidth": 920,
+        "minHeight": 620
+      }
+    ]
+  }
+}

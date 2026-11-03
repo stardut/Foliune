@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Foliune C · 刊印</title>
+  <desc id="desc">浅中性圆角底，手绘路径组成切角 F，呼应摄影出版物的克制印记。</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#f1f2ef"/><stop offset="1" stop-color="#d9dcd9"/></linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#30363c"/><stop offset="1" stop-color="#191e23"/></linearGradient>
+  </defs>
+  <rect x="80" y="87" width="864" height="864" rx="190" fill="#000000" opacity=".12"/>
+  <rect x="80" y="80" width="864" height="864" rx="190" fill="url(#tile)"/>
+  <rect x="82" y="82" width="860" height="860" rx="188" fill="none" stroke="#ffffff" stroke-opacity=".65" stroke-width="2"/>
+  <!-- Bespoke slanted terminals; no font or external resource dependency. -->
+  <path d="M326 268H724L696 356H412V468H648L620 556H412V728L312 756V282Q312 268 326 268Z" fill="url(#ink)"/>
+</svg>

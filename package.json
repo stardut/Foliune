@@ -1,0 +1,13 @@
+{
+  "name": "foliune",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.19.0",
+  "scripts": {
+    "dev": "pnpm --filter @foliune/desktop dev",
+    "desktop": "pnpm --filter @foliune/desktop tauri dev",
+    "build": "pnpm --filter @foliune/desktop build",
+    "typecheck": "pnpm --filter @foliune/desktop typecheck",
+    "desktop:build": "pnpm --filter @foliune/desktop tauri build --no-bundle"
+  }
+}

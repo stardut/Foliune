@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Foliune C · 深色精修</title>
+  <desc id="desc">单一近黑圆角底，柔白一体 F；长短横臂、统一轻斜切与柔和内弧形成沉静的品牌轮廓。</desc>
+  <rect x="80" y="87" width="864" height="864" rx="190" fill="#000000" opacity=".12"/>
+  <rect x="80" y="80" width="864" height="864" rx="190" fill="#15171a"/>
+  <!-- One continuous, bespoke outline. Both arm terminals use the same
+       28/92 inclination; the lower stem ends quietly, without a third slant. -->
+  <path d="M344 270H726Q738 270 734 282L714 350Q710 362 698 362H446Q424 362 424 384V442Q424 464 446 464H622Q634 464 630 476L610 544Q606 556 594 556H446Q424 556 424 578V722Q424 740 406 740H346Q328 740 328 722V286Q328 270 344 270Z" fill="#e2e5e9"/>
+</svg>

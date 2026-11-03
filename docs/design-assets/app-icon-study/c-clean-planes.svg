@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Foliune C · 双面几何稿</title>
+  <desc id="desc">单一近黑底与两块中性受光面；纵向结构脊线在横臂根部轻折，保留简洁一体 F 外轮廓。</desc>
+  <defs>
+    <path id="glyph" d="M344 270H726Q738 270 734 282L714 350Q710 362 698 362H446Q424 362 424 384V442Q424 464 446 464H622Q634 464 630 476L610 544Q606 556 594 556H446Q424 556 424 578V722Q424 740 406 740H346Q328 740 328 722V286Q328 270 344 270Z"/>
+    <clipPath id="silhouette"><use href="#glyph"/></clipPath>
+  </defs>
+  <rect x="80" y="80" width="864" height="864" rx="190" fill="#15171a"/>
+  <!-- Front plane: horizontal arms and the right part of their supporting shaft. -->
+  <use href="#glyph" fill="#e7e7e4"/>
+  <!-- Broad structural plane, not an outline: 52–64 of the 96px shaft.
+       The ridge changes direction at the upper arm's root; no offset/third contour. -->
+  <path d="M300 250H380L392 362V770H300Z" fill="#b4b4b2" clip-path="url(#silhouette)"/>
+</svg>

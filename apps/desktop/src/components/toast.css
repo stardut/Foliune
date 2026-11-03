@@ -1,0 +1,20 @@
+/* Padding gives each short shadow room inside the scroll viewport. The visible
+   surface remains 24px from the window edges, without a clipped hard outline. */
+.toast-viewport { position: fixed; inset: auto 0 0 auto; margin: 0; padding: 24px; width: max-content; max-width: min(400px, 100vw); max-height: 100dvh; overflow-y: auto; border: 0; background: transparent; color: var(--ink); list-style: none; pointer-events: none; font: inherit; }
+.toast-viewport-legacy { display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 8px; z-index: 90; }
+.toast-viewport:popover-open { display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 8px; }
+.toast-viewport::backdrop { background: transparent; pointer-events: none; }
+.toast-item { display: flex; align-items: flex-start; flex-shrink: 0; gap: 8px; max-width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--floating); box-shadow: 0 5px 16px #00000038; backdrop-filter: blur(22px); -webkit-backdrop-filter: blur(22px); pointer-events: auto; font-size: 12px; line-height: 1.5; animation: toast-enter .18s cubic-bezier(.16, 1, .3, 1); }
+.toast-content { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.toast-content > span { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
+.toast-icon { flex-shrink: 0; margin-top: 1px; color: var(--muted); stroke-width: 1.6; }
+.toast-error .toast-icon { color: var(--danger); }
+.toast-close { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 26px; height: 26px; margin: -4px -6px -4px 0; padding: 0; border-radius: 6px; color: var(--muted); }
+.toast-close:hover { color: var(--ink); background: var(--control-hover); }
+.toast-close:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+@keyframes toast-enter { from { transform: translateY(5px); } to { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .toast-item { animation: none; } }
+
+/* Older WebViews use the active modal's visible lower-right area because its
+   backdrop-filter establishes the fixed containing block. */
+dialog > .toast-viewport-legacy { position: fixed; inset: auto 0 0 auto; margin: 0; max-width: 100%; max-height: min(50vh, 100%); }

@@ -1,0 +1,44 @@
+{
+  "renderer": "sharp 0.34.5 / librsvg 2.61.2",
+  "unchangedFrontSilhouette": true,
+  "base": "#15171a",
+  "front": [
+    "#f0f2f5",
+    "#dce1e7",
+    "#bbc5d0"
+  ],
+  "projection": [
+    8,
+    18
+  ],
+  "shadow": {
+    "offset": [
+      10,
+      26
+    ],
+    "blur": 10,
+    "opacity": 0.48
+  },
+  "checks": [
+    {
+      "size": 1024,
+      "rgba": true,
+      "transparentCorner": true
+    },
+    {
+      "size": 128,
+      "rgba": true,
+      "transparentCorner": true
+    },
+    {
+      "size": 64,
+      "rgba": true,
+      "transparentCorner": true
+    },
+    {
+      "size": 32,
+      "rgba": true,
+      "transparentCorner": true
+    }
+  ]
+}

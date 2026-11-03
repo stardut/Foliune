@@ -1,0 +1,37 @@
+{
+  "renderer": "sharp 0.34.5 / librsvg 2.61.2",
+  "tile": "#15171a",
+  "glyph": "#e2e5e9",
+  "checks": [
+    {
+      "name": "c-refined",
+      "size": 1024,
+      "rgba": true,
+      "transparentCorners": true
+    },
+    {
+      "name": "c-refined",
+      "size": 128,
+      "rgba": true,
+      "transparentCorners": true
+    },
+    {
+      "name": "c-refined",
+      "size": 64,
+      "rgba": true,
+      "transparentCorners": true
+    },
+    {
+      "name": "c-refined",
+      "size": 32,
+      "rgba": true,
+      "transparentCorners": true
+    },
+    {
+      "name": "c-original-dark",
+      "size": 1024,
+      "rgba": true,
+      "transparentCorners": true
+    }
+  ]
+}

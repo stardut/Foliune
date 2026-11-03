@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">旧 C · 同色轮廓对照</title>
+  <desc id="desc">仅作形态比较：旧C原始路径，采用新稿相同的底色与标记颜色。</desc>
+  <rect x="80" y="87" width="864" height="864" rx="190" fill="#000000" opacity=".12"/>
+  <rect x="80" y="80" width="864" height="864" rx="190" fill="#15171a"/>
+  
+  <path d="M326 268H724L696 356H412V468H648L620 556H412V728L312 756V282Q312 268 326 268Z" fill="#e2e5e9"/>
+</svg>

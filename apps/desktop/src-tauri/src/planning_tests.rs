@@ -1,8 +1,7 @@
 use crate::{
     backup,
-    curation::CurationStore,
     db::{self, Store},
-    libraries, photos,
+    photos,
     planning::{self, PlanPart, PlanPriority, PlanReference, PlanShot, ShootPlanInput},
     planning_export,
 };
@@ -371,17 +370,20 @@ fn planning_restore_preserves_plans_migrates_old_backups_and_rejects_partial_or_
     let saved = planning::save(&mut store.connection.lock().unwrap(), None, draft).unwrap();
     let path = dir.path().join("backup.zip");
     backup::create(&store, &path).unwrap();
-    let restored = backup::restore(&store, &path).unwrap();
-    libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
+    let target = Store::open(dir.path().join("target")).unwrap();
+    backup::restore(&target, &path).unwrap();
+    let mut updated = saved.input.clone();
+    updated.title = "当前策划".into();
+    let updated = planning::save(
+        &mut target.connection.lock().unwrap(),
+        Some(&saved.id),
+        updated,
+    )
+    .unwrap();
+    backup::restore(&target, &path).unwrap();
     assert_eq!(
-        planning::list(&store.connection.lock().unwrap()).unwrap(),
-        [saved.clone()]
-    );
-    planning::delete(&mut store.connection.lock().unwrap(), &saved.id).unwrap();
-    libraries::switch(&store, &CurationStore::default(), "default").unwrap();
-    assert_eq!(
-        planning::list(&store.connection.lock().unwrap()).unwrap(),
-        [saved.clone()]
+        planning::list(&target.connection.lock().unwrap()).unwrap(),
+        [updated]
     );
     for (index, sql) in [
         "DROP TABLE shoot_plan_photos;",
@@ -409,9 +411,9 @@ fn planning_restore_preserves_plans_migrates_old_backups_and_rejects_partial_or_
         dir.path(), &path, "v1-content",
         "ALTER TABLE shoot_plans DROP COLUMN document_json; UPDATE shoot_plans SET styling='白衬衫', lighting='窗光', shot_list='靠窗回头', notes='准备服装';",
     );
-    let restored = backup::restore(&store, &v1).unwrap();
-    libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
-    let migrated = planning::list(&store.connection.lock().unwrap())
+    let target = Store::open(dir.path().join("v1-target")).unwrap();
+    backup::restore(&target, &v1).unwrap();
+    let migrated = planning::list(&target.connection.lock().unwrap())
         .unwrap()
         .remove(0);
     assert_eq!(migrated.id, saved.id);
@@ -435,9 +437,9 @@ fn planning_restore_preserves_plans_migrates_old_backups_and_rejects_partial_or_
             .collect::<Vec<_>>(),
         [ids[1].clone(), ids[0].clone()]
     );
-    planning::init(&store.connection.lock().unwrap()).unwrap();
+    planning::init(&target.connection.lock().unwrap()).unwrap();
     assert_eq!(
-        planning::list(&store.connection.lock().unwrap()).unwrap(),
+        planning::list(&target.connection.lock().unwrap()).unwrap(),
         [migrated]
     );
     let legacy = mutate_backup(
@@ -446,9 +448,9 @@ fn planning_restore_preserves_plans_migrates_old_backups_and_rejects_partial_or_
         "legacy",
         "DROP TABLE shoot_plan_photos; DROP TABLE shoot_plans;",
     );
-    let restored = backup::restore(&store, &legacy).unwrap();
-    libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
-    let mut conn = store.connection.lock().unwrap();
+    let target = Store::open(dir.path().join("legacy-target")).unwrap();
+    backup::restore(&target, &legacy).unwrap();
+    let mut conn = target.connection.lock().unwrap();
     assert!(planning::list(&conn).unwrap().is_empty());
     planning::save(&mut conn, None, input(&ids)).unwrap();
 }

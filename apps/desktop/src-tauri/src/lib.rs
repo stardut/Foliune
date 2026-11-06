@@ -11,7 +11,6 @@ mod credentials;
 mod curation;
 mod db;
 mod groups;
-mod libraries;
 mod link_import;
 mod local_photo;
 mod model_profiles;
@@ -159,8 +158,6 @@ pub fn run() {
             ai::ai_list_analyses,
             ai::ai_analyze_photo,
             ai::ai_run_text,
-            libraries::libraries_list,
-            libraries::libraries_switch,
             backup::backup_create,
             backup::backup_restore,
             music::music_import,

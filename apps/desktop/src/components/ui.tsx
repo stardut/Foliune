@@ -23,7 +23,7 @@ export function Busy({ label = '正在读取图库' }: { label?: string }) {
   return <div className="busy" role="status"><LoaderCircle size={18} className="spin" />{label}</div>;
 }
 
-export function Modal({ title, children, onClose, wide = false }: { title: string; children: ReactNode; onClose?: () => void; wide?: boolean }) {
+export function Modal({ title, children, onClose, closeDisabled = false, wide = false }: { title: string; children: ReactNode; onClose?: () => void; closeDisabled?: boolean; wide?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
@@ -32,7 +32,7 @@ export function Modal({ title, children, onClose, wide = false }: { title: strin
     const dismissModal = presentModal(dialog!);
     return () => { dismissModal(); previous?.focus(); };
   }, []);
-  return <dialog ref={ref} aria-labelledby={titleId} className={`modal ${wide ? 'modal-wide' : ''}`} onCancel={(event) => { event.preventDefault(); onClose?.(); }} onClick={(event) => { if (event.target === event.currentTarget) onClose?.(); }}>
-    <div className="modal-header"><h2 id={titleId}>{title}</h2>{onClose && <IconButton label="关闭" onClick={onClose}><X size={18} /></IconButton>}</div>{children}
+  return <dialog ref={ref} aria-labelledby={titleId} className={`modal ${wide ? 'modal-wide' : ''}`} onCancel={(event) => { event.preventDefault(); if (!closeDisabled) onClose?.(); }} onClick={(event) => { if (!closeDisabled && event.target === event.currentTarget) onClose?.(); }}>
+    <div className="modal-header"><h2 id={titleId}>{title}</h2>{onClose && <IconButton label="关闭" onClick={onClose} disabled={closeDisabled}><X size={18} /></IconButton>}</div>{children}
   </dialog>;
 }

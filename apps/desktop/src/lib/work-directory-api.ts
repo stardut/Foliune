@@ -56,5 +56,5 @@ export const retryWorkDirectoryJob = (jobId: string) => call<WorkDirectoryState>
 export const selectWorkDirectory = (relink: boolean) => open({
   multiple: false,
   directory: true,
-  title: relink ? '重新定位作品目录' : '选择作品目录（原件留在原处）',
+  title: relink ? '选择原作品目录的新位置' : '选择作品目录（原件留在原处）',
 });

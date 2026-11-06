@@ -19,7 +19,7 @@ import { PlanningWorkspace } from './features/planning/PlanningWorkspace';
 import { SearchWorkspace, type SearchSession } from './features/search/SearchWorkspace';
 import { SettingsWorkspace } from './features/SettingsWorkspace';
 import { PhotoPlayer } from './features/PhotoPlayer';
-import { WorkDirectoryControl, WorkDirectoryDiscovery } from './features/WorkDirectory';
+import { WorkDirectoryDiscovery } from './features/WorkDirectory';
 import { useWorkDirectory } from './features/use-work-directory';
 import { mergeWorkDirectoryAvailability, recordDirectoryCommit, replaceLibrarySnapshot, type LibraryView } from './features/work-directory-snapshot';
 import type { WorkDirectoryCommit } from './lib/work-directory-api';
@@ -29,6 +29,7 @@ type SearchDetail = { space: 'books'; book: BookDetail } | { space: 'models'; mo
 type SearchTarget = { space: SearchDetail['space']; id: string };
 const spaces: { id: Space; label: string }[] = [{ id: 'collection', label: '收藏' }, { id: 'work', label: '作品' }, { id: 'books', label: '画册' }, { id: 'models', label: '模特' }, { id: 'planning', label: '策划' }, { id: 'search', label: '搜索' }, { id: 'settings', label: '设置' }];
 const navigationSpaces = spaces.filter((item) => item.id !== 'search' && item.id !== 'settings');
+const primaryNavigationDurationMs = 360;
 const empty: LibrarySnapshot = { photos: [], groups: [], memberships: [] };
 const initialSearchSession: SearchSession = { query: '', category: 'all', scrollTop: 0 };
 
@@ -46,8 +47,6 @@ export default function App() {
   const [searchTarget, setSearchTarget] = useState<SearchTarget | null>(null);
   const [relinkBusy, setRelinkBusy] = useState(false);
   const [relinkConfirmation, setRelinkConfirmation] = useState<{ path: string; resolve: (confirmed: boolean) => void } | null>(null);
-  const [libraryRevision, setLibraryRevision] = useState(0);
-  const latestLibraryRevision = useRef(0);
   const [navigationRevision, setNavigationRevision] = useState(0);
   const [playingIds, setPlayingIds] = useState<string[] | null>(null);
   const [bookDirty, setBookDirty] = useState(false);
@@ -64,20 +63,19 @@ export default function App() {
   const [pendingClose, setPendingClose] = useState(false);
   const [closing, setClosing] = useState(false);
   const closeState = useRef({ dirty: false, busy: false });
-  const onDirectorySynced = useCallback((commit: WorkDirectoryCommit, revision: number) => {
-    if (revision === latestLibraryRevision.current) setLibraryView((view) => recordDirectoryCommit(view, commit));
+  const onDirectorySynced = useCallback((commit: WorkDirectoryCommit) => {
+    setLibraryView((view) => recordDirectoryCommit(view, commit));
   }, []);
-  const onDirectoryAvailability = useCallback((fresh: LibrarySnapshot, revision: number) => {
-    if (revision !== latestLibraryRevision.current) return;
+  const onDirectoryAvailability = useCallback((fresh: LibrarySnapshot) => {
     setLibraryView((view) => {
       const next = mergeWorkDirectoryAvailability(view.snapshot, fresh);
       return next === view.snapshot ? view : { ...view, snapshot: next };
     });
   }, []);
-  const workDirectory = useWorkDirectory(ready, libraryRevision, onDirectorySynced, onDirectoryAvailability);
+  const workDirectory = useWorkDirectory(ready, onDirectorySynced, onDirectoryAvailability);
   const workspaceDirty = bookDirty || photoDirty || modelDirty || planningDirty;
   const workspaceBusy = bookBusy || modelBusy || photoBusy || planningBusy || settingsBusy || relinkBusy || workDirectory.blocking;
-  const discoveryIdle = ready && !loading && photoBrowsingIdle && (space === 'collection' || space === 'work')
+  const discoveryIdle = ready && !loading && (space === 'settings' || (photoBrowsingIdle && (space === 'collection' || space === 'work')))
     && !workspaceDirty && !workspaceBusy && !pendingSpace && !pendingClose && !relinkConfirmation && !playingIds;
   closeState.current = { dirty: workspaceDirty, busy: workspaceBusy };
   async function reload() {
@@ -89,7 +87,8 @@ export default function App() {
   }
   useEffect(() => { void reload(); }, []);
   useLayoutEffect(() => {
-    if (previousSpace.current === space) return;
+    const previous = previousSpace.current;
+    if (previous === space) return;
     previousSpace.current = space;
     const main = mainRef.current;
     if (!main || loading) return;
@@ -97,10 +96,15 @@ export default function App() {
     const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
     if (motionPreference.matches) return;
 
-    // Fade only the committed workspace; keep scroll and fixed overlay geometry intact.
-    const animation = main.animate([{ opacity: .65 }, { opacity: 1 }], {
-      duration: 240,
-      easing: 'cubic-bezier(.2, .72, .2, 1)',
+    const from = navigationSpaces.findIndex((item) => item.id === previous);
+    const to = navigationSpaces.findIndex((item) => item.id === space);
+    const isPrimaryTransition = from >= 0 && to >= 0;
+    const frames = isPrimaryTransition
+      ? [{ opacity: .65, transform: `translateX(${to > from ? 12 : -12}px)` }, { opacity: 1, transform: 'translateX(0)' }]
+      : [{ opacity: .65 }, { opacity: 1 }];
+    const animation = main.animate(frames, {
+      duration: isPrimaryTransition ? primaryNavigationDurationMs : 240,
+      easing: isPrimaryTransition ? 'cubic-bezier(.25, .5, .3, 1)' : 'cubic-bezier(.2, .72, .2, 1)',
     });
     const onMotionPreferenceChange = (event: MediaQueryListEvent) => {
       if (event.matches) animation.cancel();
@@ -169,35 +173,34 @@ export default function App() {
   }
   function confirmRelink(confirmed: boolean) { relinkConfirmation?.resolve(confirmed); setRelinkConfirmation(null); }
   function openPlayer(ids: string[]) { const actual = ids.filter((id) => snapshot.photos.some((photo) => photo.id === id)); if (actual.length) setPlayingIds(actual); else feedback('没有可欣赏的照片', true); }
-  function libraryChanged(next: LibrarySnapshot) { setPlayingIds(null); setLibraryView({ snapshot: next, pendingCommits: [], observedPhotos: [] }); setLibraryRevision(++latestLibraryRevision.current); searchSession.current = { ...initialSearchSession }; setSearchTarget(null); setBookDirty(false); setBookBusy(false); setPhotoDirty(false); setPhotoBusy(false); setModelDirty(false); setModelBusy(false); setPlanningDirty(false); setPlanningBusy(false); setPendingSpace(null); setError(''); toast({ title: '已切换图库' }); }
   function returnToSearch() {
     if (relinkBusy) { feedback('正在处理，请完成后再切换工作区'); return; }
     changeSpace('search');
   }
   function renderWorkspace(result?: SearchDetail) {
     const libraryProps = { snapshot, onSnapshot: setSnapshot, onFeedback: feedback, importDisabled: relinkBusy, onRelink: relinkPhoto, onPlay: openPlayer, onDirtyChange: setPhotoDirty, onBusyChange: setPhotoBusy };
-    if (space === 'search') return <SearchWorkspace key={libraryRevision} {...libraryProps} session={searchSession.current}
+    if (space === 'search') return <SearchWorkspace {...libraryProps} session={searchSession.current}
       onOpenBook={(id) => navigate('books', { space: 'books', id })}
       onOpenModel={(model) => navigate('models', { space: 'models', id: model.id })}
       onOpenPlan={(plan) => navigate('planning', { space: 'planning', id: plan.id })} />;
-    if (space === 'collection' || space === 'work') return <LibraryWorkspace key={`${space}:${libraryRevision}:${navigationRevision}`} space={space} {...libraryProps}
+    if (space === 'collection' || space === 'work') return <LibraryWorkspace key={`${space}:${navigationRevision}`} space={space} {...libraryProps}
       onBrowsingIdleChange={setPhotoBrowsingIdle}
       workDirectory={space === 'work' ? workDirectory : undefined}
-      workDirectoryControl={space === 'work' ? <WorkDirectoryControl directory={workDirectory} disabled={photoBusy || relinkBusy} /> : undefined} />;
-    if (space === 'books') return <BookWorkspace key={libraryRevision} photos={snapshot.photos} onSnapshot={setSnapshot} onPlay={openPlayer} onDirtyChange={setBookDirty} onBusyChange={setBookBusy} onRelink={relinkPhoto}
+      onOpenWorkDirectorySettings={space === 'work' ? () => navigate('settings') : undefined} />;
+    if (space === 'books') return <BookWorkspace photos={snapshot.photos} onSnapshot={setSnapshot} onPlay={openPlayer} onDirtyChange={setBookDirty} onBusyChange={setBookBusy} onRelink={relinkPhoto}
       initialBook={result?.space === 'books' ? result.book : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
-    if (space === 'models') return <ModelWorkspace key={libraryRevision} photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setModelDirty} onBusyChange={setModelBusy} onRelink={relinkPhoto}
+    if (space === 'models') return <ModelWorkspace photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setModelDirty} onBusyChange={setModelBusy} onRelink={relinkPhoto}
       initialModel={result?.space === 'models' ? result.model : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
-    if (space === 'planning') return <PlanningWorkspace key={libraryRevision} photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setPlanningDirty} onBusyChange={setPlanningBusy}
+    if (space === 'planning') return <PlanningWorkspace photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setPlanningDirty} onBusyChange={setPlanningBusy}
       initialPlan={result?.space === 'planning' ? result.plan : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
-    return <SettingsWorkspace snapshot={snapshot} onLibraryChanged={libraryChanged} onBusyChange={setSettingsBusy} />;
+    return <SettingsWorkspace snapshot={snapshot} directory={workDirectory} onRestored={setSnapshot} onBusyChange={setSettingsBusy} />;
   }
   return <div className={`app-shell ${space === 'collection' || space === 'work' || space === 'search' ? 'gallery-shell' : ''}`} aria-busy={loading || workspaceBusy}>
     <header className="app-header" data-tauri-drag-region>
       <div className="header-left">
         <span className="wordmark">Foliune<span>.</span></span>
       </div>
-      <PrimaryNavigation items={navigationSpaces} value={space} onChange={navigate} />
+      <PrimaryNavigation items={navigationSpaces} value={space} durationMs={primaryNavigationDurationMs} onChange={navigate} />
       <nav className="header-actions" aria-label="工具">
         <button type="button" className={`icon-button ${space === 'search' ? 'is-active' : ''}`} aria-label="全局搜索 · ⌘K / Ctrl K" title="全局搜索 · ⌘K / Ctrl K" aria-current={space === 'search' ? 'page' : undefined} onClick={openSearch}><Search size={19} /></button>
         <button type="button" className={`icon-button ${space === 'settings' ? 'is-active' : ''}`} aria-label="设置" title="设置" aria-current={space === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} /></button>
@@ -205,12 +208,12 @@ export default function App() {
     </header>
     {!api.isDesktop() && <div className="desktop-hint">当前为浏览器预览 · 请在 Foliune 桌面应用中导入和管理本地照片</div>}
     {error && <div className="recovery-banner" role="alert"><span>{error}</span>{!ready && api.isDesktop() && <button type="button" onClick={() => void reload()}>重新读取</button>}</div>}
-    <main ref={mainRef}>{loading ? <Busy /> : !ready ? <><WorkspaceHeader title={spaces.find((item) => item.id === space)?.label} /><EmptyState title={api.isDesktop() ? '暂时无法读取图库' : '请在桌面应用中使用'} description={api.isDesktop() ? '读取失败，请检查提示后重试。现有照片未作更改。' : '浏览器仅预览界面。本地照片、存储与编辑需在 Foliune 桌面应用中使用。'} action={api.isDesktop() ? <button type="button" className="button" onClick={() => void reload()}>重新读取</button> : undefined} /></> : searchTarget ? <SearchResultLoader key={`${libraryRevision}:${searchTarget.space}:${searchTarget.id}`} target={searchTarget} onBack={returnToSearch}>{renderWorkspace}</SearchResultLoader> : renderWorkspace()}</main>
+    <main ref={mainRef}>{loading ? <Busy /> : !ready ? <><WorkspaceHeader title={spaces.find((item) => item.id === space)?.label} /><EmptyState title={api.isDesktop() ? '暂时无法读取图库' : '请在桌面应用中使用'} description={api.isDesktop() ? '读取失败，请检查提示后重试。现有照片未作更改。' : '浏览器仅预览界面。本地照片、存储与编辑需在 Foliune 桌面应用中使用。'} action={api.isDesktop() ? <button type="button" className="button" onClick={() => void reload()}>重新读取</button> : undefined} /></> : searchTarget ? <SearchResultLoader key={`${searchTarget.space}:${searchTarget.id}`} target={searchTarget} onBack={returnToSearch}>{renderWorkspace}</SearchResultLoader> : renderWorkspace()}</main>
     {relinkConfirmation && <Modal title="确认替换照片" onClose={() => confirmRelink(false)}><p className="replacement-copy">将用所选文件替换此照片；所有相簿和画册中的引用都会使用该文件</p><p className="replacement-path">{relinkConfirmation.path}</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => confirmRelink(false)}>取消</button><button type="button" className="button button-primary" onClick={() => confirmRelink(true)}>确认替换</button></div></Modal>}
     {pendingClose && <Modal title="放弃修改并关闭窗口？" onClose={() => { if (!closing) setPendingClose(false); }}><p className="replacement-copy">当前修改尚未保存，关闭窗口将放弃这些修改。</p><div className="form-actions"><button type="button" className="button" autoFocus disabled={closing} onClick={() => setPendingClose(false)}>继续编辑</button><button type="button" className="button" disabled={closing || workspaceBusy} onClick={() => void discardAndClose()}>{closing ? '正在关闭…' : '放弃并关闭'}</button></div></Modal>}
     {pendingSpace && <Modal title="离开未保存的修改？" onClose={() => setPendingSpace(null)}><p className="replacement-copy">当前修改尚未保存。离开将放弃这些修改。</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setPendingSpace(null)}>继续编辑</button><button type="button" className="button" disabled={workspaceBusy} onClick={() => { if (workspaceBusy) return; setBookDirty(false); setPhotoDirty(false); setModelDirty(false); setPlanningDirty(false); changeSpace(pendingSpace.space, pendingSpace.target); }}>放弃并离开</button></div></Modal>}
     {playingIds && <PhotoPlayer photos={snapshot.photos} photoIds={playingIds} onClose={() => setPlayingIds(null)} onRelink={relinkPhoto} onFeedback={feedback} />}
-    <WorkDirectoryDiscovery key={libraryRevision} directory={workDirectory} idle={discoveryIdle} />
+    <WorkDirectoryDiscovery directory={workDirectory} idle={discoveryIdle} />
   </div>;
 }
 

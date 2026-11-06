@@ -54,14 +54,28 @@ function score(tiles: ExhibitionTile[], width: number, height: number, viewportH
   return cost;
 }
 
-export function exhibitionLayout(photos: Pick<Photo, 'width' | 'height'>[], width: number, viewportHeight: number): ExhibitionBlock[] {
+function browsingWidth(ratio: number, viewportHeight: number) {
+  return Math.min(480, Math.min(360, viewportHeight * .5) * ratio);
+}
+
+export function exhibitionLayout(photos: Pick<Photo, 'width' | 'height'>[], width: number, viewportHeight: number, compactPair = false): ExhibitionBlock[] {
   if (!photos.length || !Number.isFinite(width) || width <= 0) return [];
   const ratios = photos.map(({ width: w, height: h }) => Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0 ? w / h : 1);
   // A lone photograph is a browsing entry, not a full-width mosaic block.
   if (photos.length === 1) {
-    const photoWidth = Math.min(width, 480, Math.min(360, viewportHeight * .5) * ratios[0]);
+    const photoWidth = Math.min(width, browsingWidth(ratios[0], viewportHeight));
     const height = photoWidth / ratios[0];
     return [{ start: 0, height, tiles: [{ index: 0, x: 0, y: 0, width: photoWidth, height }] }];
+  }
+  if (compactPair && photos.length === 2) {
+    const gap = Math.min(EXHIBITION_GAP, width / 2);
+    const widths = ratios.map((ratio) => browsingWidth(ratio, viewportHeight));
+    const scale = Math.min(1, (width - gap) / (widths[0] + widths[1]));
+    const tiles = widths.map((photoWidth, index) => ({
+      index, x: index === 0 ? 0 : widths[0] * scale + gap, y: 0,
+      width: photoWidth * scale, height: photoWidth * scale / ratios[index],
+    }));
+    return [{ start: 0, height: Math.max(...tiles.map((tile) => tile.height)), tiles }];
   }
   const spans = new Map<string, Slice[]>();
   function candidates(start: number, count: number): Slice[] {

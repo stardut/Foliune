@@ -1,7 +1,10 @@
 import { Plus } from 'lucide-react';
+import { DropdownSelect } from '../../components/DropdownSelect';
 import { PLAN_MAX_TITLE, type PlanPart, type PlanShot } from '../../lib/planning-types';
 import { PlanField, PlanOrder } from './PlanFields';
 import { priorityLabels, shotName } from './plan-content';
+
+const priorityOptions = (Object.keys(priorityLabels) as PlanShot['priority'][]).map((value) => ({ value, label: priorityLabels[value] }));
 
 function Shot({ value, index, length, editing, disabled, onChange, onMove, onRemove }: {
   value: PlanShot; index: number; length: number; editing: boolean; disabled: boolean;
@@ -15,7 +18,10 @@ function Shot({ value, index, length, editing, disabled, onChange, onMove, onRem
     <div className="plan-shot-body">
       <header className="plan-shot-heading"><div className="plan-shot-name">
         {editing ? <input id={`plan-name-${value.id}`} className="plan-inline-title" aria-label={`镜头 ${index + 1} 名称`} maxLength={PLAN_MAX_TITLE} placeholder="镜头名称" value={value.title} onChange={(event) => onChange({ ...value, title: event.target.value })} /> : <><h4>{shotName(value, index)}</h4>{value.priority !== 'normal' && <span className={`plan-priority is-${value.priority}`}>{priorityLabels[value.priority]}</span>}</>}</div>
-        {editing && <div className="plan-shot-controls"><select aria-label={`镜头 ${index + 1} 优先级`} value={value.priority} onChange={(event) => onChange({ ...value, priority: event.target.value as PlanShot['priority'] })}>{Object.entries(priorityLabels).map(([priority, label]) => <option value={priority} key={priority}>{label}</option>)}</select><PlanOrder label={`镜头 ${index + 1}`} index={index} length={length} disabled={disabled} move={onMove} remove={onRemove} /></div>}
+        {editing && <div className="plan-shot-controls">
+          <DropdownSelect label={`镜头 ${index + 1} 优先级`} value={value.priority} options={priorityOptions} onChange={(priority) => onChange({ ...value, priority })} />
+          <PlanOrder label={`镜头 ${index + 1}`} index={index} length={length} disabled={disabled} move={onMove} remove={onRemove} />
+        </div>}
       </header>
       {(editing || value.description.trim()) && <div className="plan-shot-method">{field('description', '关键拍法', '动作与抓拍时机')}</div>}
       {(editing || [value.composition, value.pose, value.lighting, value.mood].some((text) => text.trim())) && <div className="plan-shot-detail">{field('composition', '构图')}{field('pose', '姿态')}{field('lighting', '光线')}{field('mood', '情绪')}</div>}

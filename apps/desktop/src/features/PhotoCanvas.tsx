@@ -57,10 +57,10 @@ function focusWallPhoto(canvas: HTMLDivElement | null, index: number, backwards:
   return true;
 }
 
-export function PhotoCanvas({ ref, photos, sections, selected, onSelect, onPreview, onMenu, layout, emptyAction, onRelink, busy, onLayoutReady, restore, onRestored, onReveal }: PhotoActions & {
+export function PhotoCanvas({ ref, photos, sections, selected, onSelect, onPreview, onMenu, layout, compactAlbumPair = false, emptyAction, onRelink, busy, onLayoutReady, restore, onRestored, onReveal }: PhotoActions & {
   ref?: Ref<PhotoCanvasHandle>;
   photos: Photo[]; sections?: [string, Photo[]][]; selected: string[];
-  layout: 'exhibition' | 'grid'; emptyAction?: ReactNode; onLayoutReady?: () => void;
+  layout: 'exhibition' | 'grid'; compactAlbumPair?: boolean; emptyAction?: ReactNode; onLayoutReady?: () => void;
   restore?: WallPhotoRestore; onRestored?: (restore: WallPhotoRestore) => void;
   onReveal?: (elements: readonly Element[]) => void;
 }) {
@@ -69,9 +69,12 @@ export function PhotoCanvas({ ref, photos, sections, selected, onSelect, onPrevi
   const [deferredFocus, setDeferredFocus] = useState<{ contentKey: string; index: number; from: HTMLElement } | null>(null);
   const orderedPhotos = useMemo(() => sections ? sections.flatMap(([, items]) => items) : photos, [photos, sections]);
   const selectedIds = useMemo(() => new Set(selected), [selected]);
-  const contentKey = useMemo(() => JSON.stringify((sections || [[undefined, photos]]).map(([heading, items]) => ({
-    heading, photos: (items as Photo[]).map(({ id, width, height }) => ({ id, width, height })),
-  }))), [photos, sections]);
+  const contentKey = useMemo(() => JSON.stringify({
+    compactAlbumPair,
+    sections: (sections ?? [[undefined, photos]] as const).map(([heading, items]) => ({
+      heading, photos: items.map(({ id, width, height }) => ({ id, width, height })),
+    })),
+  }), [photos, sections, compactAlbumPair]);
   const wall = usePhotoWall(canvasRef, contentKey, layout);
   useImperativeHandle(ref, () => {
     function viewportPhoto(preferredId?: string) {

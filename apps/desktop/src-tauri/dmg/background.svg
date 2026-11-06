@@ -1,0 +1,13 @@
+<!-- For background.png, rasterize at 1120×640 and set both DPI values to 144 so Finder uses 560×320 points. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="320" viewBox="0 0 560 320">
+  <defs>
+    <radialGradient id="paper" cx="50%" cy="36%" r="74%">
+      <stop offset="0" stop-color="#e7e8e7"/>
+      <stop offset="1" stop-color="#c6c8c7"/>
+    </radialGradient>
+  </defs>
+  <rect width="560" height="320" fill="url(#paper)"/>
+  <!-- Finder draws the native icons and labels on either side of this arrow. -->
+  <path d="M249 150h62m-11-8 11 8-11 8" fill="none" stroke="#55595a"
+        stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

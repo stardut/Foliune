@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, MoreHorizontal, Plus } from 'lucide-react';
 import { useToast } from '../../components/ToastProvider';
+import { DropdownSelect } from '../../components/DropdownSelect';
 import { Modal } from '../../components/ui';
 import * as api from '../../lib/book-api';
 import { versionInput, type BookDetail, type BookItem, type VersionInput } from '../../lib/book-types';
@@ -89,15 +90,26 @@ export function BookEditor({ detail, photos, onSnapshot, onChange, onBack, onPla
           {inspector === 'photo' && item && <>
             <div className="book-inspector-context"><span>第 {currentPageIndex + 1} 页 · 照片 {currentItemIndex + 1}</span><h3>{currentPhoto?.title || '照片不可用'}</h3></div>
             {page.items.length > 1 && <div className="book-item-choices">{page.items.map((entry, index) => { const photo = photos.find((p) => p.id === entry.photoId); return <button key={index} type="button" className={index === currentItemIndex ? 'active' : ''} aria-label={`选择照片 ${index + 1} ${photo?.title || ''}`} aria-pressed={index === currentItemIndex} onClick={() => setItemIndex(index)}>{photo?.thumbnailAvailable ? <img src={photo.thumbnailUrl} alt="" /> : <span>照片 {index + 1}</span>}</button>; })}</div>}
-            <label>替换选片<select value={item.photoId} onChange={(e) => changeItem({ photoId: e.target.value })}>{photos.filter((p) => p.id === item.photoId || !used.includes(p.id)).map((p) => <option key={p.id} value={p.id}>{p.library === 'work' ? '作品' : '收藏'} · {p.title}</option>)}</select></label>
-            <label>适配方式<select value={item.fit} onChange={(e) => changeItem({ fit: e.target.value as BookItem['fit'] })}><option value="contain">完整展示</option><option value="cover">裁切填满</option></select></label>
+            <DropdownSelect label="替换选片" field value={item.photoId} disabled={busy} onChange={(photoId) => changeItem({ photoId })}
+              options={photos.filter((photo) => photo.id === item.photoId || !used.includes(photo.id)).map((photo) => ({
+                value: photo.id, label: `${photo.library === 'work' ? '作品' : '收藏'} · ${photo.title}`,
+              }))} />
+            <DropdownSelect label="适配方式" field value={item.fit} disabled={busy} onChange={(fit) => changeItem({ fit })}
+              options={[{ value: 'contain', label: '完整展示' }, { value: 'cover', label: '裁切填满' }]} />
             {item.fit === 'cover' && <div className="book-crop-controls"><label>水平裁切 <span>{item.cropX}%</span><input type="range" min={0} max={100} value={item.cropX} onChange={(e) => changeItem({ cropX: Number(e.target.value) })} /></label><label>垂直裁切 <span>{item.cropY}%</span><input type="range" min={0} max={100} value={item.cropY} onChange={(e) => changeItem({ cropY: Number(e.target.value) })} /></label></div>}
             <details className="book-details"><summary>位置与尺寸</summary><div className="book-number-grid">{(['x', 'y', 'width', 'height'] as const).map((key) => <label key={key}>{({ x: '左边距 %', y: '上边距 %', width: '宽 %', height: '高 %' })[key]}<input type="number" step={1} min={key === 'x' || key === 'y' ? 0 : 1} max={100} value={item[key]} onChange={(e) => changeItem({ [key]: Number(e.target.value) })} /></label>)}</div></details>
             {page.items.length === 2 && <button type="button" className="button" onClick={() => changePage({ items: page.items.map((current, index) => ({ ...current, photoId: page.items[1 - index].photoId, cropX: page.items[1 - index].cropX, cropY: page.items[1 - index].cropY })) })}>交换双图</button>}
           </>}
           {inspector === 'page' && <>
             <div className="book-inspector-context"><span>页面属性</span><h3>第 {currentPageIndex + 1} 页</h3></div>
-            <label>所属章节<select value={page.chapterId} onChange={(e) => { const id = page.id; const next = organize({ ...draft, pages: draft.pages.map((p) => p.id === id ? { ...p, chapterId: e.target.value } : p) }); change(next); selectPage(next.pages.findIndex((p) => p.id === id)); }}>{draft.chapters.map((c) => <option key={c.id} value={c.id}>{c.title || '未命名章节'}</option>)}</select></label>
+            <DropdownSelect label="所属章节" field value={page.chapterId} disabled={busy}
+              options={draft.chapters.map((chapter) => ({ value: chapter.id, label: chapter.title || '未命名章节' }))}
+              onChange={(chapterId) => {
+                const id = page.id;
+                const next = organize({ ...draft, pages: draft.pages.map((p) => p.id === id ? { ...p, chapterId } : p) });
+                change(next);
+                selectPage(next.pages.findIndex((p) => p.id === id));
+              }} />
             <label>页标题<input value={page.title} maxLength={200} onChange={(e) => changePage({ title: e.target.value })} /></label><label>页说明<textarea rows={4} value={page.caption} maxLength={5000} onChange={(e) => changePage({ caption: e.target.value })} /></label>
             <div className="book-inspector-section"><h3>同章顺序</h3><div className="book-page-actions"><button type="button" className="button" disabled={currentPageIndex === 0 || draft.pages[currentPageIndex - 1]?.chapterId !== page.chapterId} onClick={() => movePage(-1)}>前移一页</button><button type="button" className="button" disabled={currentPageIndex === draft.pages.length - 1 || draft.pages[currentPageIndex + 1]?.chapterId !== page.chapterId} onClick={() => movePage(1)}>后移一页</button></div></div>
             <button type="button" className="button button-quiet button-danger" disabled={draft.pages.length <= 1} onClick={() => { change({ ...draft, pages: draft.pages.filter((p) => p.id !== page.id) }); selectPage(Math.max(0, currentPageIndex - 1)); }}>移除此页</button>

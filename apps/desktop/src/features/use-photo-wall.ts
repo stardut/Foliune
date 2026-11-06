@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { photoWallLayout, visibleWallRange, type PhotoWallLayout, type PhotoWallResponse, type WallLayoutInput, type WallSection, type WallUnit } from './photo-wall-layout';
+import { photoWallLayout, visibleWallRange, type PhotoWallLayout, type PhotoWallResponse, type WallLayoutInput, type WallUnit } from './photo-wall-layout';
 
 interface PublishedWall { key: string; contentKey: string; layout: PhotoWallLayout; complete: boolean }
 
@@ -13,7 +13,7 @@ function remember(key: string, layout: PhotoWallLayout) {
 export function usePhotoWall(canvasRef: RefObject<HTMLDivElement | null>, contentKey: string, mode: 'exhibition' | 'grid') {
   const [bounds, setBounds] = useState({ width: 1120, viewportHeight: 880, bleed: 24, measured: false });
   const input = useMemo<WallLayoutInput>(() => ({
-    sections: JSON.parse(contentKey) as WallSection[], layout: mode, ...bounds,
+    ...JSON.parse(contentKey) as Pick<WallLayoutInput, 'sections' | 'compactAlbumPair'>, layout: mode, ...bounds,
   }), [contentKey, mode, bounds]);
   const key = useMemo(() => JSON.stringify([contentKey, mode, bounds]), [contentKey, mode, bounds]);
   const [computed, setComputed] = useState<PublishedWall | null>(null);

@@ -7,7 +7,7 @@ use super::{
     staging, Root, Scan, LOCATOR_PREFIX,
 };
 use crate::{
-    groups,
+    db, groups,
     models::{Group, Membership, Photo},
     photos,
 };
@@ -420,23 +420,7 @@ pub(super) fn commit(
         )
         .map_err(|e| e.to_string())?;
     }
-    let album = tx
-        .query_row(
-            "SELECT id,library,name,description,capacity,created_at FROM groups WHERE id=?1",
-            [album_id],
-            |row| {
-                Ok(Group {
-                    id: row.get(0)?,
-                    library: row.get(1)?,
-                    name: row.get(2)?,
-                    description: row.get(3)?,
-                    capacity: row.get(4)?,
-                    created_at: row.get(5)?,
-                    bound_folder: Some(candidate.folder_name.clone()),
-                })
-            },
-        )
-        .map_err(|e| e.to_string())?;
+    let album = db::read_group(&tx, album_id)?;
     let first_position: i64 = tx
         .query_row(
             "SELECT COALESCE(MAX(position),-1)+1 FROM memberships WHERE group_id=?1",

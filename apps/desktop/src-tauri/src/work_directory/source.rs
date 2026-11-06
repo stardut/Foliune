@@ -63,14 +63,21 @@ impl Original {
             }
             Storage::Bound(source) => {
                 let mut file = source.open()?;
-                if fingerprint(&mut file)? != source.sha256 {
-                    return Err(format!("作品原件内容已变化：{}", source.file_name));
-                }
+                self.verify_content_hash(&fingerprint(&mut file)?)?;
                 file.rewind().map_err(original_error)?;
                 Ok(file)
             }
             Storage::Local(locator) => local_photo::open(locator),
         }
+    }
+
+    pub(crate) fn verify_content_hash(&self, sha256: &str) -> Result<(), String> {
+        if let Storage::Bound(source) = &self.storage {
+            if sha256 != source.sha256 {
+                return Err(format!("作品原件内容已变化：{}", source.file_name));
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn read(&self) -> Result<Vec<u8>, String> {

@@ -75,6 +75,10 @@ jobs:
         run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
 
       - name: Build ad-hoc signed DMG
+        timeout-minutes: 25
+        env:
+          # Tauri skips Finder layout and background setup when CI=true unless opted in.
+          TAURI_BUNDLER_DMG_IGNORE_CI: "true"
         run: >-
           pnpm --filter @foliune/desktop tauri build --ci
           --target aarch64-apple-darwin --bundles app,dmg
@@ -102,6 +106,21 @@ jobs:
             exit 1
           fi
           hdiutil verify "${dmg_paths[0]}"
+          mount_dir="$(mktemp -d)"
+          hdiutil attach -readonly -noverify -nobrowse -noautoopen -mountpoint "$mount_dir" "${dmg_paths[0]}"
+          trap 'hdiutil detach "$mount_dir" && rmdir "$mount_dir"' EXIT
+          if [ ! -s "$mount_dir/.DS_Store" ] || [ ! -s "$mount_dir/.background/background.png" ]; then
+            echo "Expected Finder layout and background in the DMG." >&2
+            exit 1
+          fi
+          if [ "$(readlink "$mount_dir/Applications")" != "/Applications" ]; then
+            echo "Expected the Applications link to point to /Applications." >&2
+            exit 1
+          fi
+          codesign --verify --deep --strict "$mount_dir/Foliune.app"
+          hdiutil detach "$mount_dir"
+          rmdir "$mount_dir"
+          trap - EXIT
           shasum -a 256 "${dmg_paths[0]}"
           printf 'path=%s\n' "${dmg_paths[0]}" >> "$GITHUB_OUTPUT"
 

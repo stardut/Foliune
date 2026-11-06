@@ -1,13 +1,15 @@
 import { presentModal } from '../lib/modal-stack';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { ArrowLeft, ArrowRight, Maximize2, Music2, Pause, Play, Repeat2, Settings2, Shuffle, Volume2, X } from 'lucide-react';
 import type { Photo } from '../lib/types';
-import { canReadOriginal } from '../lib/photo-availability';
 import { pickMusic, releaseMusic, type MusicTrack } from '../lib/music-api';
-import { PhotoImage } from '../components/PhotoImage';
+import { DropdownSelect } from '../components/DropdownSelect';
 import { IconButton } from '../components/ui';
+import { playerNeighbor, PlayerFrames, usePlayerPresentation } from './PlayerPresentation';
 import './player.css';
+
+const playbackIntervals = [3, 5, 6, 10, 15, 30, 60].map((value) => ({ value, label: `${value} 秒` }));
 
 export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }: { photos: Photo[]; photoIds: string[]; onClose: () => void; onRelink: (photo: Photo) => Promise<void>; onFeedback: (message: string, error?: boolean) => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -17,6 +19,7 @@ export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }:
   const audio = useRef<HTMLAudioElement>(null);
   const [order, setOrder] = useState(photoIds);
   const [index, setIndex] = useState(0);
+  const requestedIndex = useRef(0);
   const [playing, setPlaying] = useState(photoIds.length > 1);
   const [random, setRandom] = useState(false);
   const [loop, setLoop] = useState(true);
@@ -33,13 +36,21 @@ export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }:
   const lastActivity = useRef(0);
   const hoveringTools = useRef(false);
   const awake = visible || !playing || settings;
-  const current = photos.find((photo) => photo.id === order[index]);
+  const photosById = useMemo(() => new Map(photos.map((photo) => [photo.id, photo])), [photos]);
+  const presentation = usePlayerPresentation(photosById, order, index, loop);
+  const { displayed, requested } = presentation;
+  const shownId = displayed?.frame.id;
+  const shownIndex = shownId && shownId !== order[index] ? order.indexOf(shownId) : index;
+  const requestedVisible = displayed?.frame.key === requested.key && displayed.status !== 'thumbnail';
+  const seek = useCallback((next: number) => {
+    requestedIndex.current = next;
+    setIndex(next);
+  }, []);
   const advance = useCallback((direction: number) => {
-    const next = index + direction;
-    if (next >= 0 && next < order.length) setIndex(next);
-    else if (loop && order.length) setIndex((next + order.length) % order.length);
-    else setPlaying(false);
-  }, [index, order.length, loop]);
+    const next = playerNeighbor(requestedIndex.current, direction, order.length, loop);
+    if (next === null) setPlaying(false);
+    else seek(next);
+  }, [order.length, loop, seek]);
   useEffect(() => {
     alive.current = true;
     const previous = document.activeElement as HTMLElement | null;
@@ -58,12 +69,11 @@ export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }:
       previous?.focus();
     };
   }, []);
-  const originalReadable = current && canReadOriginal(current);
-  useEffect(() => { if (originalReadable === false) setPlaying(false); }, [current?.id, originalReadable]);
+  useEffect(() => { if (requestedVisible && displayed?.status === 'error') setPlaying(false); }, [requestedVisible, displayed]);
   useEffect(() => {
-    if (!playing || order.length < 2) return;
+    if (!playing || !requestedVisible || order.length < 2) return;
     const timer = setTimeout(() => advance(1), seconds * 1000); return () => clearTimeout(timer);
-  }, [playing, index, seconds, order.length, advance]);
+  }, [playing, displayed, requestedVisible, seconds, order, advance]);
   useEffect(() => {
     const element = audio.current; if (!element) return;
     element.volume = volume;
@@ -99,8 +109,9 @@ export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }:
   }
   function shuffle() {
     const next = !random; setRandom(next);
-    if (next) { const others = [...photoIds]; if (current) others.splice(others.indexOf(current.id), 1); for (let i = others.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [others[i], others[j]] = [others[j], others[i]]; } setOrder(current ? [current.id, ...others] : others); setIndex(0); }
-    else { setOrder(photoIds); setIndex(Math.max(0, photoIds.indexOf(current?.id || ''))); }
+    const id = order[requestedIndex.current];
+    if (next) { const others = [...photoIds]; if (id) others.splice(others.indexOf(id), 1); for (let i = others.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [others[i], others[j]] = [others[j], others[i]]; } setOrder(id ? [id, ...others] : others); seek(0); }
+    else { setOrder(photoIds); seek(Math.max(0, photoIds.indexOf(id))); }
   }
   async function chooseMusic() {
     setPickingMusic(true); setError('');
@@ -130,7 +141,8 @@ export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }:
       }
       // Tab's default focus search must see the controls after inert is removed.
       if (!awake && event.key === 'Tab') flushSync(reveal); else reveal();
-      if (event.altKey || event.ctrlKey || event.metaKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.target instanceof HTMLInputElement ||
+        (event.target instanceof HTMLElement && event.target.matches('[role="combobox"]'))) return;
       if (event.key === ' ' && (event.target === stage.current || event.target === dialog.current)) {
         event.preventDefault();
         if (!event.repeat) setPlaying((value) => !value);
@@ -139,20 +151,22 @@ export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }:
       if (event.key === 'ArrowRight') { event.preventDefault(); advance(1); }
       if (event.key.toLowerCase() === 'f') void fullscreen();
     }}>
-    <div className="player-top" inert={!awake} {...toolbarEvents}><button className="text-button" type="button" onClick={onClose}><X size={17} />返回</button><span>{current?.title || '照片欣赏'}</span><IconButton label="切换全屏" onClick={() => void fullscreen()}><Maximize2 size={17} /></IconButton></div>
-    <div ref={stage} className="player-stage" tabIndex={-1} role="group" aria-label="照片预览" aria-keyshortcuts="Space ArrowLeft ArrowRight">{current ? <PhotoImage key={current.id} photo={current} original onRelink={onRelink} onUnavailable={() => setPlaying(false)} /> : <p role="alert">此照片不在当前图库中</p>}</div>
+    <div className="player-top" inert={!awake} {...toolbarEvents}><button className="text-button" type="button" onClick={onClose}><X size={17} />返回</button><span>{(shownId && photosById.get(shownId)?.title) || '照片欣赏'}</span><IconButton label="切换全屏" onClick={() => void fullscreen()}><Maximize2 size={17} /></IconButton></div>
+    <div ref={stage} className="player-stage" tabIndex={-1} role="group" aria-label="照片预览" aria-keyshortcuts="Space ArrowLeft ArrowRight"><PlayerFrames presentation={presentation} onRelink={onRelink} /></div>
     {error && <div className="player-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError('')}>关闭</button></div>}
     <div className="player-controls" inert={!awake} {...toolbarEvents}>
       <IconButton label="上一张" disabled={!loop && index === 0} onClick={() => advance(-1)}><ArrowLeft size={18} /></IconButton>
       <IconButton label={playing ? '暂停' : '播放'} onClick={() => { setPlaying(!playing); reveal(); }}>{playing ? <Pause size={18} /> : <Play size={18} />}</IconButton>
       <IconButton label="下一张" disabled={!loop && index === order.length - 1} onClick={() => advance(1)}><ArrowRight size={18} /></IconButton>
-      <span className="player-counter">{String(index + 1).padStart(2, '0')} / {order.length}</span><span className="player-divider" />
+      <span className="player-counter">{String(shownIndex + 1).padStart(2, '0')} / {order.length}</span><span className="player-divider" />
       <IconButton label={random ? '关闭随机播放' : '随机播放'} active={random} onClick={shuffle}><Shuffle size={16} /></IconButton>
       <IconButton label={loop ? '关闭循环' : '循环播放'} active={loop} onClick={() => setLoop(!loop)}><Repeat2 size={17} /></IconButton>
       <button ref={settingsToggle} type="button" className={`icon-button ${settings ? 'is-active' : ''}`} aria-label="播放与音乐设置" title="播放与音乐设置" aria-expanded={settings} aria-controls={settings ? settingsId : undefined}
         onClick={() => { if (settings) closeSettings(); else setSettings(true); }}><Settings2 size={17} /></button>
     </div>
-    {settings && <section id={settingsId} className="player-settings" aria-label="播放设置"><div className="player-settings-title"><h2>播放与音乐</h2><IconButton label="关闭播放设置" onClick={closeSettings}><X size={15} /></IconButton></div><label>每张停留<select value={seconds} onChange={(event) => setSeconds(Number(event.target.value))}>{[3, 5, 6, 10, 15, 30, 60].map((value) => <option key={value} value={value}>{value} 秒</option>)}</select></label><button type="button" className="button" disabled={pickingMusic} onClick={() => void chooseMusic()}><Music2 size={14} />{pickingMusic ? '正在选择…' : '选择本地音乐'}</button>{music && <><p className="player-music-name">{music.name}</p><label className="volume-label"><Volume2 size={14} /><input aria-label="音乐音量" type="range" min="0" max="1" step=".05" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /><span>{Math.round(volume * 100)}%</span></label><button type="button" className="text-button" onClick={() => void removeMusic()}>移除音乐</button></>}<p className="muted">配乐仅用于当前欣赏会话。</p></section>}
+    {settings && <section id={settingsId} className="player-settings" aria-label="播放设置"><div className="player-settings-title"><h2>播放与音乐</h2><IconButton label="关闭播放设置" onClick={closeSettings}><X size={15} /></IconButton></div>
+      <DropdownSelect label="每张停留" field value={seconds} options={playbackIntervals} onChange={setSeconds} />
+      <button type="button" className="button" disabled={pickingMusic} onClick={() => void chooseMusic()}><Music2 size={14} />{pickingMusic ? '正在选择…' : '选择本地音乐'}</button>{music && <><p className="player-music-name">{music.name}</p><label className="volume-label"><Volume2 size={14} /><input aria-label="音乐音量" type="range" min="0" max="1" step=".05" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /><span>{Math.round(volume * 100)}%</span></label><button type="button" className="text-button" onClick={() => void removeMusic()}>移除音乐</button></>}<p className="muted">配乐仅用于当前欣赏会话。</p></section>}
     <audio ref={audio} src={music?.url} loop onError={() => setError('音乐无法读取或格式不受当前系统支持，请重新选择。')} />
   </dialog>;
 }

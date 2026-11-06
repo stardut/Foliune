@@ -1,11 +1,26 @@
 use crate::{
     content_refs,
     db::snapshot,
-    models::{self, GroupInput, Snapshot},
+    models::{self, AlbumCover, GroupInput, Snapshot},
 };
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashSet;
+
+pub(crate) fn init_covers(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS album_covers (
+           group_id TEXT NOT NULL PRIMARY KEY,
+           photo_id TEXT NOT NULL,
+           offset_x REAL NOT NULL CHECK(offset_x BETWEEN 0 AND 1),
+           offset_y REAL NOT NULL CHECK(offset_y BETWEEN 0 AND 1),
+           zoom REAL NOT NULL CHECK(zoom BETWEEN 1 AND 3),
+           FOREIGN KEY(group_id, photo_id) REFERENCES memberships(group_id, photo_id) ON DELETE CASCADE
+         );",
+    )
+    .map_err(|error| error.to_string())
+}
 
 pub fn create(conn: &Connection, input: GroupInput) -> Result<Snapshot, String> {
     models::library(&input.library)?;
@@ -89,11 +104,45 @@ pub fn update(conn: &mut Connection, id: &str, patch: Value) -> Result<Snapshot,
                 )
                 .map_err(|e| e.to_string())?;
             }
+            "cover" => update_cover(&tx, id, value)?,
             _ => return Err(format!("不支持修改分组字段：{key}")),
         }
     }
+    let updated = snapshot(&tx)?;
     tx.commit().map_err(|e| e.to_string())?;
-    snapshot(conn)
+    Ok(updated)
+}
+
+fn update_cover(tx: &Transaction<'_>, group_id: &str, value: &Value) -> Result<(), String> {
+    let cover = AlbumCover::deserialize(value).map_err(|_| "相簿封面参数无效")?;
+    if !(0.0..=1.0).contains(&cover.offset_x)
+        || !(0.0..=1.0).contains(&cover.offset_y)
+        || !(1.0..=3.0).contains(&cover.zoom)
+    {
+        return Err("相簿封面的取景范围无效".into());
+    }
+    let active = tx
+        .query_row(
+            "SELECT EXISTS (
+               SELECT 1 FROM memberships m JOIN photos p ON p.id=m.photo_id
+               WHERE m.group_id=?1 AND m.photo_id=?2 AND m.status='active'
+                 AND p.hidden_after_album_delete=0
+             )",
+            params![group_id, cover.photo_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if !active {
+        return Err("请选择当前相簿中未废弃的照片作为封面".into());
+    }
+    tx.execute(
+        "INSERT INTO album_covers(group_id,photo_id,offset_x,offset_y,zoom) VALUES(?1,?2,?3,?4,?5)
+         ON CONFLICT(group_id) DO UPDATE SET
+           photo_id=excluded.photo_id,offset_x=excluded.offset_x,offset_y=excluded.offset_y,zoom=excluded.zoom",
+        params![group_id, cover.photo_id, cover.offset_x, cover.offset_y, cover.zoom],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 pub fn delete(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, String> {

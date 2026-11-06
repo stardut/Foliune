@@ -124,6 +124,49 @@ test('单图与每个作品分组保留原有观看尺寸，全部分组共用�
   assert.equal(wall.units[3].left, -24);
 });
 
+test('仅两张照片的相簿在同一组内按浏览尺寸并排，窄窗等比收缩', () => {
+  const input = [{ width: 1000, height: 3000 }, { width: 3800, height: 3600 }];
+  const options = { sections: [{ heading: '地点', photos: input }], layout: 'exhibition', viewportHeight: 880, bleed: 24, compactAlbumPair: true };
+  const wide = photoWallLayout({ ...options, width: 896 });
+  const [heading, pair] = wide.units;
+  assert.equal(heading.heading, '地点');
+  assert.deepEqual(pair.tiles.map(({ width }) => width), [120, 380]);
+  assert.deepEqual(photoWallLayout({ ...options, width: 1296 }), wide);
+  for (const width of [280, 896, 1296]) for (const viewportHeight of [540, 880]) {
+    const wall = photoWallLayout({ ...options, width, viewportHeight });
+    verifyUnits(wall, 2);
+    const unit = wall.units[1];
+    const [first, second] = unit.tiles;
+    assert.equal(unit.left, 0);
+    assert.equal(first.x, 0);
+    assert.equal(first.y, 0);
+    assert.equal(second.y, 0);
+    assert.equal(second.x - first.width, 4);
+    assert.ok(second.x + second.width <= width + 1e-7);
+    assert.equal(unit.height, Math.max(first.height, second.height));
+    for (const [index, tile] of unit.tiles.entries()) {
+      assert.ok(tile.width <= 480 && tile.height <= Math.min(360, viewportHeight / 2) + 1e-7);
+      assert.ok(Math.abs(tile.width / tile.height - input[index].width / input[index].height) < 1e-7);
+    }
+    assert.ok(Math.abs(first.width / second.width - 120 / 380) < 1e-7);
+  }
+  const panoramic = photoWallLayout({ ...options, width: 896, sections: [{ photos: [{ width: 10000, height: 100 }, input[1]] }] });
+  assert.deepEqual(panoramic.units[0].tiles.map(({ width }) => width), [480, 380]);
+});
+
+test('双图限制保留不同分组、三张以上相簿、总览和默认双图展览的原布局', () => {
+  const options = { layout: 'exhibition', width: 896, viewportHeight: 880, bleed: 24 };
+  const pair = [{ photos: photos(2) }];
+  const defaultPair = photoWallLayout({ ...options, sections: pair });
+  assert.equal(defaultPair.units[0].left, -24);
+  assert.deepEqual(defaultPair.units.map((unit) => unit.tiles), exhibitionLayout(pair[0].photos, 944, 880).map((block) => block.tiles));
+  const splitPair = [{ heading: '甲', photos: photos(1) }, { heading: '乙', photos: photos(1) }];
+  for (const [layout, sections] of [['exhibition', splitPair], ['exhibition', [{ heading: '甲', photos: photos(2) }, splitPair[1]]], ['grid', pair]]) {
+    const input = { ...options, layout, sections };
+    assert.deepEqual(photoWallLayout({ ...input, compactAlbumPair: true }), photoWallLayout(input));
+  }
+});
+
 test('二分虚拟窗口与逐项相交一致，正反向、首尾和越界不漏项', () => {
   const wall = photoWallLayout({ sections: [{ photos: photos(1000) }], layout: 'grid', width: 896, viewportHeight: 880, bleed: 24 });
   for (const height of [360, 700, 1000]) for (const overscan of [0, 900, 1500]) {

@@ -145,7 +145,7 @@
 .plan-document .plan-field input[type=date][aria-invalid=true] { border-bottom-color: var(--danger); }
 .planning-workspace .plan-shot-heading .plan-inline-title { font-size: 14px; font-weight: 450; line-height: 1.5; padding: 6px 8px; }
 .planning-workspace .plan-shot textarea { font-size: 13px; font-weight: 400; line-height: 1.75; }
-.planning-workspace .plan-shot-heading select { width: auto; flex-shrink: 0; font-size: 12px; font-weight: 400; min-height: 32px; padding: 6px 28px 6px 8px; }
+.planning-workspace .plan-shot-heading .dropdown-select { width: auto; flex-shrink: 0; font-size: 12px; font-weight: 400; min-height: 32px; padding: 6px 7px 6px 8px; }
 .is-editing .plan-shot-name { flex: 1 1 180px; }
 .is-editing .plan-shot > .plan-sequence { padding-top: 8px; }
 .is-editing .plan-shot-detail { row-gap: 8px; }

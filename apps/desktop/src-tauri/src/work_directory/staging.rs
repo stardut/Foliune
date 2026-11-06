@@ -20,26 +20,7 @@ pub(super) fn record_publication(staging: &Path, names: &[String]) -> Result<(),
         .map_err(|e| format!("无法记录作品缩略图发布清单：{e}"))
 }
 
-pub(super) fn clean_abandoned_staging(base: &Path) -> Result<(), String> {
-    clean_library(base)?;
-    let libraries = base.join("libraries");
-    if fs::symlink_metadata(&libraries).is_ok_and(|metadata| metadata.is_dir()) {
-        for entry in fs::read_dir(libraries).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            if entry.file_type().map_err(|e| e.to_string())?.is_dir()
-                && entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| Uuid::parse_str(name).is_ok())
-            {
-                clean_library(&entry.path())?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn clean_library(library: &Path) -> Result<(), String> {
+pub(super) fn clean_abandoned_staging(library: &Path) -> Result<(), String> {
     let directory = root(library);
     let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,

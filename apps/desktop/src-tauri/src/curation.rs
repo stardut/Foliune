@@ -392,15 +392,6 @@ fn commit_inner(
     Ok(state)
 }
 
-pub fn cancel_all(store: &Store, drafts: &CurationStore) -> Result<(), String> {
-    let mut items = drafts.0.lock().map_err(|e| e.to_string())?;
-    for draft in items.values() {
-        cleanup(store, draft)?;
-    }
-    items.clear();
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn prepare_import(
     app: tauri::AppHandle,

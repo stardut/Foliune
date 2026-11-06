@@ -87,6 +87,7 @@ const bundle = await build({
       if (name === 'api') return { contents: [
         'export const isDesktop = () => !!globalThis.albumAirDropTest;',
         'export const shareAlbumAirDrop = (...args) => globalThis.albumAirDropTest(...args);',
+        'export const updateGroup = (...args) => globalThis.albumCoverTest(...args);',
         ...['cancelCuration', 'prepareGroupCuration', 'setMembershipStatuses', 'updatePhoto', 'createGroup', 'commitCuration', 'deleteGroup'].map(name => `export const ${name} = () => { throw new Error('Unexpected native mutation: ${name}'); };`),
       ].join('\n') };
       if (name === 'book-api') return { contents: 'export const listBooks = async () => globalThis.searchFixture?.books?.() ?? [];' };
@@ -130,7 +131,7 @@ async function scenario(space, input, run, options = {}) {
     await renderSnapshot(snapshot);
     await run({ container, relinks, renderSnapshot, session, plays, idle });
     assert.deepEqual(snapshot, before, '浏览和搜索不改变照片、真实相簿或成员关系');
-    assert.deepEqual(calls, [], '不调用 onSnapshot 进行自动归属或迁移');
+    assert.deepEqual(calls, options.expectedSnapshots ?? [], '只应用用户操作返回的图库快照');
   } finally { await act(async () => root.unmount()); container.remove(); }
 }
 
@@ -147,10 +148,13 @@ for (const library of ['collection', 'work']) {
       assert.equal(container.querySelector('.album-detail-title h1').textContent, `${library}-album`);
       assert.deepEqual([...container.querySelectorAll('[data-photo-id]')].map(photo => photo.dataset.photoId), [`${library}-active`]);
       await act(async () => container.querySelector('button[aria-label="相簿更多操作"]').click());
-      assert.equal(container.querySelector('.album-more-panel').textContent.includes('相簿信息'), false);
-      assert.equal(container.querySelector('.album-more-panel').textContent.includes('查看已废弃'), true);
+      assert.equal(menuFor(albumMore(container)).textContent.includes('相簿信息'), false);
+      assert.equal(menuFor(albumMore(container)).textContent.includes('查看已废弃'), true);
       await act(async () => container.querySelector(`button[aria-label="返回${library === 'work' ? '作品相簿' : '收藏相簿'}"]`).click());
       assert.equal(container.querySelectorAll('button.album-open').length, 2);
+      await act(async () => container.querySelectorAll('button.album-open')[1].click());
+      await openAlbumMore(albumMore(container));
+      assert.equal(photoSortOptions(menuFor(albumMore(container))).filter((option) => option.disabled).length, 5);
     });
   });
 
@@ -159,7 +163,7 @@ for (const library of ['collection', 'work']) {
       assert.equal(container.querySelector('.empty-state h2').textContent, '还没有相簿');
       assert.equal(container.querySelector('.empty-state button').textContent, '新建相簿');
       assert.equal(container.querySelector('.photo-count').textContent, '0 本相簿');
-      assert.equal(container.querySelector('.album-sort > button').disabled, true);
+      assert.equal(albumSortTrigger(container).disabled, true);
       assert.equal(container.querySelectorAll('button.album-open').length, 0);
       assert.equal(container.textContent.includes('未归入相簿'), false);
     });
@@ -189,7 +193,7 @@ test('相簿首页与详情共用有效成员，分别保留收藏和废弃的�
     await act(async () => card.click());
     assert.deepEqual(shownPhotos(), ['collection-active', 'collection-earliest', 'collection-loose']);
     await act(async () => container.querySelector('button[aria-label="相簿更多操作"]').click());
-    await act(async () => [...container.querySelectorAll('.album-more-panel button')].find(button => button.textContent === '查看已废弃').click());
+    await act(async () => [...menuFor(albumMore(container)).querySelectorAll('button')].find(button => button.textContent === '查看已废弃').click());
     assert.deepEqual(shownPhotos(), ['collection-discarded-first', 'collection-discarded']);
     await act(async () => container.querySelector('.album-return').click());
     assert.deepEqual(shownPhotos(), ['collection-active', 'collection-earliest', 'collection-loose']);
@@ -198,9 +202,34 @@ test('相簿首页与详情共用有效成员，分别保留收藏和废弃的�
 
 async function changeSort(trigger, label) {
   await act(async () => trigger.click());
-  const item = [...trigger.parentElement.querySelectorAll('[role="menuitemradio"]')].find((option) => option.textContent === label);
+  const item = [...menuFor(trigger).querySelectorAll('[role="menuitemradio"]')].find((option) => option.textContent === label);
   assert.ok(item, `找不到排序选项 ${label}`);
   await act(async () => item.click());
+}
+
+const albumMore = (container) => container.querySelector('button[aria-label="相簿更多操作"]');
+const albumSortTrigger = (container) => container.querySelector('button[aria-haspopup="menu"][aria-label^="相簿排序 · "]');
+const menuFor = (trigger) => document.getElementById(trigger.getAttribute('aria-controls') ?? '');
+const radioGroup = (menu, label) => menu?.querySelector(`[role="group"][aria-label="${label}"]`);
+const photoSortOptions = (menu) => [...(radioGroup(menu, '照片排序')?.querySelectorAll('button') ?? [])];
+
+async function openAlbumMore(trigger) {
+  await act(async () => { trigger.focus(); trigger.click(); });
+}
+
+async function changePhotoSort(trigger, label) {
+  await openAlbumMore(trigger);
+  const item = photoSortOptions(menuFor(trigger)).find((option) => option.textContent === label);
+  assert.ok(item, `找不到照片排序选项 ${label}`);
+  await act(async () => item.click());
+}
+
+async function assertPhotoSort(trigger, label) {
+  await openAlbumMore(trigger);
+  const checked = photoSortOptions(menuFor(trigger)).filter((option) => option.getAttribute('aria-checked') === 'true');
+  assert.deepEqual(checked.map((option) => option.textContent), [label]);
+  assert.ok(checked[0].querySelector('.dropdown-row-check'));
+  await pressKey(checked[0], 'Escape');
 }
 
 test('隔空投送区分整本相簿、选片和未选照片，取消后保留选择', async (t) => {
@@ -267,6 +296,101 @@ function pressKey(target, key) {
   return act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
 }
 
+test('相簿封面以右击照片取景，取消保留旧封面，保存后卡片与弹窗一致', async (t) => {
+  const groupId = 'collection-album';
+  const cover = { photoId: 'collection-loose', offsetX: .5, offsetY: 1, zoom: 2 };
+  const input = { ...mixed, memberships: [...mixed.memberships, { groupId, photoId: cover.photoId, status: 'active', position: 2 }] };
+  const saved = { ...input, groups: input.groups.map((group) => group.id === groupId ? { ...group, cover } : group) };
+  const discarded = { ...saved, memberships: input.memberships.map((member) => member.photoId === cover.photoId ? { ...member, status: 'discarded' } : member) };
+  let actions, settleSave;
+  t.mock.method(window.Element.prototype, 'getBoundingClientRect', function () { return new window.DOMRect(0, 0, 300, 200); });
+  globalThis.captureAlbumTestMenu = (menu) => { actions = menu.actions; };
+  const update = t.mock.fn(() => new Promise((resolve, reject) => { settleSave = { resolve, reject }; }));
+  globalThis.albumCoverTest = update;
+  try {
+    await scenario('collection', input, async ({ container, renderSnapshot }) => {
+      const photoButton = (id) => container.querySelector(`[data-photo-id="collection-${id}"] button`);
+      const action = (id) => actions.find((item) => item.id === id);
+      const context = (target) => act(async () => { target.focus(); target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })); });
+      const run = (id) => act(async () => { assert.equal(action(id)?.allowed(), true); action(id).run(); });
+      const click = (target) => act(async () => target.click());
+      const frame = () => container.querySelector('.album-cover-editor-frame');
+      const zoom = () => container.querySelector('.album-cover-zoom input');
+      const save = () => container.querySelector('dialog .button-primary');
+      const cancel = () => container.querySelector('dialog .form-actions .button');
+      const openCrop = async () => {
+        await context(photoButton('loose'));
+        await run('cover');
+        assert.equal(frame().querySelector('img').alt, cover.photoId);
+        assert.equal(save().disabled, true);
+        await act(async () => frame().querySelector('img').dispatchEvent(new Event('load')));
+      };
+      await click(container.querySelector('.album-open'));
+      await click(container.querySelector('[aria-label="总览"]'));
+      await context(photoButton('active'));
+      await run('select');
+      await click(container.querySelector('[data-testid="selection-more"]'));
+      assert.equal(action('cover'), undefined);
+
+      await openCrop();
+      await pressKey(frame(), 'ArrowDown');
+      assert.equal(frame().style.getPropertyValue('--album-cover-position'), '50% 53.2%');
+      await click(cancel());
+      assert.equal(update.mock.callCount(), 0);
+      assert.equal(document.activeElement, photoButton('loose'));
+
+      await click(photoButton('loose'));
+      await click(container.querySelector('[data-testid="selection-more"]'));
+      assert.equal(action('cover'), undefined);
+      await openCrop();
+      assert.equal(photoButton('active').getAttribute('aria-pressed'), 'true');
+      assert.equal(photoButton('loose').getAttribute('aria-pressed'), 'true');
+      const pointer = (type, clientY) => act(async () => frame().dispatchEvent(new window.PointerEvent(type, { pointerId: 1, clientX: 100, clientY, bubbles: true })));
+      await pointer('pointerdown', 120);
+      await pointer('pointermove', -200);
+      await pointer('pointerup', -200);
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(zoom(), '2');
+        zoom().dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      assert.equal(zoom().value, '2');
+      assert.equal(frame().style.getPropertyValue('--album-cover-position'), '50% 100%');
+      await click(save());
+      assert.deepEqual(update.mock.calls[0].arguments, [groupId, { cover }]);
+      assert.equal(cancel().disabled, true);
+      await act(async () => settleSave.reject(new Error('封面写入失败')));
+      assert.equal(container.querySelector('dialog [role="alert"]').textContent, '封面写入失败');
+      assert.equal(frame().style.getPropertyValue('--album-cover-top'), '-100%');
+      await click(save());
+      await act(async () => settleSave.resolve(saved));
+      assert.equal(container.querySelector('dialog'), null);
+      await renderSnapshot(saved);
+      await openCrop();
+      assert.equal(zoom().value, '2');
+      const previewStyle = frame().getAttribute('style');
+      await click(cancel());
+
+      await click(container.querySelector('[aria-label="返回收藏相簿"]'));
+      const card = () => container.querySelector('.album-open .album-cover');
+      assert.equal(card().querySelector('img').alt, cover.photoId);
+      assert.equal(card().getAttribute('style'), previewStyle);
+      await renderSnapshot(discarded);
+      assert.equal(card().querySelector('img').alt, 'collection-active');
+      assert.equal(card().getAttribute('style'), null);
+      await renderSnapshot(saved);
+      assert.equal(card().querySelector('img').alt, cover.photoId);
+      await click(container.querySelector('.album-open'));
+      await click(albumMore(container));
+      await click([...menuFor(albumMore(container)).querySelectorAll('button')].find((button) => button.textContent === '查看已废弃'));
+      await context(photoButton('discarded'));
+      assert.equal(action('cover'), undefined);
+    }, { expectedSnapshots: [saved] });
+  } finally {
+    delete globalThis.captureAlbumTestMenu;
+    delete globalThis.albumCoverTest;
+  }
+});
+
 test('相簿按创建时间或自然名称双向排序，照片排序不影响封面及加入顺序', async () => {
   const input = {
     photos: [
@@ -279,7 +403,7 @@ test('相簿按创建时间或自然名称双向排序，照片排序不影响�
     memberships: [10, 2].map((number, position) => ({ groupId: 'album-2', photoId: `collection-${number}`, status: 'active', position })),
   };
   await scenario('collection', input, async ({ container, idle }) => {
-    const homeSort = () => container.querySelector('.album-sort > button');
+    const homeSort = () => albumSortTrigger(container);
     const currentIcon = () => homeSort().querySelector('svg').getAttribute('class');
     const cardOrder = () => [...container.querySelectorAll('.album-open h2')].map((item) => item.textContent);
     const cover = () => container.querySelector('.album-open img');
@@ -293,10 +417,10 @@ test('相簿按创建时间或自然名称双向排序，照片排序不影响�
     await pressKey(homeSort(), 'ArrowDown');
     assert.equal(idle.at(-1), false);
     assert.equal(homeSort().getAttribute('aria-expanded'), 'true');
-    const checked = container.querySelector('[role="menuitemradio"][aria-checked="true"]');
+    const checked = menuFor(homeSort()).querySelector('[role="menuitemradio"][aria-checked="true"]');
     assert.equal(document.activeElement, checked);
     assert.equal(checked.textContent, '创建时间 · 由旧到新');
-    assert.ok(checked.querySelector('.album-sort-check'));
+    assert.ok(checked.querySelector('.dropdown-row-check'));
     await pressKey(checked, 'ArrowDown');
     assert.equal(document.activeElement.textContent, '创建时间 · 由新到旧');
     await act(async () => document.activeElement.click());
@@ -315,15 +439,30 @@ test('相簿按创建时间或自然名称双向排序，照片排序不影响�
     await act(async () => cover().dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true })));
     assert.equal(homeSort().getAttribute('aria-expanded'), 'false');
     await act(async () => cover().closest('button').click());
-    const sort = container.querySelector('.album-sort > button');
-    assert.equal(sort.title, '照片排序 · 拍摄时间 · 由新到旧');
+    const sort = albumMore(container);
+    assert.equal(albumSortTrigger(container), null);
+    await openAlbumMore(sort);
+    assert.deepEqual(photoSortOptions(menuFor(albumMore(container))).map((item) => item.textContent), [
+      '加入顺序', '拍摄时间 · 由旧到新', '拍摄时间 · 由新到旧', '文件名 · 升序', '文件名 · 降序',
+    ]);
+    assert.equal(idle.at(-1), false);
+    await act(async () => photoSortOptions(menuFor(albumMore(container)))[0].focus());
+    await pressKey(document.activeElement, 'Escape');
+    assert.equal(document.activeElement, sort);
+    assert.equal(photoSortOptions(menuFor(albumMore(container))).length, 0);
+    assert.equal(idle.at(-1), true);
+    await openAlbumMore(sort);
+    await act(async () => container.querySelector('[data-photo-id]').dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true })));
+    assert.equal(sort.getAttribute('aria-expanded'), 'false');
+    await assertPhotoSort(sort, '拍摄时间 · 由新到旧');
     assert.deepEqual(shownPhotos(), ['collection-2', 'collection-10']);
-    await changeSort(sort, '文件名 · 升序');
+    await changePhotoSort(sort, '文件名 · 升序');
     assert.deepEqual(shownPhotos(), ['collection-2', 'collection-10']);
-    await changeSort(sort, '加入顺序');
-    assert.match(sort.querySelector('svg').getAttribute('class'), /lucide-list-ordered/);
+    await changePhotoSort(sort, '加入顺序');
+    assert.equal(document.activeElement, sort);
+    await assertPhotoSort(sort, '加入顺序');
     assert.deepEqual(shownPhotos(), ['collection-10', 'collection-2']);
-    await changeSort(sort, '文件名 · 升序');
+    await changePhotoSort(sort, '文件名 · 升序');
     await act(async () => container.querySelector('[aria-label="返回收藏相簿"]').click());
     assert.equal(homeSort().title, '相簿排序 · 相簿名 · 降序');
     assert.equal(cover().alt, 'collection-10');
@@ -338,18 +477,18 @@ test('相簿首页与相簿内的排序分别记忆，收藏与作品重挂载�
       groupId: id, photoId: `${library}-${name}`, status: 'active', position,
     }))),
   };
-  const sort = (container) => container.querySelector('.album-sort > button');
+  const sort = (container) => albumSortTrigger(container);
   const cardNames = (container) => [...container.querySelectorAll('.album-open h2')].map((title) => title.textContent);
   const photoIds = (container) => [...container.querySelectorAll('[data-photo-id]')].map((item) => item.dataset.photoId);
 
   await scenario('collection', input, async ({ container }) => {
     await changeSort(sort(container), '相簿名 · 降序');
     await act(async () => container.querySelector('.album-open').click());
-    await changeSort(sort(container), '文件名 · 升序');
+    await changePhotoSort(albumMore(container), '文件名 · 升序');
     await act(async () => container.querySelector('[aria-label="返回收藏相簿"]').click());
     assert.deepEqual(cardNames(container), ['collection-empty', 'collection-album']);
     await act(async () => container.querySelectorAll('.album-open')[1].click());
-    assert.equal(sort(container).title, '照片排序 · 文件名 · 升序');
+    await assertPhotoSort(albumMore(container), '文件名 · 升序');
     assert.deepEqual(photoIds(container), ['collection-2', 'collection-10']);
   });
 
@@ -357,16 +496,16 @@ test('相簿首页与相簿内的排序分别记忆，收藏与作品重挂载�
     assert.equal(sort(container).title, '相簿排序 · 相簿名 · 降序');
     assert.deepEqual(cardNames(container), ['work-empty', 'work-album']);
     await act(async () => container.querySelector('.album-open').click());
-    assert.equal(sort(container).title, '照片排序 · 文件名 · 升序');
+    await assertPhotoSort(albumMore(container), '文件名 · 升序');
     assert.deepEqual(photoIds(container), ['work-2', 'work-10']);
-    await changeSort(sort(container), '加入顺序');
+    await changePhotoSort(albumMore(container), '加入顺序');
     assert.deepEqual(photoIds(container), ['work-10', 'work-2']);
   });
 
   await scenario('collection', input, async ({ container }) => {
     assert.equal(sort(container).title, '相簿排序 · 相簿名 · 降序');
     await act(async () => container.querySelector('.album-open').click());
-    assert.equal(sort(container).title, '照片排序 · 加入顺序');
+    await assertPhotoSort(albumMore(container), '加入顺序');
     assert.deepEqual(photoIds(container), ['collection-10', 'collection-2']);
   });
 });
@@ -375,10 +514,10 @@ test('已保存的无效相簿和照片排序分别使用默认值', async () =>
   window.localStorage.setItem('foliune.album-sort', 'membership');
   window.localStorage.setItem('foliune.photo-sort', 'constructor');
   await scenario('collection', mixed, async ({ container }) => {
-    const sortTitle = () => container.querySelector('.album-sort > button').title;
+    const sortTitle = () => albumSortTrigger(container).title;
     assert.equal(sortTitle(), '相簿排序 · 创建时间 · 由旧到新');
     await act(async () => container.querySelector('.album-open').click());
-    assert.equal(sortTitle(), '照片排序 · 拍摄时间 · 由新到旧');
+    await assertPhotoSort(albumMore(container), '拍摄时间 · 由新到旧');
   });
 });
 
@@ -390,7 +529,7 @@ test('排序偏好写入失败时反馈错误，仍可在当前页排序并重�
     setItem() { throw new Error('写入被拒绝'); },
   }));
   await scenario('collection', mixed, async ({ container }) => {
-    const sort = container.querySelector('.album-sort > button');
+    const sort = albumSortTrigger(container);
     await changeSort(sort, '相簿名 · 降序');
     assert.equal(sort.title, '相簿排序 · 相簿名 · 降序');
     assert.deepEqual(feedback, [['无法记住排序偏好', true]]);
@@ -423,28 +562,28 @@ test('作品按拍摄时间跨月连续排序，可选择地点分组，文件�
       const headings = () => container.querySelector('[data-testid="photo-canvas"]').getAttribute('data-section-headings');
       const ids = (...numbers) => numbers.map((number) => `work-${number}`);
       await act(async () => container.querySelector('.album-open').click());
-      const sort = container.querySelector('.album-sort > button');
-      assert.equal(sort.title, '照片排序 · 拍摄时间 · 由新到旧');
+      const sort = albumMore(container);
+      await assertPhotoSort(sort, '拍摄时间 · 由新到旧');
       assert.deepEqual(order(), ids(10, 9, 1, 2));
       assert.equal(headings(), null);
-      await changeSort(sort, '拍摄时间 · 由旧到新');
+      await changePhotoSort(sort, '拍摄时间 · 由旧到新');
       assert.deepEqual(order(), ids(2, 1, 9, 10));
       assert.equal(headings(), null);
-      await changeSort(sort, '拍摄时间 · 由新到旧');
+      await changePhotoSort(sort, '拍摄时间 · 由新到旧');
       await more();
-      assert.equal(container.querySelector('.album-group-options button[aria-pressed="true"]').textContent, '不分组');
-      await act(async () => [...container.querySelectorAll('.album-group-options button')].find((item) => item.textContent === '地点').click());
+      assert.equal(radioGroup(menuFor(sort), '分组方式').querySelector('button[aria-checked="true"]').textContent, '不分组');
+      await act(async () => [...radioGroup(menuFor(sort), '分组方式').querySelectorAll('button')].find((item) => item.textContent === '地点').click());
       assert.deepEqual(order(), ids(10, 2, 9, 1));
       assert.equal(headings(), '甲,乙');
-      await changeSort(sort, '拍摄时间 · 由旧到新');
+      await changePhotoSort(sort, '拍摄时间 · 由旧到新');
       assert.deepEqual(order(), ids(1, 9, 2, 10));
 
       await act(async () => photoButton(9).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
       await act(async () => photoMenu.find((action) => action.id === 'select').run());
-      await changeSort(sort, '文件名 · 升序');
+      await changePhotoSort(sort, '文件名 · 升序');
       assert.deepEqual(order(), ids(1, 2, 9, 10));
       assert.equal(headings(), null);
-      await act(async () => sort.click());
+      await openAlbumMore(sort);
       await pressKey(document.activeElement, 'Escape');
       assert.equal(sort.getAttribute('aria-expanded'), 'false');
       assert.equal(document.activeElement, sort);
@@ -452,8 +591,8 @@ test('作品按拍摄时间跨月连续排序，可选择地点分组，文件�
       await pressKey(sort, 'Escape');
       assert.equal(photoButton(9).hasAttribute('aria-pressed'), false);
       await more();
-      assert.equal(container.querySelector('.album-group-options'), null);
-      await act(async () => [...container.querySelectorAll('.album-more-panel button')].find((item) => item.textContent === '欣赏').click());
+      assert.equal(radioGroup(menuFor(sort), '分组方式'), null);
+      await act(async () => [...menuFor(albumMore(container)).querySelectorAll('button')].find((item) => item.textContent === '欣赏').click());
       assert.deepEqual(plays, [ids(1, 2, 9, 10)]);
       await act(async () => button('总览').click());
       await act(async () => photoButton(2).click());
@@ -472,22 +611,23 @@ test('作品按拍摄时间跨月连续排序，可选择地点分组，文件�
       await act(async () => otherReview.querySelector('button').click());
       assert.equal(shownImage(container).alt, '风');
       assert.equal(document.activeElement, otherThumbnail);
-      await changeSort(sort, '文件名 · 降序');
+      await changePhotoSort(sort, '文件名 · 降序');
       assert.deepEqual([...container.querySelectorAll('.album-filmstrip button')].map((item) => item.title), ['海', '风', '山', '云']);
       assert.equal(shownImage(container).alt, '风');
-      await act(async () => sort.click());
+      await openAlbumMore(sort);
+      await act(async () => photoSortOptions(menuFor(albumMore(container)))[0].focus());
       await pressKey(document.activeElement, 'ArrowLeft');
       assert.equal(shownImage(container).alt, '风');
       await pressKey(document.activeElement, 'Escape');
-      await pressKey(sort, 'ArrowLeft');
-      assert.equal(shownImage(container).alt, '风');
+      assert.equal(document.activeElement, sort);
+      assert.equal(sort.getAttribute('aria-expanded'), 'false');
       await act(async () => button('展览').click());
       assert.deepEqual(order(), ids(10, 9, 2, 1));
-      await changeSort(sort, '拍摄时间 · 由旧到新');
+      await changePhotoSort(sort, '拍摄时间 · 由旧到新');
       assert.deepEqual(order(), ids(1, 9, 2, 10));
       await more();
-      assert.equal(container.querySelector('.album-group-options button[aria-pressed="true"]').textContent, '地点');
-      await act(async () => [...container.querySelectorAll('.album-group-options button')].find((item) => item.textContent === '不分组').click());
+      assert.equal(radioGroup(menuFor(sort), '分组方式').querySelector('button[aria-checked="true"]').textContent, '地点');
+      await act(async () => [...radioGroup(menuFor(sort), '分组方式').querySelectorAll('button')].find((item) => item.textContent === '不分组').click());
       assert.deepEqual(order(), ids(2, 1, 9, 10));
       assert.equal(headings(), null);
     });
@@ -746,8 +886,8 @@ test('相簿单张按既有顺序浏览，菜单和弹窗隔离方向键，搜�
     assert.equal(shownImage(container).alt, 'collection-third');
 
     await act(async () => { button('相簿更多操作').focus(); button('相簿更多操作').click(); });
-    assert.equal(container.querySelector('.album-more-panel').textContent.includes('显示方式'), false);
-    assert.match(container.querySelector('.album-more-panel').textContent, /导入照片.*欣赏.*查看已废弃/);
+    assert.equal(menuFor(albumMore(container)).textContent.includes('显示方式'), false);
+    assert.match(menuFor(albumMore(container)).textContent, /导入照片.*欣赏.*查看已废弃/);
     await key('ArrowLeft');
     assert.equal(thumb().title, 'collection-third');
     await key('Escape');

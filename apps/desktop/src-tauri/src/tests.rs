@@ -69,6 +69,68 @@ fn import_preserves_original_and_persists_metadata() {
 }
 
 #[test]
+fn album_cover_requires_an_active_member_and_persists_until_album_deletion() {
+    let (root, store) = store();
+    let album_id = group(&store, "海岸", None);
+    let path = fixture(&root, "cover.jpg");
+    let original = std::fs::read(&path).unwrap();
+    let imported =
+        photos::import(&store, vec![path.clone(), path.clone()], "collection", None).unwrap();
+    let photo_id = &imported.imported_ids[0];
+    let other_id = &imported.imported_ids[1];
+    let cover = json!({"photoId": photo_id, "offsetX": 0.25, "offsetY": 0.8, "zoom": 2.5});
+    {
+        let mut conn = store.connection.lock().unwrap();
+        let state = groups::add(&mut conn, &album_id, std::slice::from_ref(photo_id)).unwrap();
+        assert!(serde_json::to_value(&state.groups[0]).unwrap()["cover"].is_null());
+        for (key, invalid) in [
+            ("photoId", json!(other_id)),
+            ("offsetX", json!(-0.1)),
+            ("offsetY", json!(1.1)),
+            ("zoom", json!(0.9)),
+            ("zoom", json!(3.1)),
+        ] {
+            let mut invalid_cover = cover.clone();
+            invalid_cover[key] = invalid;
+            assert!(groups::update(&mut conn, &album_id, json!({"cover": invalid_cover})).is_err());
+        }
+        assert!(groups::update(&mut conn, &album_id, json!({"cover": cover, "name": 1})).is_err());
+        assert!(snapshot(&conn).unwrap().groups[0].cover.is_none());
+        let state = groups::update(&mut conn, &album_id, json!({"cover": cover})).unwrap();
+        assert_eq!(
+            serde_json::to_value(&state.groups[0]).unwrap()["cover"],
+            cover
+        );
+        let state = groups::set_status(&mut conn, &album_id, photo_id, "discarded").unwrap();
+        assert_eq!(
+            serde_json::to_value(&state.groups[0]).unwrap()["cover"],
+            cover
+        );
+        assert!(groups::update(&mut conn, &album_id, json!({"cover": cover})).is_err());
+    }
+    drop(store);
+    let reopened = Store::open(root.path().join("managed")).unwrap();
+    let mut conn = reopened.connection.lock().unwrap();
+    let state = groups::set_status(&mut conn, &album_id, photo_id, "active").unwrap();
+    assert_eq!(
+        serde_json::to_value(&state.groups[0]).unwrap()["cover"],
+        cover
+    );
+    let photo = state
+        .photos
+        .iter()
+        .find(|photo| photo.id == *photo_id)
+        .unwrap();
+    assert_eq!(std::fs::read(&photo.original_path).unwrap(), original);
+    assert_eq!(std::fs::read(path).unwrap(), original);
+    crate::work_directory::runtime::delete_album(&mut conn, &album_id).unwrap();
+    let covers: u32 = conn
+        .query_row("SELECT count(*) FROM album_covers", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(covers, 0);
+}
+
+#[test]
 fn local_import_keeps_only_thumbnail_and_reads_original_at_selected_path() {
     let (root, store) = store();
     let path = fixture(&root, "潮汐 #1.webp");
@@ -558,4 +620,37 @@ fn all_eight_exif_orientations_map_thumbnail_corners_correctly() {
             "EXIF orientation {orientation}"
         );
     }
+}
+
+#[test]
+fn opens_the_previous_active_library_without_relocating_its_photos() {
+    let (root, default) = store();
+    let id = uuid::Uuid::new_v4().to_string();
+    let selected = default.root.join("libraries").join(&id);
+    let previous = Store::open_direct(selected.clone()).unwrap();
+    let source = fixture(&root, "active.jpg");
+    let imported = photos::import(&previous, vec![source], "collection", None).unwrap();
+    let original = imported.snapshot.photos[0].original_path.clone();
+    let app_root = default.root.clone();
+    drop(previous);
+    drop(default);
+    std::fs::write(
+        app_root.join("library-selection.json"),
+        serde_json::to_vec(&id).unwrap(),
+    )
+    .unwrap();
+
+    let upgraded = Store::open(app_root.clone()).unwrap();
+    let conn = upgraded.connection.lock().unwrap();
+    assert_eq!(crate::db::library_root(&conn).unwrap(), selected);
+    let state = snapshot(&conn).unwrap();
+    assert_eq!(state.photos[0].id, imported.imported_ids[0]);
+    assert_eq!(state.photos[0].original_path, original);
+    assert!(std::path::Path::new(&original).is_file());
+    drop(conn);
+    drop(upgraded);
+
+    std::fs::rename(&selected, selected.with_extension("unavailable")).unwrap();
+    assert!(Store::open(app_root).is_err());
+    assert!(!selected.exists());
 }

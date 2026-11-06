@@ -20,5 +20,15 @@
         "minHeight": 620
       }
     ]
+  },
+  "bundle": {
+    "macOS": {
+      "dmg": {
+        "background": "dmg/background.png",
+        "windowSize": { "width": 560, "height": 320 },
+        "appPosition": { "x": 148, "y": 150 },
+        "applicationFolderPosition": { "x": 412, "y": 150 }
+      }
+    }
   }
 }

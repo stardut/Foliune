@@ -1,3 +1,4 @@
+.work-directory-source { display: inline-flex; vertical-align: -0.2em; color: var(--muted); }
 .work-directory-batch { display: grid; gap: 4px; max-height: min(320px, 45vh); overflow: auto; }
 .work-directory-batch:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; border-radius: 6px; }
 .work-directory-batch summary { padding: 8px 4px; cursor: pointer; overflow-wrap: anywhere; }

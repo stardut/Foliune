@@ -108,10 +108,12 @@ fn only_confirmed_direct_photos_get_stable_ids_and_no_original_copy() {
     );
     assert!(Path::new(&old.thumbnail_path).is_file());
 
+    let cover =
+        serde_json::json!({"photoId": old.id, "offsetX": 0.25, "offsetY": 0.8, "zoom": 2.5});
     groups::update(
         &mut conn,
         &indexed.groups[0].id,
-        serde_json::json!({"name":"改名后的相簿"}),
+        serde_json::json!({"name":"改名后的相簿", "cover": cover}),
     )
     .unwrap();
     photo(&fixture.works.join("海岸/新片.jpg"), 50);
@@ -124,6 +126,10 @@ fn only_confirmed_direct_photos_get_stable_ids_and_no_original_copy() {
     let appended = db::snapshot(&conn).unwrap();
     assert_eq!(appended.groups.len(), 1);
     assert_eq!(appended.groups[0].name, "改名后的相簿");
+    assert_eq!(
+        serde_json::to_value(&appended.groups[0].cover).unwrap(),
+        cover
+    );
     assert_eq!(appended.photos.len(), 2);
     assert_eq!(appended.memberships[0].photo_id, old.id);
     assert_eq!(appended.memberships[1].position, 1);
@@ -412,8 +418,11 @@ fn startup_cleanup_removes_only_abandoned_work_directory_staging() {
         fs::write(curation.join("original.jpg"), b"other feature").unwrap();
     }
     staging::clean_abandoned_staging(&fixture.store.root).unwrap();
+    assert!(!fixture.store.root.join("staging/work-directory").exists());
+    assert!(other_library
+        .join("staging/work-directory/interrupted-job/thumbnail.jpg")
+        .is_file());
     for root in [&fixture.store.root, &other_library] {
-        assert!(!root.join("staging/work-directory").exists());
         assert!(root.join("staging/other-feature/original.jpg").is_file());
     }
 }
@@ -466,7 +475,7 @@ fn backup_restores_metadata_and_thumbnail_without_authorizing_external_reads() {
         db::snapshot(&conn).unwrap().photos.remove(0).id
     };
     let archive_path = fixture.temp.path().join("works.zip");
-    backup::create(&fixture.store, &archive_path).unwrap();
+    backup::create_with_mode(&fixture.store, &archive_path, backup::BackupMode::Metadata).unwrap();
     let archive = zip::ZipArchive::new(fs::File::open(&archive_path).unwrap()).unwrap();
     assert!(!archive
         .file_names()
@@ -474,9 +483,9 @@ fn backup_restores_metadata_and_thumbnail_without_authorizing_external_reads() {
     assert!(archive
         .file_names()
         .any(|name| name.starts_with("thumbnails/")));
-    let restored = backup::restore(&fixture.store, &archive_path).unwrap();
-    let restored = Store::open_direct(PathBuf::from(restored.library.path)).unwrap();
-    let conn = restored.connection.lock().unwrap();
+    let target = Store::open(fixture.temp.path().join("target")).unwrap();
+    backup::restore(&target, &archive_path).unwrap();
+    let conn = target.connection.lock().unwrap();
     let state = db::snapshot(&conn).unwrap();
     let restored_photo = &state.photos[0];
     assert_eq!(restored_photo.id, photo_id);
@@ -494,6 +503,150 @@ fn backup_restores_metadata_and_thumbnail_without_authorizing_external_reads() {
             .read()
             .unwrap(),
         fs::read(&path).unwrap()
+    );
+}
+
+#[test]
+fn full_backup_restores_managed_copies_for_all_sources_and_keeps_live_binding() {
+    let fixture = Fixture::new();
+    let work = fixture.works.join("活动/首张.png");
+    let local = fixture.temp.path().join("首张.png");
+    photo(&work, 10);
+    photo(&local, 20);
+    let inputs = vec![local.to_str().unwrap().into()];
+    let managed_id = crate::photos::import(&fixture.store, inputs.clone(), "collection", None)
+        .unwrap()
+        .imported_ids
+        .remove(0);
+    let local_id = crate::photos::import_local(&fixture.store, inputs, "collection", None)
+        .unwrap()
+        .0
+        .imported_ids
+        .remove(0);
+    let (work_id, album_id) = {
+        let mut conn = fixture.store.connection.lock().unwrap();
+        let root = fixture.binding(&conn);
+        let candidates = fixture.pending(&conn, &root);
+        sync_now(&mut conn, &root, &candidates).unwrap();
+        conn.execute(
+            "INSERT INTO work_directory_ignored_files(root_id,folder,file_name)
+             VALUES(?1,'活动','忽略.png')",
+            [&root.id],
+        )
+        .unwrap();
+        let state = db::snapshot(&conn).unwrap();
+        let work = state
+            .photos
+            .iter()
+            .find(|photo| photo.library == "work")
+            .unwrap();
+        (work.id.clone(), state.groups[0].id.clone())
+    };
+    let archive_path = fixture.temp.path().join("full.zip");
+    assert_eq!(
+        backup::create_with_mode(&fixture.store, &archive_path, backup::BackupMode::Full)
+            .unwrap()
+            .photo_count,
+        3
+    );
+    let archive = zip::ZipArchive::new(fs::File::open(&archive_path).unwrap()).unwrap();
+    let names = archive.file_names().collect::<Vec<_>>();
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| name.starts_with("originals/"))
+            .count(),
+        3
+    );
+    assert!(names.contains(&format!("originals/{local_id}.png").as_str()));
+    assert!(names.contains(&format!("originals/{work_id}.png").as_str()));
+    let work_bytes = fs::read(&work).unwrap();
+    let local_bytes = fs::read(&local).unwrap();
+    {
+        let conn = fixture.store.connection.lock().unwrap();
+        assert!(active(&conn).unwrap().unwrap().authorized);
+        let live = db::snapshot(&conn).unwrap();
+        assert_eq!(live.groups[0].bound_folder.as_deref(), Some("活动"));
+        assert!(live
+            .photos
+            .iter()
+            .any(|p| p.id == work_id && is_locator(&p.original_path)));
+        assert!(live
+            .photos
+            .iter()
+            .any(|p| p.id == local_id && crate::local_photo::is_locator(&p.original_path)));
+        assert_eq!(
+            fs::read_dir(fixture.store.root.join("originals"))
+                .unwrap()
+                .count(),
+            1
+        );
+    }
+    fs::remove_file(&local).unwrap();
+    fs::remove_dir_all(&fixture.works).unwrap();
+
+    let target = Store::open(fixture.temp.path().join("target")).unwrap();
+    let restored = backup::restore(&target, &archive_path).unwrap();
+    assert_eq!(restored.photo_count, 3);
+    assert_eq!(restored.unresolved_work_photo_count, 0);
+    assert_eq!(restored.snapshot.groups[0].id, album_id);
+    assert_eq!(restored.snapshot.groups[0].bound_folder, None);
+    assert_eq!(restored.snapshot.memberships[0].photo_id, work_id);
+    assert!(active(&target.connection.lock().unwrap())
+        .unwrap()
+        .is_none());
+    for (id, bytes) in [
+        (&work_id, &work_bytes),
+        (&local_id, &local_bytes),
+        (&managed_id, &local_bytes),
+    ] {
+        let photo = restored
+            .snapshot
+            .photos
+            .iter()
+            .find(|photo| &photo.id == id)
+            .unwrap();
+        assert!(photo.original_available && photo.thumbnail_available);
+        assert!(Path::new(&photo.original_path).starts_with(target.root.join("originals")));
+        assert_eq!(&fs::read(&photo.original_path).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn full_backup_failure_for_offline_work_source_preserves_destination_and_cleans_temps() {
+    let fixture = Fixture::new();
+    photo(&fixture.works.join("活动/离线.png"), 10);
+    {
+        let mut conn = fixture.store.connection.lock().unwrap();
+        let root = fixture.binding(&conn);
+        let candidates = fixture.pending(&conn, &root);
+        sync_now(&mut conn, &root, &candidates).unwrap();
+    }
+    fs::remove_dir_all(&fixture.works).unwrap();
+    let destination = fixture.temp.path().join("existing.zip");
+    fs::write(&destination, b"previous backup").unwrap();
+    let result = backup::create_with_mode(&fixture.store, &destination, backup::BackupMode::Full);
+    assert!(
+        matches!(result, Err(error) if error.contains("离线") && error.contains("作品目录当前不可用"))
+    );
+    assert_eq!(fs::read(&destination).unwrap(), b"previous backup");
+    for (directory, prefix) in [
+        (fixture.store.root.as_path(), ".backup-"),
+        (fixture.temp.path(), ".foliune-backup-"),
+    ] {
+        assert!(fs::read_dir(directory).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(prefix)));
+    }
+    backup::create_with_mode(&fixture.store, &destination, backup::BackupMode::Metadata).unwrap();
+    let target = Store::open(fixture.temp.path().join("target")).unwrap();
+    let restored = backup::restore(&target, &destination).unwrap();
+    assert!(restored.snapshot.photos[0].thumbnail_available);
+    assert_eq!(
+        restored.snapshot.photos[0].availability,
+        Some(BoundAvailability::Offline)
     );
 }
 
@@ -523,9 +676,9 @@ fn archive_does_not_include_confirmations_and_restore_discards_any_legacy_queue(
         .unwrap()
         .exists([])
         .unwrap());
-    let restored = backup::restore(&fixture.store, &archive_path).unwrap();
-    let restored = Store::open_direct(PathBuf::from(restored.library.path)).unwrap();
-    let conn = restored.connection.lock().unwrap();
+    let target = Store::open(fixture.temp.path().join("target")).unwrap();
+    backup::restore(&target, &archive_path).unwrap();
+    let conn = target.connection.lock().unwrap();
     let root = active(&conn).unwrap().unwrap();
     assert!(!root.authorized);
     assert!(queue::Queue::load(&conn, &root)
@@ -612,4 +765,183 @@ fn backup_with_a_trigger_cannot_reauthorize_external_root() {
             .unwrap()
             .authorized
     );
+}
+
+#[test]
+fn backup_restore_keeps_existing_work_index_when_another_library_indexed_the_same_file() {
+    let fixture = Fixture::new();
+    let original_path = fixture.works.join("活动/首张.jpg");
+    photo(&original_path, 10);
+    let import = |store: &Store| {
+        let mut conn = store.connection.lock().unwrap();
+        let root = fixture.binding(&conn);
+        let pending = fixture.pending(&conn, &root);
+        sync_now(&mut conn, &root, &pending).unwrap();
+        db::snapshot(&conn).unwrap().photos.remove(0).id
+    };
+    let incoming = import(&fixture.store);
+    fixture
+        .store
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO work_directory_ignored_files(root_id,folder,file_name)
+         SELECT root_id,folder,'归档中忽略.jpg' FROM work_directory_folders;",
+        )
+        .unwrap();
+    let target = Store::open(fixture.temp.path().join("target")).unwrap();
+    let current = import(&target);
+    assert_ne!(incoming, current);
+
+    let archive = fixture.temp.path().join("same-source.zip");
+    backup::create(&fixture.store, &archive).unwrap();
+    let restored = backup::restore(&target, &archive).unwrap();
+    assert_eq!(restored.photo_count, 1);
+    assert_eq!(restored.unresolved_work_photo_count, 1);
+    let archived = restored
+        .snapshot
+        .photos
+        .iter()
+        .find(|p| p.id == incoming)
+        .unwrap();
+    assert_eq!(archived.original_path, crate::local_photo::PREFIX);
+    assert!(!archived.original_available && archived.thumbnail_available);
+    let retained = restored
+        .snapshot
+        .photos
+        .iter()
+        .find(|p| p.id == current)
+        .unwrap();
+    assert!(retained.original_available);
+    assert_eq!(restored.snapshot.memberships.len(), 2);
+    let repeated = backup::restore(&target, &archive).unwrap();
+    assert_eq!(repeated.photo_count, 0);
+    assert_eq!(repeated.unresolved_work_photo_count, 0);
+    let conn = target.connection.lock().unwrap();
+    assert!(active(&conn).unwrap().unwrap().authorized);
+    assert!(!conn
+        .prepare("SELECT 1 FROM work_directory_ignored_files")
+        .unwrap()
+        .exists([])
+        .unwrap());
+    assert_eq!(
+        original(&conn, &current, &retained.original_path)
+            .unwrap()
+            .read()
+            .unwrap(),
+        fs::read(original_path).unwrap()
+    );
+}
+
+#[test]
+fn backup_restore_does_not_reuse_a_relinked_root_for_the_old_archive_path() {
+    let fixture = Fixture::new();
+    let first = "活动/首张.jpg";
+    let second = "活动/第二张.jpg";
+    photo(&fixture.works.join(first), 10);
+    let first_id = {
+        let mut conn = fixture.store.connection.lock().unwrap();
+        let root = fixture.binding(&conn);
+        let pending = fixture.pending(&conn, &root);
+        sync_now(&mut conn, &root, &pending).unwrap();
+        db::snapshot(&conn).unwrap().photos.remove(0).id
+    };
+    let initial = fixture.temp.path().join("initial.zip");
+    backup::create(&fixture.store, &initial).unwrap();
+    let target = Store::open(fixture.temp.path().join("target")).unwrap();
+    backup::restore(&target, &initial).unwrap();
+    let relocated = fixture.works.with_file_name("重新定位");
+    photo(&relocated.join(first), 10);
+    photo(&relocated.join(second), 11);
+    relink(&target.connection.lock().unwrap(), &relocated).unwrap();
+
+    photo(&fixture.works.join(second), 11);
+    let second_id = {
+        let mut conn = fixture.store.connection.lock().unwrap();
+        let root = active(&conn).unwrap().unwrap();
+        let pending = fixture.pending(&conn, &root);
+        sync_now(&mut conn, &root, &pending).unwrap();
+        db::snapshot(&conn)
+            .unwrap()
+            .photos
+            .into_iter()
+            .find(|p| p.id != first_id)
+            .unwrap()
+            .id
+    };
+    let archive = fixture.temp.path().join("old-root.zip");
+    backup::create(&fixture.store, &archive).unwrap();
+    let restored = backup::restore(&target, &archive).unwrap();
+    assert_eq!(restored.photo_count, 1);
+    assert_eq!(restored.unresolved_work_photo_count, 1);
+    let original = restored
+        .snapshot
+        .photos
+        .iter()
+        .find(|p| p.id == first_id)
+        .unwrap();
+    assert!(original.original_available);
+    let incoming = restored
+        .snapshot
+        .photos
+        .iter()
+        .find(|p| p.id == second_id)
+        .unwrap();
+    assert!(!incoming.original_available && incoming.thumbnail_available);
+    let conn = target.connection.lock().unwrap();
+    let root = active(&conn).unwrap().unwrap();
+    assert_eq!(root.path, relocated);
+    assert!(root.authorized);
+}
+
+#[test]
+fn backup_restore_preserves_a_confirmed_work_directory_job() {
+    let fixture = Fixture::new();
+    photo(&fixture.works.join("活动/首张.jpg"), 10);
+    let incoming = {
+        let mut conn = fixture.store.connection.lock().unwrap();
+        let root = fixture.binding(&conn);
+        let pending = fixture.pending(&conn, &root);
+        sync_now(&mut conn, &root, &pending).unwrap();
+        db::snapshot(&conn).unwrap().photos.remove(0).id
+    };
+    let archive = fixture.temp.path().join("pending-folder.zip");
+    backup::create(&fixture.store, &archive).unwrap();
+    let target = Store::open(fixture.temp.path().join("target")).unwrap();
+    let (root, job) = {
+        let mut conn = target.connection.lock().unwrap();
+        let root = fixture.binding(&conn);
+        let pending = fixture.pending(&conn, &root);
+        let mut jobs = queue::Queue::default();
+        jobs.enqueue(&mut conn, &root, pending, None).unwrap();
+        (root, jobs.take_next().unwrap())
+    };
+
+    let restored = backup::restore(&target, &archive).unwrap();
+    assert_eq!(restored.unresolved_work_photo_count, 1);
+    let photo = &restored.snapshot.photos[0];
+    assert_eq!(photo.id, incoming);
+    assert!(!photo.original_available && photo.thumbnail_available);
+
+    let mut conn = target.connection.lock().unwrap();
+    let library = db::library_root(&conn).unwrap();
+    sync::validate_job(&conn, &root, &job.candidate).unwrap();
+    let mut prepared = sync::prepare(&root, &job.candidate, &library, None, |_| Ok(())).unwrap();
+    let result = sync::commit(
+        &mut conn,
+        &root,
+        &job.candidate,
+        &job.state.album_id,
+        &job.state.id,
+        "default",
+        &mut prepared,
+    )
+    .unwrap();
+    assert_eq!(result.album.id, job.state.album_id);
+    assert!(result.photos[0].original_available);
+    assert!(queue::Queue::load(&conn, &root)
+        .unwrap()
+        .states()
+        .is_empty());
 }

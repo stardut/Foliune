@@ -92,7 +92,7 @@ impl LinkImportStore {
         session.remove_downloads()?;
         Ok(progress.draft.take())
     }
-    /// Caller holds the library connection lock, so no request starts during a switch.
+    #[cfg(test)]
     pub(crate) fn cancel_all(&self) -> Result<(), String> {
         for session in self.0.lock().map_err(|e| e.to_string())?.values().flatten() {
             let mut progress = session.progress.lock().map_err(|e| e.to_string())?;

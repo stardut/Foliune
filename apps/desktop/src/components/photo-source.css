@@ -3,8 +3,25 @@
 .photo-source-input .search-field { flex: 1; max-width: none; margin: 0; }
 .photo-source-input .search-field input { min-height: 34px; }
 .photo-source-input > .button { flex-shrink: 0; }
-.photo-source-input:has(+ .photo-source-link-hint) { margin-bottom: 6px; }
-.photo-source-link-hint { flex-shrink: 0; margin: 0 0 16px; }
+.photo-source-input:has(+ .photo-source-link-meta) { margin-bottom: 6px; }
+.photo-source-link-meta { display: flex; flex-shrink: 0; align-items: center; gap: 12px; min-height: 32px; margin-bottom: 10px; }
+.photo-source-link-meta .text-button { min-height: 28px; margin-right: -7px; padding: 3px 7px; font-size: 12px; }
+.photo-source-link-hint { margin: 0; }
+.photo-source-progress { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.photo-source-progress-track { display: block; flex: 1; height: 3px; overflow: hidden; border-radius: 2px; background: var(--control-line); }
+.photo-source-progress-track > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.photo-source-progress:not([aria-valuenow]) .photo-source-progress-track > span { width: 28%; animation: photo-source-progress-reading 1.4s ease-in-out infinite alternate; }
+.photo-source .photo-picker-item[data-preview] { cursor: default; }
+.photo-source .photo-picker-placeholder { display: grid; grid-auto-flow: column; place-content: center; gap: 5px; box-shadow: inset 0 0 0 1px var(--control-line); }
+.photo-source .photo-picker-placeholder > span { width: 4px; height: 4px; border-radius: 50%; background: var(--muted); opacity: .3; animation: photo-source-loading-dot 1.5s ease-in-out infinite; }
+.photo-source .photo-picker-placeholder > span:nth-child(2) { animation-delay: .15s; }
+.photo-source .photo-picker-placeholder > span:nth-child(3) { animation-delay: .3s; }
+@keyframes photo-source-progress-reading { from { transform: translateX(0); } to { transform: translateX(257%); } }
+@keyframes photo-source-loading-dot { 24% { opacity: .76; } 52% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) {
+  .photo-source-progress:not([aria-valuenow]) .photo-source-progress-track > span { animation: none; }
+  .photo-source .photo-picker-placeholder > span { animation: none; opacity: .5; }
+}
 .photo-source-empty, .photo-source-wait { display: flex; flex: 1; min-height: 180px; align-items: center; justify-content: center; }
 .photo-source-empty .empty-state { min-height: 180px; }
 .photo-source-wait { flex-direction: column; gap: 14px; }
@@ -16,6 +33,4 @@
 @media (max-width: 580px) {
   .photo-source-input { align-items: stretch; flex-direction: column; }
   .photo-source-input > .button { align-self: flex-start; }
-  .photo-source .photo-picker-footer { flex-wrap: wrap; }
-  .photo-source .photo-picker-footer .form-actions { flex-basis: 100%; margin-top: 8px; }
 }

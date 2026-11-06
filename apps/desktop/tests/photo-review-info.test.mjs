@@ -15,7 +15,10 @@ const { createElement: h, act } = require('react');
 const { createRoot } = require('react-dom/client');
 const { build } = createRequire(require.resolve('vite/package.json'))('esbuild');
 const bundle = await build({
-  entryPoints: [resolve('apps/desktop/src/features/PhotoReview.tsx')],
+  stdin: {
+    contents: 'export { PhotoReview } from "./PhotoReview"; export { PhotoDetail } from "./PhotoDetail";',
+    resolveDir: resolve('apps/desktop/src/features'),
+  },
   bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external',
   write: false, loader: { '.css': 'empty' },
   plugins: [{ name: 'preview-boundaries', setup(build) {
@@ -33,7 +36,7 @@ const bundle = await build({
 });
 const module = { exports: {} };
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(require, module, module.exports);
-const { PhotoReview } = module.exports;
+const { PhotoReview, PhotoDetail } = module.exports;
 
 const photo = (id, fields = {}) => ({
   id, title: id, originalName: `${id}.jpg`, originalPath: `/test/${id}.jpg`,
@@ -160,4 +163,48 @@ test('重定位时等到新画面再读取新修订，读取失败保留图库�
     assert.match(panel().textContent, /已填写地点/);
     assert.doesNotMatch(panel().textContent, /旧原件相机/);
   });
+});
+
+test('详情读取拍摄参数，重定位时清掉旧参数，保存文字不覆盖历史区域', async () => {
+  const first = photo('portrait', {
+    originalUrl: '/test/portrait.jpg', location: '手填地点', tags: [], annotation: '原来的文字', project: '',
+    regions: [{ id: 'old', x: 0, y: 0, width: 0.5, height: 0.5, text: '' }],
+  });
+  const container = document.body.appendChild(document.createElement('div'));
+  const root = createRoot(container);
+  const calls = [];
+  const saved = [];
+  globalThis.requestReviewMetadata = (id, path) => new Promise((resolve, reject) => calls.push({ id, path, resolve, reject }));
+  const render = (current) => act(async () => root.render(h(PhotoDetail, {
+    photo: current, busy: false, onClose() {}, onRelink() {}, onSave: async (patch) => saved.push(patch),
+  })));
+  const info = () => container.querySelector('.detail-preview .photo-info-content');
+  try {
+    await render({ ...first, originalAvailable: false });
+    assert.equal(calls.length, 0);
+    assert.match(info().textContent, /原图缺失.*手填地点/);
+    await render(first);
+    await act(async () => calls[0].resolve({ ...withoutExif, camera: '旧原件相机', iso: 400 }));
+    assert.match(info().textContent, /ISO400.*旧原件相机/);
+    await render({ ...first, originalPath: '/test/relinked.jpg', originalUrl: '/test/relinked.jpg' });
+    assert.deepEqual(calls.map(({ id, path }) => [id, path]), [[first.id, first.originalPath], [first.id, '/test/relinked.jpg']]);
+    assert.match(info().textContent, /正在读取原图信息/);
+    assert.doesNotMatch(info().textContent, /旧原件相机|ISO400/);
+    await act(async () => calls[1].reject(new Error('读取失败')));
+    assert.match(info().textContent, /无法读取原图信息.*手填地点/);
+    assert.doesNotMatch(container.textContent, /区域标注/);
+    await act(async () => {
+      const annotation = container.querySelector('textarea');
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(annotation, '更新的文字');
+      annotation.dispatchEvent(new window.Event('input', { bubbles: true }));
+    });
+    await act(async () => container.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].annotation, '更新的文字');
+    assert.equal(Object.hasOwn(saved[0], 'regions'), false);
+  } finally {
+    delete globalThis.requestReviewMetadata;
+    await act(async () => root.unmount());
+    container.remove();
+  }
 });

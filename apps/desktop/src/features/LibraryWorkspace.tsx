@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowUpRight, FolderPlus, Grid2X2, ImagePlus, LayoutTemplate, Play } from 'lucide-react';
+import { ArrowUpRight, CheckCheck, FolderPlus, Grid2X2, ImagePlus, LayoutTemplate, Play, X } from 'lucide-react';
 import * as api from '../lib/api';
 import type { AlbumCover, Group, LibraryKind, LibrarySnapshot, Photo } from '../lib/types';
 import type { CurationDraft } from '../lib/curation-types';
@@ -27,6 +27,7 @@ import { isPhotoMenuTracking, usePhotoMenu, type PhotoMenuAction } from './use-p
 import { useContextMenu } from './use-context-menu';
 import { SocialWorkspace } from './social/SocialWorkspace';
 import { CollageWorkspace } from './collage/CollageWorkspace';
+import { COLLAGE_MAX_PHOTOS } from './collage/collage-layout';
 import type { useWorkDirectory } from './use-work-directory';
 
 let preferredPhotoLayout: Exclude<AlbumPhotoLayout, 'single'> = 'exhibition';
@@ -115,7 +116,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
   const [coverTarget, setCoverTarget] = useState<{ groupId: string; photoId: string } | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ id: string; scrollTop: number; trigger?: HTMLElement; entrySource?: ReviewEntrySource } | null>(null);
+  const [preview, setPreview] = useState<{ id: string; scrollTop: number; trigger?: HTMLElement; entrySource?: ReviewEntrySource; directFullscreen?: boolean } | null>(null);
   const [layout, setLayout] = useState<AlbumPhotoLayout>(() => space !== 'search' && prefersSinglePhoto ? 'single' : preferredPhotoLayout);
   const [status, setStatus] = useState<'active' | 'discarded'>('active');
   const [albumSort, setAlbumSort] = useState(() => readSortPreference<AlbumSort>(ALBUM_SORT_KEY, albumSortLabels, 'time-asc'));
@@ -189,7 +190,10 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
   const wallPhotos = useMemo(() => previewCount === undefined ? photos : photos.slice(0, previewCount), [photos, previewCount]);
   const menuContext = JSON.stringify([space, groupId, status, searchTerm, previewCount, workView, albumSort, photoSort, layout, !!detailId, !!preview, pickingSource, !!draft, !!groupForm, !!coverTarget, !!addToGroup, !!addingToBook, !!comparing, !!deleteConfirm, !!social, !!collage]);
   const photoIds = useMemo(() => new Set(wallPhotos.map((photo) => photo.id)), [wallPhotos]);
-  const currentSelection = useMemo(() => space === 'search' ? selected.filter((id) => photoIds.has(id)) : selected, [space, selected, photoIds]);
+  const currentSelection = useMemo(() => selected.filter((id) => photoIds.has(id)), [selected, photoIds]);
+  const selectedIds = useMemo(() => new Set(currentSelection), [currentSelection]);
+  const allSelected = photoIds.size > 0 && selectedIds.size === photoIds.size;
+  const selectAllLabel = allSelected ? '取消全选' : searchPreview ? '全选预览照片' : '全选';
   const actionState = useRef({ context: menuContext, busy: busy || importDisabled, ids: photoIds });
   actionState.current = { context: menuContext, busy: busy || importDisabled, ids: photoIds };
   const openPhotoMenu = usePhotoMenu(menuContext, (message) => onFeedback(message, true));
@@ -251,6 +255,10 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
   }
   function openCollage(photoIds: string[]) {
     if (busy || importDisabled || !groupId || space === 'search' || photoIds.length < 2) return;
+    if (photoIds.length > COLLAGE_MAX_PHOTOS) {
+      onFeedback(`拼图最多支持 ${COLLAGE_MAX_PHOTOS} 张照片，请减少选片后重试。`, true);
+      return;
+    }
     stopReveal();
     albumScroll.current = workspaceRef.current?.closest('main')?.scrollTop ?? 0;
     setCollage({ photoIds });
@@ -308,15 +316,23 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     setPhotoSort(next);
     saveSortPreference(PHOTO_SORT_KEY, next);
   }
-  function openPreview(photo: Photo, trigger?: HTMLElement, entrySource?: ReviewEntrySource) {
+  function openPreview(photo: Photo, trigger?: HTMLElement, entrySource?: ReviewEntrySource, directFullscreen = false) {
     const main = workspaceRef.current?.closest('main');
-    setPreview({ id: photo.id, scrollTop: main?.scrollTop ?? 0, trigger, entrySource });
+    setPreview({ id: photo.id, scrollTop: main?.scrollTop ?? 0, trigger, entrySource, directFullscreen });
   }
   function openWallPreview(photo: Photo, trigger?: HTMLButtonElement) {
     openPreview(photo, trigger, trigger && space !== 'search' && currentGroup ? wallReviewSource(photo, trigger) : undefined);
   }
   function closePreview(visibleId?: string) {
     setPreview(null);
+    if (preview?.directFullscreen) {
+      if (singleAlbum) {
+        const main = workspaceRef.current?.closest('main');
+        if (main) main.scrollTop = preview.scrollTop;
+        preview.trigger?.focus({ preventScroll: true });
+      } else setRestorePhoto({ id: preview.id, scrollTop: preview.scrollTop, focus: preview.trigger ?? true });
+      return;
+    }
     if (!preview || space === 'search') return;
     const displayed = visibleId && photoIds.has(visibleId) ? visibleId : undefined;
     const id = displayed ?? preview.id;
@@ -332,6 +348,16 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     } else setRestorePhoto({ id, scrollTop: preview.scrollTop, focus: preview.trigger ?? true });
   }
   function togglePhoto(id: string) { setSelected((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]); }
+  function selectedInPhotoOrder() { return wallPhotos.filter((photo) => selectedIds.has(photo.id)).map((photo) => photo.id); }
+  function clearSelectionFromBar() {
+    if (!wallRef.current?.focusViewportPhoto()) {
+      workspaceRef.current?.querySelector<HTMLButtonElement>('.photo-interaction-target, .album-filmstrip-thumb[tabindex="0"]')?.focus({ preventScroll: true });
+    }
+    setSelected([]);
+  }
+  function toggleAllSelection() {
+    if (!busy && !importDisabled) setSelected(allSelected ? [] : [...photoIds]);
+  }
   function showAlbumMenu(group: Group, at: { x: number; y: number }, trigger: HTMLElement) {
     const context = menuContext;
     const target = () => albumMenuState.current.albumIndex?.byGroupId.get(group.id);
@@ -390,7 +416,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
   }
   const importButton = currentGroup ? <button type="button" className="button button-primary" onClick={() => void importFiles()} disabled={busy || importDisabled}><ImagePlus size={15} />{busy ? '处理中…' : '导入照片'}</button> : undefined;
   function showPhotoMenu(photo: Photo | null, at: { x: number; y: number }, trigger: HTMLElement) {
-    const ids = photo && !currentSelection.includes(photo.id) ? [photo.id] : photos.filter((item) => currentSelection.includes(item.id)).map((item) => item.id);
+    const ids = photo && !selectedIds.has(photo.id) ? [photo.id] : selectedInPhotoOrder();
     if (!ids.length) return;
     const single = photo || (ids.length === 1 ? photos.find((item) => item.id === ids[0]) : undefined);
     const context = menuContext;
@@ -399,9 +425,13 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     const countSuffix = ids.length > 1 ? ` · ${ids.length} 张` : '';
     const actions: PhotoMenuAction[] = [];
     if (single) {
-      actions.push(action('preview', '查看大图', () => openPreview(single, trigger)), action('detail', '详情与标注', () => setDetailId(single.id)));
-      actions.push(action('select', currentSelection.includes(single.id) ? '取消选择' : '选择', () => togglePhoto(single.id)));
+      actions.push(action('preview', '查看大图', () => openPreview(single, trigger)), action('fullscreen', '全屏查看', () => openPreview(single, trigger, undefined, true)), action('detail', '详情', () => setDetailId(single.id)));
+      actions.push(action('select', selectedIds.has(single.id) ? '取消选择' : '选择', () => togglePhoto(single.id)));
     }
+    actions.push({
+      ...action('select-all', selectAllLabel, allSelected && !photo ? clearSelectionFromBar : toggleAllSelection),
+      allowed: () => allowed() && actionState.current.ids === photoIds,
+    });
     if (photo && currentGroup && status === 'active') {
       actions.push(action('cover', '设为封面…', () => setCoverTarget({ groupId: currentGroup.id, photoId: photo.id })));
     }
@@ -415,7 +445,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     void openPhotoMenu(actions, at, trigger);
   }
   function canvas() {
-    if (singleAlbum) return <SinglePhotoView key={`${groupId}:${status}`} photos={photos} selected={selected} initialCursor={photoCursor.current} rememberCursor={rememberSinglePhoto} onMenu={showPhotoMenu} onRelink={onRelink} busy={busy || importDisabled} onLayoutReady={restoreAlbumScroll}
+    if (singleAlbum) return <SinglePhotoView key={`${groupId}:${status}`} photos={photos} selected={currentSelection} initialCursor={photoCursor.current} rememberCursor={rememberSinglePhoto} onMenu={showPhotoMenu} onRelink={onRelink} busy={busy || importDisabled} onLayoutReady={restoreAlbumScroll}
       restorePhotoId={restorePhoto?.id} onPhotoRestored={finishSingleRestore} onReveal={onReveal} />;
     return <PhotoCanvas ref={wallRef} photos={wallPhotos} sections={workSections} onLayoutReady={searchResults?.onLayoutReady ?? restoreAlbumScroll} selected={currentSelection} onSelect={togglePhoto} onPreview={openWallPreview} onMenu={showPhotoMenu} layout={previewCount !== undefined ? 'grid' : layout === 'single' ? preferredPhotoLayout : layout} emptyAction={importButton} onRelink={onRelink} busy={busy}
       compactAlbumPair={!!currentGroup} restore={restorePhoto} onRestored={finishWallRestore} onReveal={onReveal} />;
@@ -426,6 +456,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
       name={currentGroup.name} homeTitle={albumHomeTitle}
       discarded={status === 'discarded'} activeLabel={space === 'work' ? '相簿' : '收藏'}
       canImport={!busy && !importDisabled} canPlay={!!photos.length && !busy} canSort={!!photos.length}
+      selection={photos.length ? { allSelected, disabled: busy || importDisabled, run: toggleAllSelection } : undefined}
       airDrop={supportsAirDrop ? { label: albumAirDropLabel(currentAlbum?.photos.length ?? 0), disabled: busy || importDisabled || !currentAlbum?.photos.length, run: () => void shareAirDrop(currentGroup.id) } : undefined}
       layout={layout} sort={photoSort} onSort={changePhotoSort} onBack={() => openAlbum(null)} onImport={() => void importFiles()}
       onPlay={() => onPlay(photos.map((photo) => photo.id))} onStatus={changeAlbumStatus}
@@ -438,6 +469,9 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     </WorkspaceHeader> : previewCount === undefined && <div className="search-group-heading">
       <h2>照片 <span className="photo-count">{photos.length}</span></h2>
       <div className="workspace-tools">
+        <button type="button" className="text-button" disabled={!photos.length || busy || importDisabled} onClick={toggleAllSelection}>
+          {allSelected ? <X size={14} aria-hidden="true" /> : <CheckCheck size={14} aria-hidden="true" />}{selectAllLabel}
+        </button>
         <button type="button" className="text-button" disabled={!photos.length || busy} onClick={() => onPlay(photos.map((photo) => photo.id))}><Play size={14} />欣赏</button>
         <div className="segmented" aria-label="浏览方式"><button type="button" className={layout === 'exhibition' ? 'active' : ''} aria-label="展览" aria-pressed={layout === 'exhibition'} onClick={() => changeLayout('exhibition')}><LayoutTemplate size={15} /><span>展览</span></button><button type="button" className={layout === 'grid' ? 'active' : ''} aria-label="总览" aria-pressed={layout === 'grid'} onClick={() => changeLayout('grid')}><Grid2X2 size={15} /><span>总览</span></button></div>
       </div>
@@ -448,12 +482,14 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
         <button type="button" className="button" onClick={() => setGroupForm('new')}><FolderPlus size={15} />新建相簿</button>
         {workDirectory?.state?.status === 'unbound' && onOpenWorkDirectorySettings && <button type="button" className="text-button work-directory-settings-link" onClick={onOpenWorkDirectorySettings}>在设置中绑定作品目录</button>}
       </>} /> : !photos.length && status === 'discarded' ? <EmptyState title="没有已废弃的照片" description="从当前相簿废弃的照片会保留在这里。" /> : !photos.length && currentGroup ? <EmptyState title="相簿为空" description={discardedCount ? '可在“已废弃”中恢复照片。' : undefined} action={importButton} /> : canvas()}
-    <SelectionBar count={albumHome ? 0 : currentSelection.length} busy={busy || importDisabled} onClear={() => setSelected([])} onBook={() => setAddingToBook(photos.filter((photo) => currentSelection.includes(photo.id)).map((photo) => photo.id))} onMore={(at, trigger) => showPhotoMenu(null, at, trigger)} onCollage={currentGroup && space !== 'search' && selected.length >= 2 ? () => openCollage(photos.filter((photo) => selected.includes(photo.id)).map((photo) => photo.id)) : undefined} onSocial={currentGroup && space !== 'search' ? () => openSocial(photos.filter((photo) => selected.includes(photo.id)).map((photo) => photo.id)) : undefined} />
-    {preview && <PhotoReview photos={photos} initialPhotoId={preview.id} entrySource={preview.entrySource} context={space === 'search' ? '搜索结果' : currentGroup?.name || albumHomeTitle} busy={busy || importDisabled} onClose={closePreview} onRelink={onRelink} returnLabel={singleAlbum ? '返回相簿' : undefined} />}
+    <SelectionBar count={albumHome ? 0 : currentSelection.length} busy={busy || importDisabled} onClear={clearSelectionFromBar} onBook={() => setAddingToBook(selectedInPhotoOrder())} onMore={(at, trigger) => showPhotoMenu(null, at, trigger)} onCollage={currentGroup && space !== 'search' && currentSelection.length >= 2 ? () => openCollage(selectedInPhotoOrder()) : undefined} onSocial={currentGroup && space !== 'search' ? () => openSocial(selectedInPhotoOrder()) : undefined} />
+    {preview && <PhotoReview photos={photos} initialPhotoId={preview.id} entrySource={preview.entrySource} fullscreen={preview.directFullscreen ? 'direct' : 'available'} context={space === 'search' ? '搜索结果' : currentGroup?.name || albumHomeTitle} busy={busy || importDisabled} onClose={closePreview} onRelink={onRelink} returnLabel={singleAlbum ? '返回相簿' : undefined} />}
     {currentGroup && coverPhoto && <AlbumCoverDialog photo={coverPhoto} initialCover={currentGroup.cover} busy={busy || importDisabled}
       onClose={() => setCoverTarget(null)} onSave={(cover) => saveCover(currentGroup.id, cover)} />}
     {detail && <PhotoDetail key={detail.id} photo={detail} busy={busy} onClose={() => setDetailId(null)} onRelink={onRelink} onDirtyChange={onDirtyChange} extension={detailExtension?.(detail)} onSave={async (patch) => { onSnapshot(await run(() => api.updatePhoto(detail.id, patch))); setDetailId(null); onFeedback('已保存照片信息'); }} />}
-    {groupForm && <GroupForm group={groupForm === 'new' ? undefined : groupForm} counts={groupForm === 'new' ? undefined : groupCounts(groupForm.id)} busy={busy} onClose={() => setGroupForm(null)} onSave={async (values) => {
+    {groupForm && <GroupForm group={groupForm === 'new' ? undefined : groupForm}
+      defaultCapacity={groupForm === 'new' && library === 'collection' ? 50 : undefined}
+      counts={groupForm === 'new' ? undefined : groupCounts(groupForm.id)} busy={busy} onClose={() => setGroupForm(null)} onSave={async (values) => {
       if (groupForm === 'new') { const next = await run(() => api.createGroup({ library, ...values })); const created = next.groups.find((group) => group.library === library && !group.boundFolder && !snapshot.groups.some((old) => old.id === group.id)); onSnapshot(next); if (created) openAlbum(created.id); }
       else await prepareGroup(groupForm.id, values);
       setGroupForm(null);
@@ -464,7 +500,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
       try { const next = await api.commitCuration(draft.id, kept); onSnapshot(next); setDraft(null); setSelected((ids) => validSelection(next, ids)); onFeedback('已确认选片并保存'); }
       catch (cause) { setDraft(null); onFeedback(`${errorMessage(cause)} 本次取舍未保存，请重新开始。`, true); }
     }} />}
-    {comparing && <Modal title="并排比较" wide onClose={() => setComparing(null)}><div className="comparison-grid">{comparing.map((id) => snapshot.photos.find((photo) => photo.id === id)).filter((photo): photo is Photo => !!photo).map((photo) => <article key={photo.id}><PhotoImage photo={photo} original onRelink={onRelink} /><p>{photo.title || photo.originalName}</p><button type="button" className="button" onClick={() => setDetailId(photo.id)}>详情与标注</button></article>)}</div></Modal>}
+    {comparing && <Modal title="并排比较" wide onClose={() => setComparing(null)}><div className="comparison-grid">{comparing.map((id) => snapshot.photos.find((photo) => photo.id === id)).filter((photo): photo is Photo => !!photo).map((photo) => <article key={photo.id}><PhotoImage photo={photo} original onRelink={onRelink} /><p>{photo.title || photo.originalName}</p><button type="button" className="button" onClick={() => setDetailId(photo.id)}>详情</button></article>)}</div></Modal>}
     {deleteConfirm && <Modal title="删除相簿" onClose={() => setDeleteConfirm(null)}><p className="replacement-copy">删除“{deleteConfirm.name}”？仅在此相簿使用的照片将从搜索和图库选片中移除，照片文件会保留。{deleteConfirm.boundFolder && '源文件夹将停止同步。'}</p><div className="form-actions"><button className="button" type="button" onClick={() => setDeleteConfirm(null)}>取消</button><button className="button button-primary" type="button" disabled={busy || syncingAlbums.has(deleteConfirm.id)} onClick={() => void run(() => api.deleteGroup(deleteConfirm.id)).then((next) => { onSnapshot(next); setDeleteConfirm(null); setGroupForm(null); openAlbum(null); onFeedback('已删除相簿'); }).catch(() => {})}>删除相簿</button></div></Modal>}
     {addingToBook && <AddPhotosToBook onSnapshot={onSnapshot} onBusyChange={setBookBusy} photos={snapshot.photos} selectedIds={addingToBook} onClose={() => setAddingToBook(null)} onComplete={() => { setSelected((ids) => ids.filter((id) => !addingToBook.includes(id))); setAddingToBook(null); searchResults?.onBooksChange(); onFeedback('已加入画册'); }} />}
     </>}

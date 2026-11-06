@@ -86,6 +86,8 @@
 .book-row-title { flex: 1; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .book-create-footer { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding-top: 18px; font-size: 12px; color: var(--muted); }
 .book-create-footer > div { display: flex; align-items: center; gap: 7px; }
+.book-create-footer > .book-create-selection { flex-wrap: wrap; column-gap: 4px; row-gap: 0; }
+.book-create-selection > * { white-space: nowrap; }
 
 /* Let the existing app shell allocate the editor's actual remaining height. */
 .app-shell:has(.book-editor) { height: 100dvh; min-height: 0; }

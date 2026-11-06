@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import { readPhotoMetadata } from '../lib/api';
 import { canReadOriginal } from '../lib/photo-availability';
 import type { Photo, PhotoMetadata } from '../lib/types';
+import './photo-info.css';
 
 type Field = [label: string, value: string | null | undefined];
 
@@ -71,7 +72,7 @@ export function PhotoReviewInfo({ photo, titleId }: { photo: Photo; titleId: str
     ['闪光灯', metadata?.flashFired == null ? null : metadata.flashFired ? '已闪光' : '未闪光'],
   ];
 
-  return <>
+  return <div className="photo-info-content">
     <h3 id={titleId} className="sr-only">照片信息</h3>
     {metrics.some(([, value]) => value) && <dl className="photo-review-metrics">
       {metrics.map(([label, value]) => value && <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
@@ -98,7 +99,7 @@ export function PhotoReviewInfo({ photo, titleId }: { photo: Photo; titleId: str
       <summary><ChevronRight size={13} aria-hidden="true" />更多拍摄参数</summary>
       <InfoRows fields={exposure} />
     </details>}
-  </>;
+  </div>;
 }
 
 function InfoGroup({ title, fields }: { title: string; fields: Field[] }) {

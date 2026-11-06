@@ -40,39 +40,55 @@ export function PrimaryNavigation<Value extends string>({ items, value, duration
     }
     let disposed = false;
     let frame = 0;
-    let scaleX = 1;
-    let scaleY = 1;
     let controls: { stop: () => void }[] = [];
     const buttons = Array.from(nav.querySelectorAll<HTMLButtonElement>('button'));
     const labels = Array.from(nav.querySelectorAll<HTMLSpanElement>('[data-liquid-label]'));
+    const moving = lastValue.current !== null && lastValue.current !== value && nav.dataset.liquidReady === 'true';
+    nav.dataset.liquidReady = 'true';
 
     function measure() {
       const bounds = nav!.getBoundingClientRect();
-      const tabs = buttons.map((button): TabBounds => {
-        const rect = button.getBoundingClientRect();
-        return { left: rect.left - bounds.left - nav!.clientLeft, top: rect.top - bounds.top - nav!.clientTop, width: rect.width, height: rect.height };
-      });
-      return { tabs, signature: tabs.map((tab) => `${tab.left}:${tab.top}:${tab.width}:${tab.height}`).join('|') };
+      const left = bounds.left + nav!.clientLeft;
+      const top = bounds.top + nav!.clientTop;
+      function relativeBounds(element: HTMLElement): TabBounds {
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left - left, top: rect.top - top, width: rect.width, height: rect.height };
+      }
+      const tabs = buttons.map(relativeBounds);
+      const labelBounds = labels.map(relativeBounds);
+      return { tabs, labelBounds, signature: tabs.map((tab) => `${tab.left}:${tab.top}:${tab.width}:${tab.height}`).join('|') };
     }
     let geometry = measure();
 
-    function updateShape() {
+    function drawShape() {
       const width = baseWidth.current;
       if (!width) return;
       const left = leftEdge.get();
       const right = rightEdge.get();
-      const stretch = Math.max(1, right - left) / width;
-      // Independent edges pull the head forward before the tail catches up.
-      // Keep drawing on transforms; button geometry and label text never scale.
-      scaleX = stretch;
-      scaleY = Math.min(1, Math.max(.91, Math.pow(stretch, -.18)));
-      // One DOM writer owns this transform, including the final selected state.
-      // Mixing a manual snap with Motion's render queue can restore a stale
-      // transform in WKWebView after the content has already changed.
-      pill!.style.transform = `translateX(${(left + right - width) / 2}px) scale(${scaleX}, ${scaleY})`;
+      const target = geometry.tabs[selectedIndex];
+      const centerX = (left + right) / 2;
+      const centerY = target.top + target.height / 2;
+      const halfWidth = Math.max(1, right - left) / 2;
+      const scaleX = halfWidth * 2 / width;
+      const scaleY = Math.min(1, Math.max(.91, Math.pow(scaleX, -.18)));
+      const halfHeight = target.height / 2 * scaleY;
+      const radiusX = target.height / 2 * scaleX;
+      pill!.style.transform = `translateX(${centerX - width / 2}px) scale(${scaleX}, ${scaleY})`;
+
+      // Use the same geometry for the pill and text. Reading a transformed
+      // box here would synchronize style/layout on every animation frame.
+      labels.forEach((label, index) => {
+        const bounds = geometry.labelBounds[index];
+        const top = centerY - halfHeight - bounds.top;
+        const right = bounds.left + bounds.width - centerX - halfWidth;
+        const bottom = bounds.top + bounds.height - centerY - halfHeight;
+        const left = centerX - halfWidth - bounds.left;
+        const overlaps = left < bounds.width && right < bounds.width && top < bounds.height && bottom < bounds.height;
+        label.style.clipPath = overlaps
+          ? `inset(${top}px ${right}px ${bottom}px ${left}px round ${radiusX}px / ${halfHeight}px)`
+          : 'inset(0 100% 0 0)';
+      });
     }
-    const unsubscribeLeft = leftEdge.on('change', updateShape);
-    const unsubscribeRight = rightEdge.on('change', updateShape);
 
     function stop() {
       controls.forEach((control) => control.stop());
@@ -80,40 +96,22 @@ export function PrimaryNavigation<Value extends string>({ items, value, duration
       cancelAnimationFrame(frame);
       frame = 0;
     }
-    function clipLabels() {
-      // Batch every geometry read before the clip writes; no per-label reflow loop.
-      const surface = pill!.getBoundingClientRect();
-      const rows = labels.map((label) => ({ label, bounds: label.getBoundingClientRect() }));
-      const radiusX = geometry.tabs[selectedIndex].height / 2 * scaleX;
-      const radiusY = geometry.tabs[selectedIndex].height / 2 * scaleY;
-      for (const { label, bounds } of rows) {
-        const overlaps = surface.right > bounds.left && surface.left < bounds.right && surface.bottom > bounds.top && surface.top < bounds.bottom;
-        label.style.clipPath = overlaps
-          ? `inset(${surface.top - bounds.top}px ${bounds.right - surface.right}px ${bounds.bottom - surface.bottom}px ${surface.left - bounds.left}px round ${radiusX}px / ${radiusY}px)`
-          : 'inset(0 100% 0 0)';
-      }
-    }
     function snap(target: TabBounds) {
       baseWidth.current = target.width;
       leftEdge.set(target.left);
       rightEdge.set(target.left + target.width);
-      scaleX = 1;
-      scaleY = 1;
       pill!.style.width = `${target.width}px`;
       pill!.style.height = `${target.height}px`;
       pill!.style.top = `${target.top}px`;
       // Apply the measured first frame synchronously; never wait for Motion to show it.
-      pill!.style.transform = `translateX(${target.left}px) scale(1, 1)`;
-      nav!.dataset.liquidReady = 'true';
-      clipLabels();
+      drawShape();
     }
     function tick() {
       if (disposed) return;
-      clipLabels();
+      drawShape();
       frame = requestAnimationFrame(tick);
     }
     const target = geometry.tabs[selectedIndex];
-    const moving = lastValue.current !== null && lastValue.current !== value && nav.dataset.liquidReady === 'true';
     lastValue.current = value;
     if (!moving) {
       snap(target);
@@ -154,8 +152,6 @@ export function PrimaryNavigation<Value extends string>({ items, value, duration
       disposed = true;
       stop();
       observer.disconnect();
-      unsubscribeLeft();
-      unsubscribeRight();
       window.removeEventListener('resize', align);
     };
   }, [items, value, selectedIndex, durationMs, reducedMotion, leftEdge, rightEdge]);

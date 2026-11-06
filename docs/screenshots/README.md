@@ -6,7 +6,7 @@ Both README editions use the same four screenshots.
 
 | 文件 / File | 来源 / Source |
 | --- | --- |
-| `portrait-wall.png` | 用户提供的人像照片墙截图 / User-supplied portrait photo wall |
+| `portrait-wall.png` | 用户提供的人像照片墙截图 / User-supplied portrait photo wall · 摄影 / Photography by [@\_awong\_](https://www.instagram.com/_awong_/) |
 | `photobook-shelf.jpg` | 2026-11-04 macOS 原生画册主页验收截图 / Native macOS photobook shelf capture |
 | `shoot-planning.png` | 用户提供的拍摄策划截图 / User-supplied shoot plan |
 | `model-profiles.png` | 用户提供的模特档案截图 / User-supplied model profiles |

@@ -2,13 +2,13 @@ import { useState, type FormEvent } from 'react';
 import type { Group } from '../lib/types';
 import { Modal } from '../components/ui';
 
-export function GroupForm({ group, counts, busy, onClose, onSave }: {
-  group?: Group; counts?: { active: number; discarded: number }; busy: boolean; onClose: () => void;
+export function GroupForm({ group, defaultCapacity, counts, busy, onClose, onSave }: {
+  group?: Group; defaultCapacity?: number; counts?: { active: number; discarded: number }; busy: boolean; onClose: () => void;
   onSave: (values: { name: string; description: string; capacity: number | null }) => Promise<void>;
 }) {
   const [name, setName] = useState(group?.name || '');
   const [description, setDescription] = useState(group?.description || '');
-  const [capacity, setCapacity] = useState(group?.capacity?.toString() || '');
+  const [capacity, setCapacity] = useState((group ? group.capacity : defaultCapacity)?.toString() ?? '');
   const [error, setError] = useState('');
   async function submit(event: FormEvent) {
     event.preventDefault(); setError('');

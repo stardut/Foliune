@@ -1,7 +1,7 @@
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { isLocalPhoto } from './photo-availability';
-import type { GroupInput, GroupPatch, ImportResult, LibraryKind, LibrarySnapshot, MembershipStatus, Photo, PhotoMetadata, PhotoPatch } from './types';
+import type { AlbumCover, GroupInput, GroupPatch, ImportResult, LibraryKind, LibrarySnapshot, MembershipStatus, Photo, PhotoMetadata, PhotoPatch } from './types';
 
 export const isDesktop = () => isTauri();
 
@@ -53,6 +53,11 @@ export async function importPhotos(library: LibraryKind, groupId?: string): Prom
 
 export const createGroup = (input: GroupInput) => mutate('create_group', { input });
 export const updateGroup = (id: string, patch: GroupPatch) => mutate('update_group', { id, patch });
+export async function readAlbumCover(groupId: string, photoId: string, expectedOriginalPath: string, expectedThumbnailPath: string, expectedCover: AlbumCover | null): Promise<ArrayBuffer> {
+  const bytes = await call<ArrayBuffer | number[]>('read_album_cover', { groupId, photoId, expectedOriginalPath, expectedThumbnailPath, expectedCover });
+  // Tauri's macOS postMessage transport serializes raw IPC responses as arrays.
+  return Array.isArray(bytes) ? Uint8Array.from(bytes).buffer : bytes;
+}
 export const deleteGroup = (id: string) => mutate('delete_group', { id });
 export const shareAlbumAirDrop = (groupId: string, photoIds?: string[]) =>
   call<void>('share_album_airdrop', { groupId, photoIds: photoIds ?? null });

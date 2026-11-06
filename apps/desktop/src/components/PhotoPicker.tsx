@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Search, X } from 'lucide-react';
 import type { Photo } from '../lib/types';
 import { PhotoImage } from './PhotoImage';
+import { PhotoSelectionControls } from './PhotoSelectionControls';
 import { EmptyState, IconButton, Modal } from './ui';
 import { PageControls, PHOTO_PAGE_SIZE } from './PageControls';
 import './photo-picker.css';
@@ -38,7 +39,11 @@ export function PhotoPicker({ photos, selectedIds, onConfirm, onClose, title = '
       </button>)}</div> : <EmptyState title={photos.length ? '没有找到照片' : '图库还没有照片'} />}
       </div>
       <PageControls page={actualPage} total={filtered.length} onPage={setPage} />
-      <div className="photo-picker-footer"><span role="status">已选 {selected.length} 张{maxSelection !== undefined ? ` / 最多 ${maxSelection} 张` : ''}</span><button type="button" className="text-button" disabled={!selected.length} onClick={() => setSelected([])}>清空</button><div className="form-actions"><button type="button" className="button" onClick={onClose}>取消</button><button type="button" className="button button-primary" disabled={maxSelection !== undefined && selected.length > maxSelection} onClick={() => onConfirm(selected)}>确认选择</button></div></div>
+      <div className="photo-picker-footer">
+        <PhotoSelectionControls photos={filtered} selectedIds={selected} maxSelection={maxSelection}
+          onSelect={(ids) => setSelected((current) => [...new Set([...current, ...ids])])} onClear={() => setSelected([])} />
+        <div className="form-actions"><button type="button" className="button" onClick={onClose}>取消</button><button type="button" className="button button-primary" disabled={maxSelection !== undefined && selected.length > maxSelection} onClick={() => onConfirm(selected)}>确认选择</button></div>
+      </div>
     </div>
   </Modal>;
 }

@@ -3,18 +3,18 @@ import { ImageOff, LocateFixed } from 'lucide-react';
 import type { Photo } from '../lib/types';
 import { canReadOriginal, isLocalPhoto, originalReadUrl, photoUnavailableLabel } from '../lib/photo-availability';
 
-export function PhotoImage({ photo, original = false, onSelect, onDoubleClick, selected = false, onRelink, busy = false, onUnavailable, onReadyChange, lazy = false, softReveal = false }: {
-  photo: Photo; original?: boolean; onSelect?: () => void; onDoubleClick?: () => void; selected?: boolean;
+export function PhotoImage({ photo, original = false, thumbnailOnly = false, onSelect, onDoubleClick, selected = false, onRelink, busy = false, onUnavailable, onReadyChange, lazy = false, softReveal = false }: {
+  photo: Photo; original?: boolean; thumbnailOnly?: boolean; onSelect?: () => void; onDoubleClick?: () => void; selected?: boolean;
   onRelink?: (photo: Photo) => Promise<void>; busy?: boolean;
   onUnavailable?: () => void;
   onReadyChange?: (ready: boolean) => void;
   lazy?: boolean; softReveal?: boolean;
 }) {
   const [readSession] = useState(() => original ? crypto.randomUUID() : '');
-  const src = original ? originalReadUrl(photo, readSession) : photo.thumbnailUrl || photo.originalUrl;
+  const src = original ? originalReadUrl(photo, readSession) : photo.thumbnailUrl || (thumbnailOnly ? '' : photo.originalUrl);
   const unavailable = original
     ? !canReadOriginal(photo)
-    : !photo.thumbnailAvailable || (!photo.originalAvailable && !isLocalPhoto(photo));
+    : !photo.thumbnailAvailable || (thumbnailOnly ? !src : !photo.originalAvailable && !isLocalPhoto(photo));
   const [failed, setFailed] = useState(false);
   const [pending, setPending] = useState(true);
   const imageRef = useRef<HTMLImageElement>(null);

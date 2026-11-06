@@ -24,8 +24,8 @@ export function useReviewPresentation(photos: Photo[], requestedId: string, dire
   return { state, controller: controller.current! };
 }
 
-export function PhotoReviewImage({ state, controller, busy, onRelink, allowZoom = true, onEntryZoom }: {
-  state: ReviewPresentationState; controller: ReviewPresentation; busy: boolean; onRelink: (photo: Photo) => Promise<void>; allowZoom?: boolean; onEntryZoom?: () => void;
+export function PhotoReviewImage({ state, controller, busy, onRelink, allowZoom = true, onEntryZoom, fullscreen }: {
+  state: ReviewPresentationState; controller: ReviewPresentation; busy: boolean; onRelink: (photo: Photo) => Promise<void>; allowZoom?: boolean; onEntryZoom?: () => void; fullscreen?: boolean;
 }) {
   const layers: [ReviewFrame | null, string][] = [[state.current, state.incoming ? 'cover' : state.entering ? 'enter' : 'current'], [state.incoming, 'incoming'], [state.outgoing, 'outgoing']];
   const reduced = !!useReducedMotion();
@@ -38,13 +38,14 @@ export function PhotoReviewImage({ state, controller, busy, onRelink, allowZoom 
     if (element && owner) { owner.attach(element, onEntryZoom); return () => owner.detach(); }
   }, [owner, onEntryZoom]);
   useLayoutEffect(() => owner?.update(layers.map(([frame]) => frame).filter((frame): frame is ReviewFrame => !!frame), state.current, reduced), [owner, state, reduced]);
+  useLayoutEffect(() => { if (fullscreen) owner?.reset(); }, [owner, fullscreen]);
   return <div className="photo-review-images" ref={viewport}>
     {layers.map(([frame, role]) => frame && <div key={frame.key} className={`photo-review-frame photo-review-frame-${role}`} style={{ '--review-offset': `${state.direction * 12}px` } as CSSProperties} aria-hidden={role === 'incoming' || role === 'outgoing' ? true : undefined} inert={role === 'incoming' || role === 'outgoing'}>
-      {frame.kind === 'error' ? <ReviewMissing photo={frame.photo} busy={busy} onRelink={async (photo) => { await onRelink(photo); controller.retry(photo); }} />
+      {frame.kind === 'error' ? !fullscreen && <ReviewMissing photo={frame.photo} busy={busy} onRelink={async (photo) => { await onRelink(photo); controller.retry(photo); }} />
         : <div className="photo-review-zoom" ref={owner ? (element) => owner.register(frame, element) : undefined}><img src={frame.src} width={frame.photo.width} height={frame.photo.height} alt={frame.photo.title || frame.photo.originalName} draggable={false}
           onLoad={(event) => { owner?.imageLoaded(frame.key); void controller.domReady(frame.key, event.currentTarget); }} onError={() => controller.domFailed(frame.key)} /></div>}
     </div>)}
-    {state.waiting && <div className="photo-review-loading" role="status"><LoaderCircle size={16} aria-hidden="true" /><span>正在读取照片</span></div>}
+    {!fullscreen && state.waiting && <div className="photo-review-loading" role="status"><LoaderCircle size={16} aria-hidden="true" /><span>正在读取照片</span></div>}
   </div>;
 }
 

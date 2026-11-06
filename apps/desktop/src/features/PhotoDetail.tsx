@@ -1,10 +1,10 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { ExternalLink } from 'lucide-react';
 import type { Photo, PhotoPatch } from '../lib/types';
 import { displayOriginalPath } from '../lib/photo-availability';
 import { Modal } from '../components/ui';
 import { PhotoImage } from '../components/PhotoImage';
-import { RegionEditor } from './RegionEditor';
+import { PhotoReviewInfo } from './PhotoReviewInfo';
 
 export function PhotoDetail({ photo, onClose, onSave, busy, onRelink, extension, onDirtyChange }: {
   photo: Photo; onClose: () => void; busy: boolean;
@@ -20,20 +20,22 @@ export function PhotoDetail({ photo, onClose, onSave, busy, onRelink, extension,
   const [project, setProject] = useState(photo.project);
   const [capturedAt, setCapturedAt] = useState(localDateTime(photo.capturedAt));
   const [capturedAtDirty, setCapturedAtDirty] = useState(false);
-  const [regions, setRegions] = useState(photo.regions || []);
-  const [regionEditing, setRegionEditing] = useState(false);
   const [error, setError] = useState('');
+  const infoTitleId = useId();
   const originalPath = displayOriginalPath(photo);
-  const dirty = title !== photo.title || tags !== photo.tags.join('，') || annotation !== photo.annotation || source !== photo.source || location !== photo.location || project !== photo.project || capturedAtDirty || JSON.stringify(regions) !== JSON.stringify(photo.regions || []);
+  const dirty = title !== photo.title || tags !== photo.tags.join('，') || annotation !== photo.annotation || source !== photo.source || location !== photo.location || project !== photo.project || capturedAtDirty;
   useEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
   async function save(event: FormEvent) {
     event.preventDefault(); setError('');
-    if (regions.some((region) => !region.text.trim())) { setError('请为每个区域填写标注，或删除空标注框。'); setRegionEditing(true); return; }
-    try { await onSave({ title: title.trim() || photo.originalName, tags: [...new Set(tags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean))], annotation, source, location, project, ...(capturedAtDirty ? { capturedAt: capturedAt ? new Date(capturedAt).toISOString() : null } : {}), regions }); }
+    try { await onSave({ title: title.trim() || photo.originalName, tags: [...new Set(tags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean))], annotation, source, location, project, ...(capturedAtDirty ? { capturedAt: capturedAt ? new Date(capturedAt).toISOString() : null } : {}) }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
   return <Modal title="照片详情" onClose={onClose} wide>
-    <div className="detail-layout"><div className="detail-preview">{regionEditing ? <RegionEditor photo={photo} regions={regions} onChange={setRegions} /> : <PhotoImage photo={photo} original onRelink={onRelink} busy={busy} />}<p>{photo.width} × {photo.height} <span>·</span> {photo.originalName}</p><button type="button" className="button region-switch" onClick={() => setRegionEditing(!regionEditing)}>{regionEditing ? '查看照片' : `区域标注 ${regions.length || ''}`}</button></div>
+    <div className="detail-layout">
+      <div className="detail-preview">
+        <PhotoImage photo={photo} original onRelink={onRelink} busy={busy} />
+        <PhotoReviewInfo key={JSON.stringify([photo.originalPath, photo.originalAvailable])} photo={photo} titleId={infoTitleId} />
+      </div>
       <form onSubmit={save} className="detail-form">
         <label>标题<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
         <label>标签<input value={tags} placeholder="用逗号分隔" onChange={(event) => setTags(event.target.value)} /></label>
@@ -43,7 +45,6 @@ export function PhotoDetail({ photo, onClose, onSave, busy, onRelink, extension,
         <label>标注<textarea value={annotation} rows={4} placeholder="留下你的观察" onChange={(event) => setAnnotation(event.target.value)} /></label>
         {extension}
         {originalPath && <p className="file-path" title={originalPath}><ExternalLink size={12} />{originalPath}</p>}
-        {photo.capturedAt && <p className="muted">拍摄于 {new Date(photo.capturedAt).toLocaleString('zh-CN')}</p>}
         {error && <p role="alert" className="form-error">{error}</p>}
         <div className="form-actions"><button type="button" className="button" onClick={onClose}>取消</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button></div>
       </form>

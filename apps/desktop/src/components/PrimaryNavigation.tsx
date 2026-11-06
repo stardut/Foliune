@@ -1,12 +1,24 @@
-import { useLayoutEffect, useRef } from 'react';
-import { animate, useMotionValue, useReducedMotion } from 'motion/react';
+import { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
+import { animate, useMotionValue } from 'motion/react';
 
 type TabBounds = { left: number; top: number; width: number; height: number };
+const reducedMotionQuery = '(prefers-reduced-motion: reduce)';
+
+function subscribeReducedMotion(onChange: () => void) {
+  const preference = window.matchMedia(reducedMotionQuery);
+  preference.addEventListener('change', onChange);
+  return () => preference.removeEventListener('change', onChange);
+}
+
+function getReducedMotion() {
+  return window.matchMedia(reducedMotionQuery).matches;
+}
 
 /** App navigation stays native buttons; the moving surface is only decoration. */
-export function PrimaryNavigation<Value extends string>({ items, value, onChange }: {
+export function PrimaryNavigation<Value extends string>({ items, value, durationMs, onChange }: {
   items: readonly { id: Value; label: string }[];
   value: Value;
+  durationMs: number;
   onChange: (value: Value) => void;
 }) {
   const navRef = useRef<HTMLElement>(null);
@@ -15,7 +27,7 @@ export function PrimaryNavigation<Value extends string>({ items, value, onChange
   const baseWidth = useRef(0);
   const leftEdge = useMotionValue(0);
   const rightEdge = useMotionValue(0);
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, getReducedMotion);
   const selectedIndex = items.findIndex((item) => item.id === value);
 
   useLayoutEffect(() => {
@@ -109,7 +121,7 @@ export function PrimaryNavigation<Value extends string>({ items, value, onChange
       const movingRight = target.left + target.width / 2 >= (leftEdge.get() + rightEdge.get()) / 2;
       const frontEase = [.20, .65, .25, 1] as const;
       const tailEase = [.44, .08, .34, 1] as const;
-      const duration = .6;
+      const duration = durationMs / 1000;
       let completed = 0;
       const finish = () => {
         if (!disposed && ++completed === 2) { stop(); snap(geometry.tabs[selectedIndex]); }
@@ -146,7 +158,7 @@ export function PrimaryNavigation<Value extends string>({ items, value, onChange
       unsubscribeRight();
       window.removeEventListener('resize', align);
     };
-  }, [items, value, selectedIndex, reducedMotion, leftEdge, rightEdge]);
+  }, [items, value, selectedIndex, durationMs, reducedMotion, leftEdge, rightEdge]);
 
   return <nav ref={navRef} className="primary-navigation" aria-label="工作区">
     {selectedIndex >= 0 && !reducedMotion && <span ref={pillRef} className="navigation-liquid-pill" aria-hidden="true" />}

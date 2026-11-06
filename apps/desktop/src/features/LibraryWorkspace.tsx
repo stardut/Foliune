@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowUpRight, FolderPlus, Grid2X2, ImagePlus, LayoutTemplate, Play } from 'lucide-react';
 import * as api from '../lib/api';
-import type { Group, LibraryKind, LibrarySnapshot, Photo } from '../lib/types';
+import type { AlbumCover, Group, LibraryKind, LibrarySnapshot, Photo } from '../lib/types';
 import type { CurationDraft } from '../lib/curation-types';
 import { useToast } from '../components/ToastProvider';
 import { exportedFileName } from '../lib/export-directory';
@@ -15,6 +15,7 @@ import { PhotoImage } from '../components/PhotoImage';
 import { PhotoSourceDialog } from '../components/PhotoSourceDialog';
 import { AddPhotosToBook } from './books/AddPhotosToBook';
 import { AlbumOverview } from './AlbumOverview';
+import { AlbumCoverDialog } from './AlbumCoverDialog';
 import { libraryAlbums } from './library-albums';
 import { AlbumDetailHeader, type AlbumPhotoLayout } from './AlbumDetailHeader';
 import { AlbumSortButton, albumSortLabels, photoSortLabels } from './AlbumSortButton';
@@ -61,11 +62,11 @@ export interface LibraryWorkspaceProps {
   onPlay: (photoIds: string[]) => void;
   onDirtyChange?: (dirty: boolean) => void; onBusyChange?: (busy: boolean) => void;
   onBrowsingIdleChange?: (idle: boolean) => void;
-  workDirectoryControl?: ReactNode;
-  workDirectory?: Pick<ReturnType<typeof useWorkDirectory>, 'jobs' | 'retryJob' | 'retrying'>;
+  onOpenWorkDirectorySettings?: () => void;
+  workDirectory?: Pick<ReturnType<typeof useWorkDirectory>, 'state' | 'jobs' | 'retryJob' | 'retrying'>;
 }
 
-export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, importDisabled = false, onRelink, detailExtension, searchResults, onPlay, onDirtyChange, onBusyChange, onBrowsingIdleChange, workDirectoryControl, workDirectory }: LibraryWorkspaceProps & (
+export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, importDisabled = false, onRelink, detailExtension, searchResults, onPlay, onDirtyChange, onBusyChange, onBrowsingIdleChange, onOpenWorkDirectorySettings, workDirectory }: LibraryWorkspaceProps & (
   { space: LibraryKind; searchResults?: never } | { space: 'search'; searchResults: SearchPhotoWall }
 )) {
   const [working, setBusy] = useState(false);
@@ -111,6 +112,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
   const [albumToolsOpen, setAlbumToolsOpen] = useState(false);
   const [albumSortOpen, setAlbumSortOpen] = useState(false);
   const [groupForm, setGroupForm] = useState<'new' | Group | null>(null);
+  const [coverTarget, setCoverTarget] = useState<{ groupId: string; photoId: string } | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ id: string; scrollTop: number; trigger?: HTMLElement; entrySource?: ReviewEntrySource } | null>(null);
@@ -139,7 +141,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
   const singleAlbum = space !== 'search' && !!currentGroup && layout === 'single';
   const albumHome = space !== 'search' && groupId === null;
   const orderedAlbums = useMemo(() => albumHome && albumIndex ? sortLibraryAlbums(albumIndex.albums, albumSort) : [], [albumHome, albumIndex, albumSort]);
-  const browsingIdle = space !== 'search' && !busy && !albumToolsOpen && !albumSortOpen && !selected.length && !groupForm && !deleteConfirm && !detailId && !preview
+  const browsingIdle = space !== 'search' && !busy && !albumToolsOpen && !albumSortOpen && !selected.length && !groupForm && !coverTarget && !deleteConfirm && !detailId && !preview
     && !pickingSource && !draft && !addToGroup && !addingToBook && !comparing && !social && !collage;
   useLayoutEffect(() => {
     onBrowsingIdleChange?.(browsingIdle);
@@ -153,6 +155,8 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
   }
   const discardedCount = currentAlbum?.discardedPhotos.length ?? 0;
   const albumPhotos = (status === 'active' ? currentAlbum?.photos : currentAlbum?.discardedPhotos) ?? EMPTY_PHOTOS;
+  const coverPhoto = coverTarget && status === 'active' && coverTarget.groupId === currentGroup?.id
+    ? albumPhotos.find((photo) => photo.id === coverTarget.photoId) : undefined;
   const searchPhotos = searchResults?.photos;
   const previewCount = searchResults?.previewCount;
   const searchPreview = previewCount !== undefined;
@@ -183,7 +187,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     return sortAlbumPhotos(albumPhotos, photoSort);
   }, [albumPhotos, photoSort, searchPhotos, workSections]);
   const wallPhotos = useMemo(() => previewCount === undefined ? photos : photos.slice(0, previewCount), [photos, previewCount]);
-  const menuContext = JSON.stringify([space, groupId, status, searchTerm, previewCount, workView, albumSort, photoSort, layout, !!detailId, !!preview, pickingSource, !!draft, !!groupForm, !!addToGroup, !!addingToBook, !!comparing, !!deleteConfirm, !!social, !!collage]);
+  const menuContext = JSON.stringify([space, groupId, status, searchTerm, previewCount, workView, albumSort, photoSort, layout, !!detailId, !!preview, pickingSource, !!draft, !!groupForm, !!coverTarget, !!addToGroup, !!addingToBook, !!comparing, !!deleteConfirm, !!social, !!collage]);
   const photoIds = useMemo(() => new Set(wallPhotos.map((photo) => photo.id)), [wallPhotos]);
   const currentSelection = useMemo(() => space === 'search' ? selected.filter((id) => photoIds.has(id)) : selected, [space, selected, photoIds]);
   const actionState = useRef({ context: menuContext, busy: busy || importDisabled, ids: photoIds });
@@ -359,6 +363,14 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     catch (cause) { onFeedback(errorMessage(cause), true); throw cause; }
     finally { setBusy(false); }
   }
+  async function saveCover(id: string, cover: AlbumCover) {
+    setBusy(true);
+    try {
+      onSnapshot(await api.updateGroup(id, { cover }));
+      setCoverTarget(null);
+      onFeedback('已设置相簿封面');
+    } finally { setBusy(false); }
+  }
   function importFiles() {
     if (busy || importDisabled || draft || !currentGroup) return;
     setPickingSource(true);
@@ -390,6 +402,9 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
       actions.push(action('preview', '查看大图', () => openPreview(single, trigger)), action('detail', '详情与标注', () => setDetailId(single.id)));
       actions.push(action('select', currentSelection.includes(single.id) ? '取消选择' : '选择', () => togglePhoto(single.id)));
     }
+    if (photo && currentGroup && status === 'active') {
+      actions.push(action('cover', '设为封面…', () => setCoverTarget({ groupId: currentGroup.id, photoId: photo.id })));
+    }
     if (ids.length >= 2 && groupId && space !== 'search') actions.push(action('collage', `拼图${countSuffix}`, () => openCollage(ids)));
     if (ids.length === 2) actions.push(action('compare', `并排比较${countSuffix}`, () => setComparing(ids)));
     actions.push(action('play', `欣赏${countSuffix}`, () => onPlay(ids)), action('book', `加入画册${countSuffix}`, () => setAddingToBook(ids)), action('group', `加入相簿${countSuffix}`, () => setAddToGroup(ids)));
@@ -403,7 +418,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     if (singleAlbum) return <SinglePhotoView key={`${groupId}:${status}`} photos={photos} selected={selected} initialCursor={photoCursor.current} rememberCursor={rememberSinglePhoto} onMenu={showPhotoMenu} onRelink={onRelink} busy={busy || importDisabled} onLayoutReady={restoreAlbumScroll}
       restorePhotoId={restorePhoto?.id} onPhotoRestored={finishSingleRestore} onReveal={onReveal} />;
     return <PhotoCanvas ref={wallRef} photos={wallPhotos} sections={workSections} onLayoutReady={searchResults?.onLayoutReady ?? restoreAlbumScroll} selected={currentSelection} onSelect={togglePhoto} onPreview={openWallPreview} onMenu={showPhotoMenu} layout={previewCount !== undefined ? 'grid' : layout === 'single' ? preferredPhotoLayout : layout} emptyAction={importButton} onRelink={onRelink} busy={busy}
-      restore={restorePhoto} onRestored={finishWallRestore} onReveal={onReveal} />;
+      compactAlbumPair={!!currentGroup} restore={restorePhoto} onRestored={finishWallRestore} onReveal={onReveal} />;
   }
   return <section ref={workspaceRef} className={social || collage ? undefined : `library-workspace library-${space}${singleAlbum && photos.length ? ' album-single-layout' : ''}${previewCount !== undefined ? ' search-photo-preview' : ''}`} aria-label={space === 'work' ? '作品图库' : space === 'search' ? '照片搜索结果' : '收藏图库'}>
     {collage ? <CollageWorkspace snapshot={snapshot} library={library} initialPhotoIds={collage.photoIds} onDirtyChange={onDirtyChange} onBusyChange={onBusyChange} onRelink={onRelink} onExit={returnToAlbum} onExported={(path) => { toast({ title: `已导出 ${exportedFileName(path)}`, dismissible: false }); returnToAlbum(); }} /> : social ? <SocialWorkspace photos={snapshot.photos} initialPhotoIds={social.photoIds} onExit={returnToAlbum} onRelink={onRelink} /> : <>
@@ -415,10 +430,9 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
       layout={layout} sort={photoSort} onSort={changePhotoSort} onBack={() => openAlbum(null)} onImport={() => void importFiles()}
       onPlay={() => onPlay(photos.map((photo) => photo.id))} onStatus={changeAlbumStatus}
       workView={canGroup ? workView : undefined} onWorkView={(next) => { if (next !== workView) changePhotoOrder(); setWorkView(next); }}
-      onLayout={changeLayout} onMenuOpenChange={setAlbumToolsOpen} onSortOpenChange={setAlbumSortOpen}
+      onLayout={changeLayout} onMenuOpenChange={setAlbumToolsOpen}
       onFocusWall={() => wallRef.current?.focusViewportPhoto(photoCursor.current?.id) ?? false}
     /> : space !== 'search' ? <WorkspaceHeader title={albumHomeTitle} count={albumIndex?.albums.length || !hasPendingAlbum ? `${albumIndex?.albums.length ?? 0} 本相簿` : undefined}>
-      {workDirectoryControl}
       <AlbumSortButton label="相簿排序" labels={albumSortLabels} value={albumSort} disabled={!orderedAlbums.length} onChange={changeAlbumSort} onOpenChange={setAlbumSortOpen} />
       <button type="button" className="button" disabled={busy} onClick={() => setGroupForm('new')}><FolderPlus size={15} />新建相簿</button>
     </WorkspaceHeader> : previewCount === undefined && <div className="search-group-heading">
@@ -430,9 +444,14 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     </div>}
     {albumHome ? (orderedAlbums.length || hasPendingAlbum)
       ? <AlbumOverview albums={orderedAlbums} busy={busy || importDisabled} jobs={workDirectory?.jobs} retrying={workDirectory?.retrying} onRetry={workDirectory?.retryJob} onMenu={showAlbumMenu} onOpen={openAlbum} />
-      : <EmptyState title="还没有相簿" action={<button type="button" className="button" onClick={() => setGroupForm('new')}><FolderPlus size={15} />新建相簿</button>} /> : !photos.length && status === 'discarded' ? <EmptyState title="没有已废弃的照片" description="从当前相簿废弃的照片会保留在这里。" /> : !photos.length && currentGroup ? <EmptyState title="相簿为空" description={discardedCount ? '可在“已废弃”中恢复照片。' : undefined} action={importButton} /> : canvas()}
+      : <EmptyState title="还没有相簿" action={<>
+        <button type="button" className="button" onClick={() => setGroupForm('new')}><FolderPlus size={15} />新建相簿</button>
+        {workDirectory?.state?.status === 'unbound' && onOpenWorkDirectorySettings && <button type="button" className="text-button work-directory-settings-link" onClick={onOpenWorkDirectorySettings}>在设置中绑定作品目录</button>}
+      </>} /> : !photos.length && status === 'discarded' ? <EmptyState title="没有已废弃的照片" description="从当前相簿废弃的照片会保留在这里。" /> : !photos.length && currentGroup ? <EmptyState title="相簿为空" description={discardedCount ? '可在“已废弃”中恢复照片。' : undefined} action={importButton} /> : canvas()}
     <SelectionBar count={albumHome ? 0 : currentSelection.length} busy={busy || importDisabled} onClear={() => setSelected([])} onBook={() => setAddingToBook(photos.filter((photo) => currentSelection.includes(photo.id)).map((photo) => photo.id))} onMore={(at, trigger) => showPhotoMenu(null, at, trigger)} onCollage={currentGroup && space !== 'search' && selected.length >= 2 ? () => openCollage(photos.filter((photo) => selected.includes(photo.id)).map((photo) => photo.id)) : undefined} onSocial={currentGroup && space !== 'search' ? () => openSocial(photos.filter((photo) => selected.includes(photo.id)).map((photo) => photo.id)) : undefined} />
     {preview && <PhotoReview photos={photos} initialPhotoId={preview.id} entrySource={preview.entrySource} context={space === 'search' ? '搜索结果' : currentGroup?.name || albumHomeTitle} busy={busy || importDisabled} onClose={closePreview} onRelink={onRelink} returnLabel={singleAlbum ? '返回相簿' : undefined} />}
+    {currentGroup && coverPhoto && <AlbumCoverDialog photo={coverPhoto} initialCover={currentGroup.cover} busy={busy || importDisabled}
+      onClose={() => setCoverTarget(null)} onSave={(cover) => saveCover(currentGroup.id, cover)} />}
     {detail && <PhotoDetail key={detail.id} photo={detail} busy={busy} onClose={() => setDetailId(null)} onRelink={onRelink} onDirtyChange={onDirtyChange} extension={detailExtension?.(detail)} onSave={async (patch) => { onSnapshot(await run(() => api.updatePhoto(detail.id, patch))); setDetailId(null); onFeedback('已保存照片信息'); }} />}
     {groupForm && <GroupForm group={groupForm === 'new' ? undefined : groupForm} counts={groupForm === 'new' ? undefined : groupCounts(groupForm.id)} busy={busy} onClose={() => setGroupForm(null)} onSave={async (values) => {
       if (groupForm === 'new') { const next = await run(() => api.createGroup({ library, ...values })); const created = next.groups.find((group) => group.library === library && !group.boundFolder && !snapshot.groups.some((old) => old.id === group.id)); onSnapshot(next); if (created) openAlbum(created.id); }

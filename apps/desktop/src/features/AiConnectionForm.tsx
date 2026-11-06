@@ -1,6 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { KeyRound } from 'lucide-react';
+import { DropdownSelect } from '../components/DropdownSelect';
 import { aiProviders, type AiProvider, type AiSettings, type AiSettingsInput } from '../lib/ai-types';
+
+const providerOptions = aiProviders.map(({ id, name }) => ({ value: id, label: name }));
 
 export function AiConnectionForm({ settings, disabled, onSave, onRemove }: {
   settings: AiSettings;
@@ -40,7 +43,7 @@ export function AiConnectionForm({ settings, disabled, onSave, onRemove }: {
   }
   return <form className="provider-form" onSubmit={(event) => void save(event)} aria-busy={operation !== null}>
     <div className="provider-fields">
-      <label>提供方<select value={provider} disabled={locked} onChange={(event) => selectProvider(event.target.value as AiProvider)}>{aiProviders.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+      <DropdownSelect label="提供方" field value={provider} options={providerOptions} disabled={locked} onChange={selectProvider} />
       <label>模型<input required maxLength={200} value={model} disabled={locked} onChange={(event) => setModel(event.target.value)} /></label>
       <label className="provider-key">API Key<input type="password" autoComplete="off" spellCheck={false} required={!hasSavedKey} value={key} disabled={locked} onChange={(event) => setKey(event.target.value)} placeholder={hasSavedKey ? '留空保留已保存的 Key' : '输入此提供方的 API Key'} /></label>
     </div>

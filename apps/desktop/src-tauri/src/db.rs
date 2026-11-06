@@ -1,6 +1,10 @@
-use crate::models::{Group, Membership, Photo, Snapshot};
-use rusqlite::Connection;
-use std::{fs, path::PathBuf, sync::Mutex};
+use crate::models::{AlbumCover, Group, Membership, Photo, Snapshot};
+use rusqlite::{Connection, Row};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 use tauri::{AppHandle, Manager};
 
 pub struct Store {
@@ -10,31 +14,19 @@ pub struct Store {
 
 impl Store {
     pub fn open(root: PathBuf) -> Result<Self, String> {
-        Self::open_selected(root, true)
+        fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+        let root = root.canonicalize().map_err(|e| e.to_string())?;
+        let library = installed_library(&root)?;
+        Self::open_at(root, library)
     }
 
     pub fn open_direct(root: PathBuf) -> Result<Self, String> {
-        Self::open_selected(root, false)
+        fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+        let root = root.canonicalize().map_err(|e| e.to_string())?;
+        Self::open_at(root.clone(), root)
     }
 
-    fn open_selected(root: PathBuf, follow_selection: bool) -> Result<Self, String> {
-        fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-        // SQLite 返回规范路径（macOS /var 会解析为 /private/var）；所有库边界以同一规范路径比较。
-        let root = root.canonicalize().map_err(|e| e.to_string())?;
-        let selection = root.join("library-selection.json");
-        let actual = if follow_selection && selection.exists() {
-            let id: String =
-                serde_json::from_slice(&fs::read(selection).map_err(|e| e.to_string())?)
-                    .map_err(|e| e.to_string())?;
-            uuid::Uuid::parse_str(&id).map_err(|_| "图库选择配置无效")?;
-            let actual = root.join("libraries").join(id);
-            if !actual.join("library.sqlite").is_file() {
-                return Err("所选图库不存在，未创建空库替代".into());
-            }
-            actual
-        } else {
-            root.clone()
-        };
+    fn open_at(root: PathBuf, actual: PathBuf) -> Result<Self, String> {
         fs::create_dir_all(actual.join("originals")).map_err(|e| e.to_string())?;
         fs::create_dir_all(actual.join("thumbnails")).map_err(|e| e.to_string())?;
         let conn = Connection::open(actual.join("library.sqlite")).map_err(|e| e.to_string())?;
@@ -64,6 +56,7 @@ impl Store {
              );",
         ).map_err(|e| e.to_string())?;
         migrate_photos(&conn)?;
+        crate::groups::init_covers(&conn)?;
         crate::books::init(&conn)?;
         crate::ai::init(&conn)?;
         crate::model_profiles::init(&conn)?;
@@ -75,6 +68,27 @@ impl Store {
             connection: Mutex::new(conn),
         })
     }
+}
+
+// Earlier installations stored their active library here. Keep opening that
+// location so managed photos and their recorded paths stay together on upgrade.
+fn installed_library(root: &Path) -> Result<PathBuf, String> {
+    let bytes = match fs::read(root.join("library-selection.json")) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(root.to_path_buf()),
+        Err(error) => return Err(error.to_string()),
+    };
+    let id: String = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    uuid::Uuid::parse_str(&id).map_err(|_| "图库位置配置无效")?;
+    let library = root.join("libraries").join(id);
+    let database = library.join("library.sqlite");
+    if !fs::symlink_metadata(&database).is_ok_and(|metadata| metadata.is_file()) {
+        return Err("当前图库数据库不存在或路径无效".into());
+    }
+    if database.canonicalize().map_err(|e| e.to_string())? != database {
+        return Err("当前图库数据库路径无效".into());
+    }
+    Ok(library)
 }
 
 pub(crate) fn migrate_photos(conn: &Connection) -> Result<(), String> {
@@ -126,6 +140,43 @@ pub fn snapshot(conn: &Connection) -> Result<Snapshot, String> {
 /// Backup and restore include every retained photo and its files, even when hidden from the UI.
 pub(crate) fn snapshot_with_hidden(conn: &Connection) -> Result<Snapshot, String> {
     read_snapshot(conn, true)
+}
+
+const GROUP_SELECT: &str =
+    "SELECT g.id,g.library,g.name,g.description,g.capacity,g.created_at,f.folder,
+            c.photo_id,c.offset_x,c.offset_y,c.zoom
+     FROM groups g LEFT JOIN work_directory_folders f ON f.album_id=g.id
+     LEFT JOIN album_covers c ON c.group_id=g.id";
+
+fn group_from_row(row: &Row<'_>) -> rusqlite::Result<Group> {
+    let cover = match row.get(7)? {
+        Some(photo_id) => Some(AlbumCover {
+            photo_id,
+            offset_x: row.get(8)?,
+            offset_y: row.get(9)?,
+            zoom: row.get(10)?,
+        }),
+        None => None,
+    };
+    Ok(Group {
+        id: row.get(0)?,
+        library: row.get(1)?,
+        name: row.get(2)?,
+        description: row.get(3)?,
+        capacity: row.get(4)?,
+        created_at: row.get(5)?,
+        bound_folder: row.get(6)?,
+        cover,
+    })
+}
+
+pub(crate) fn read_group(conn: &Connection, id: &str) -> Result<Group, String> {
+    conn.query_row(
+        &format!("{GROUP_SELECT} WHERE g.id=?1"),
+        [id],
+        group_from_row,
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn read_snapshot(conn: &Connection, include_hidden: bool) -> Result<Snapshot, String> {
@@ -180,19 +231,11 @@ fn read_snapshot(conn: &Connection, include_hidden: bool) -> Result<Snapshot, St
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
-    let mut statement = conn.prepare("SELECT g.id,g.library,g.name,g.description,g.capacity,g.created_at,f.folder FROM groups g LEFT JOIN work_directory_folders f ON f.album_id=g.id ORDER BY g.created_at,g.id").map_err(|e| e.to_string())?;
+    let mut statement = conn
+        .prepare(&format!("{GROUP_SELECT} ORDER BY g.created_at,g.id"))
+        .map_err(|e| e.to_string())?;
     let groups = statement
-        .query_map([], |row| {
-            Ok(Group {
-                id: row.get(0)?,
-                library: row.get(1)?,
-                name: row.get(2)?,
-                description: row.get(3)?,
-                capacity: row.get(4)?,
-                created_at: row.get(5)?,
-                bound_folder: row.get(6)?,
-            })
-        })
+        .query_map([], group_from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;

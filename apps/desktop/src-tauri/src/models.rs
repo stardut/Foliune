@@ -45,8 +45,18 @@ pub struct Group {
     pub description: String,
     pub capacity: Option<u32>,
     pub created_at: String,
+    pub cover: Option<AlbumCover>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bound_folder: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AlbumCover {
+    pub photo_id: String,
+    pub offset_x: f64,
+    pub offset_y: f64,
+    pub zoom: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]

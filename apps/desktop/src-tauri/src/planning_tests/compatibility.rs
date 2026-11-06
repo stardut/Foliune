@@ -50,9 +50,9 @@ fn planning_old_v2_without_execution_date_can_reopen_and_restore_but_must_set_da
     );
     let path = dir.path().join("old-v2-without-execution-date.zip");
     backup::create(&store, &path).unwrap();
-    let restored = backup::restore(&store, &path).unwrap();
-    libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
-    let mut conn = store.connection.lock().unwrap();
+    let target = Store::open(dir.path().join("target")).unwrap();
+    backup::restore(&target, &path).unwrap();
+    let mut conn = target.connection.lock().unwrap();
     let mut loaded = planning::list(&conn).unwrap().remove(0);
     assert_eq!(loaded, legacy);
     let error = planning::save(&mut conn, Some(&loaded.id), loaded.input.clone()).unwrap_err();
@@ -210,9 +210,9 @@ fn planning_old_v2_four_scene_references_survive_reopen_and_backup_restore() {
     );
     let path = dir.path().join("old-v2.zip");
     backup::create(&store, &path).unwrap();
-    let restored = backup::restore(&store, &path).unwrap();
-    libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
-    let mut conn = store.connection.lock().unwrap();
+    let target = Store::open(dir.path().join("target")).unwrap();
+    backup::restore(&target, &path).unwrap();
+    let mut conn = target.connection.lock().unwrap();
     assert_eq!(planning::list(&conn).unwrap(), [saved.clone()]);
     let mut corrected = saved.input;
     corrected.parts[0].references.pop();
@@ -302,9 +302,9 @@ fn planning_old_v2_shared_preparation_defaults_survive_reopen_backup_and_resave(
     );
     let path = dir.path().join("old-v2-shared-preparation.zip");
     backup::create(&store, &path).unwrap();
-    let restored = backup::restore(&store, &path).unwrap();
-    libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
-    let mut conn = store.connection.lock().unwrap();
+    let target = Store::open(dir.path().join("target")).unwrap();
+    backup::restore(&target, &path).unwrap();
+    let mut conn = target.connection.lock().unwrap();
     assert_eq!(planning::list(&conn).unwrap(), [saved.clone()]);
     let updated = planning::save(&mut conn, Some(&saved.id), saved.input).unwrap();
     assert_eq!(updated.input.parts[0].styling, "旧场景造型与道具保持原位");

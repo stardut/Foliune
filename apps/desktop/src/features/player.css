@@ -1,9 +1,26 @@
 .photo-player { position: fixed; inset: 0; margin: 0; padding: 0; max-width: none; max-height: none; width: 100vw; height: 100vh; border: 0; background: var(--photo-mat); color: var(--ink); overflow: hidden; }
-.photo-player::backdrop { background: var(--surface); }
+.photo-player::backdrop { background: var(--photo-mat); }
 .player-stage { position: absolute; inset: calc(var(--window-safe-top) + 62px) 42px 82px; display: flex; align-items: center; justify-content: center; }
 .player-stage:focus-visible { outline: none; }
-.player-stage .image-asset { width: 100%; height: 100%; }
-.player-stage .image-asset > img { width: 100%; height: 100%; object-fit: contain; }
+.player-frame { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--photo-mat); }
+.player-frame.image-unavailable { background: var(--soft); }
+.player-frame[data-role=prepared] { visibility: hidden; }
+.player-frame[data-role=outgoing] { z-index: 1; visibility: hidden; pointer-events: none; }
+.player-frame > img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.player-entry-veil { position: absolute; inset: 0; z-index: 1; display: none; background: var(--photo-mat); pointer-events: none; }
+.player-waiting { position: absolute; right: 0; bottom: -23px; width: 12px; height: 12px; border: 1px solid var(--line); border-top-color: var(--muted); border-radius: 50%; pointer-events: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .player-entry-veil { display: block; animation: player-entry .28s cubic-bezier(.2,.65,.3,1) both; }
+  .player-frame[data-role=outgoing] { visibility: visible; animation: player-dissolve .32s ease-in-out forwards; }
+  .player-frame[data-effect=drift] > img { animation: player-drift .32s cubic-bezier(.2,.65,.3,1); }
+  .player-frame[data-effect=settle] > img { animation: player-settle .32s cubic-bezier(.2,.65,.3,1); }
+  .player-waiting { animation: player-wait 1s linear infinite; }
+}
+@keyframes player-entry { from { opacity: .34; } to { opacity: 0; } }
+@keyframes player-dissolve { to { opacity: 0; } }
+@keyframes player-drift { from { transform: translateY(8px); } }
+@keyframes player-settle { from { transform: scale(.985); } }
+@keyframes player-wait { to { transform: rotate(360deg); } }
 .player-top { position: absolute; z-index: 2; inset: calc(var(--window-safe-top) + 12px) 25px auto; display: flex; justify-content: space-between; align-items: center; opacity: 0; transition: opacity .2s; }
 .player-top > span { min-width: 0; margin-inline: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
 .player-top > button { flex-shrink: 0; }

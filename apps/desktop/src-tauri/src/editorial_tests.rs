@@ -1,8 +1,7 @@
 use crate::{
     backup, book_layout, book_tests, books,
-    curation::CurationStore,
     db::{self, Store},
-    groups, libraries,
+    groups,
     model_profiles::{self, ModelInput},
     models::{GroupInput, Snapshot},
     photos, planning, planning_tests,
@@ -532,7 +531,7 @@ fn mutate_backup(dir: &Path, source: &Path, name: &str, sql: &str) -> PathBuf {
 }
 
 #[test]
-fn editorial_backup_restore_keeps_records_order_and_current_library_isolation() {
+fn editorial_backup_restore_keeps_existing_documents_and_preserves_new_document_order() {
     let (dir, store, ids) = setup(3);
     let profile = model_profiles::save(
         &mut store.connection.lock().unwrap(),
@@ -543,36 +542,29 @@ fn editorial_backup_restore_keeps_records_order_and_current_library_isolation() 
     let draft = social::save(&mut store.connection.lock().unwrap(), None, draft(&ids)).unwrap();
     let path = dir.path().join("backup.zip");
     backup::create(&store, &path).unwrap();
-    let restored = backup::restore(&store, &path).unwrap();
-    libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
-    {
-        let mut conn = store.connection.lock().unwrap();
+    let target = Store::open(dir.path().join("target")).unwrap();
+    backup::restore(&target, &path).unwrap();
+    let (updated_profile, updated_draft) = {
+        let mut conn = target.connection.lock().unwrap();
         assert_eq!(model_profiles::list(&conn).unwrap(), [profile.clone()]);
         assert_eq!(social::list(&conn).unwrap(), [draft.clone()]);
         let mut changed = profile.input.clone();
-        changed.name = "新库模特".into();
-        model_profiles::save(&mut conn, Some(&profile.id), changed).unwrap();
-        social::delete(&conn, &draft.id).unwrap();
-    }
-    drop(store);
-    let store = Store::open(dir.path().join("managed")).unwrap();
+        changed.name = "当前模特".into();
+        changed.photo_ids.reverse();
+        let updated_profile = model_profiles::save(&mut conn, Some(&profile.id), changed).unwrap();
+        let mut changed = draft.input.clone();
+        changed.photo_ids.reverse();
+        let updated_draft = social::save(&mut conn, Some(&draft.id), changed).unwrap();
+        (updated_profile, updated_draft)
+    };
+    assert_eq!(backup::restore(&target, &path).unwrap().photo_count, 0);
     assert_eq!(
-        model_profiles::list(&store.connection.lock().unwrap()).unwrap()[0]
-            .input
-            .name,
-        "新库模特"
-    );
-    assert!(social::list(&store.connection.lock().unwrap())
-        .unwrap()
-        .is_empty());
-    libraries::switch(&store, &CurationStore::default(), "default").unwrap();
-    assert_eq!(
-        model_profiles::list(&store.connection.lock().unwrap()).unwrap(),
-        [profile]
+        model_profiles::list(&target.connection.lock().unwrap()).unwrap(),
+        [updated_profile]
     );
     assert_eq!(
-        social::list(&store.connection.lock().unwrap()).unwrap(),
-        [draft]
+        social::list(&target.connection.lock().unwrap()).unwrap(),
+        [updated_draft]
     );
 }
 
@@ -582,11 +574,11 @@ fn editorial_old_backup_initializes_empty_tables_before_restore_validation() {
     let path = dir.path().join("backup.zip");
     backup::create(&store, &path).unwrap();
     let legacy = mutate_backup(dir.path(), &path, "legacy", "DROP TABLE model_photos; DROP TABLE model_profiles; DROP TABLE social_photos; DROP TABLE social_drafts; ALTER TABLE photos DROP COLUMN hidden_after_album_delete; PRAGMA user_version=2;");
-    let restored = backup::restore(&store, &legacy).unwrap();
-    let state = libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
+    let target = Store::open(dir.path().join("target")).unwrap();
+    let state = backup::restore(&target, &legacy).unwrap().snapshot;
     assert_eq!(state.photos.len(), 1);
     assert!(state.hidden_photo_ids.is_empty());
-    let mut conn = store.connection.lock().unwrap();
+    let mut conn = target.connection.lock().unwrap();
     assert!(model_profiles::list(&conn).unwrap().is_empty());
     assert!(social::list(&conn).unwrap().is_empty());
     model_profiles::save(&mut conn, None, model(&[])).unwrap();
@@ -633,7 +625,6 @@ fn editorial_restore_rejects_invalid_content_references_and_order_without_changi
     {
         let bad = mutate_backup(dir.path(), &path, &format!("invalid-{index}"), sql);
         assert!(backup::restore(&store, &bad).is_err(), "{sql}");
-        assert_eq!(libraries::list(&store).unwrap().libraries.len(), 1);
         assert_eq!(
             model_profiles::list(&store.connection.lock().unwrap()).unwrap(),
             [profile.clone()]
@@ -769,9 +760,9 @@ fn editorial_backup_restore_migrates_legacy_tag_catalog_and_preserves_explicit_e
     let empty = model_profiles::save(&mut store.connection.lock().unwrap(), None, empty).unwrap();
     let path = dir.path().join("catalog.zip");
     backup::create(&store, &path).unwrap();
-    let restored = backup::restore(&store, &path).unwrap();
-    libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
-    let profiles = model_profiles::list(&store.connection.lock().unwrap()).unwrap();
+    let target = Store::open(dir.path().join("target")).unwrap();
+    backup::restore(&target, &path).unwrap();
+    let profiles = model_profiles::list(&target.connection.lock().unwrap()).unwrap();
     assert!(profiles.contains(&profile));
     assert!(profiles.contains(&empty));
     let legacy = mutate_backup(
@@ -780,9 +771,9 @@ fn editorial_backup_restore_migrates_legacy_tag_catalog_and_preserves_explicit_e
         "pre-catalog",
         "ALTER TABLE model_profiles DROP COLUMN tag_options",
     );
-    let restored = backup::restore(&store, &legacy).unwrap();
-    libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
-    let profiles = model_profiles::list(&store.connection.lock().unwrap()).unwrap();
+    let target = Store::open(dir.path().join("legacy-target")).unwrap();
+    backup::restore(&target, &legacy).unwrap();
+    let profiles = model_profiles::list(&target.connection.lock().unwrap()).unwrap();
     assert!(profiles
         .iter()
         .all(|profile| profile.input.tag_options.is_none()));
@@ -802,4 +793,36 @@ fn editorial_backup_restore_migrates_legacy_tag_catalog_and_preserves_explicit_e
         .input
         .tags
         .is_empty());
+}
+
+#[test]
+fn first_version_backup_restores_ai_analysis_without_selecting_an_old_provider() {
+    let (dir, store, ids) = setup(1);
+    let path = dir.path().join("backup.zip");
+    backup::create(&store, &path).unwrap();
+    let legacy = mutate_backup(
+        dir.path(),
+        &path,
+        "first-version",
+        "DROP TABLE ai_connection;
+         CREATE TABLE ai_settings(provider TEXT PRIMARY KEY,model TEXT NOT NULL,vision INTEGER NOT NULL);
+         INSERT INTO ai_settings VALUES('openai','old-openai-model',1),('anthropic','old-anthropic-model',0);
+         INSERT INTO photo_analyses SELECT id,'openai','old-openai-model','旧照片分析',imported_at FROM photos;",
+    );
+    let target = Store::open(dir.path().join("target")).unwrap();
+    assert_eq!(backup::restore(&target, &legacy).unwrap().photo_count, 1);
+    let conn = target.connection.lock().unwrap();
+    assert!(!conn
+        .prepare("SELECT 1 FROM ai_connection")
+        .unwrap()
+        .exists([])
+        .unwrap());
+    let analysis: String = conn
+        .query_row(
+            "SELECT text FROM photo_analyses WHERE photo_id=?1",
+            [&ids[0]],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(analysis, "旧照片分析");
 }

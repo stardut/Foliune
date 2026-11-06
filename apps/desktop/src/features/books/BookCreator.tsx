@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { Check, ChevronLeft, ChevronRight, Plus, Search } from 'lucide-react';
 import { Modal } from '../../components/ui';
+import { DropdownSelect } from '../../components/DropdownSelect';
 import { templates, type BookChapter, type BookPage, type BookTemplate, type CreateBookInput } from '../../lib/book-types';
 import type { LibrarySnapshot, Photo } from '../../lib/types';
 import { PhotoSourceDialog } from '../../components/PhotoSourceDialog';
@@ -11,6 +12,8 @@ const paperSizes = [
   { label: '竖向 · 3:4', width: 900, height: 1200 },
   { label: '方形 · 1:1', width: 1000, height: 1000 },
 ];
+const paperOptions = [{ value: -1, label: '自定义比例', disabled: true }, ...paperSizes.map(({ label }, value) => ({ value, label }))];
+const libraryOptions = [{ value: 'all', label: '全部图库' }, { value: 'collection', label: '收藏' }, { value: 'work', label: '作品' }];
 const templateNotes = { white: '单图留白，完整构图', full: '单图铺满，裁切填充', pair: '双图并置，完整构图' };
 
 export function BookCreator({ photos, busy, onSnapshot, onBusyChange, onClose, onCreate, initialSelected = [] }: { photos: Photo[]; busy: boolean; onSnapshot: (snapshot: LibrarySnapshot) => void; onBusyChange?: (busy: boolean) => void; onClose: () => void; onCreate: (input: CreateBookInput) => Promise<void>; initialSelected?: string[] }) {
@@ -32,6 +35,7 @@ export function BookCreator({ photos, busy, onSnapshot, onBusyChange, onClose, o
   const currentPage = Math.min(pickerPage, lastPage);
   useEffect(() => { setPickerPage(0); }, [query, library]);
   const visiblePhotos = available.slice(currentPage * 60, (currentPage + 1) * 60);
+  const chapterOptions = chapters.map((chapter) => ({ value: chapter.id, label: chapter.title || '未命名章节' }));
   const orderedChapters = chapters.map((chapter) => ({ ...chapter, photoIds: selected.filter((id) => assignments[id] === chapter.id) }));
   const firstChapter = orderedChapters.find((chapter) => chapter.photoIds.length);
   const sampleIds = firstChapter?.photoIds.slice(0, template === 'pair' ? 2 : 1) || [];
@@ -71,7 +75,9 @@ export function BookCreator({ photos, busy, onSnapshot, onBusyChange, onClose, o
       </nav>
       <fieldset className="book-create-body" disabled={blocked}>
         {step === 0 ? <section className="book-choose-photos" aria-label="选择画册照片">
-          <div className="book-source-tools"><button type="button" className="button" onClick={() => setPickingSource(true)}><Plus size={14} />添加照片</button><div className="book-search"><Search size={16} /><input aria-label="搜索可选照片" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索标题或标签" /></div><select aria-label="照片来源" value={library} onChange={(e) => setLibrary(e.target.value)}><option value="all">全部图库</option><option value="collection">收藏</option><option value="work">作品</option></select></div>
+          <div className="book-source-tools"><button type="button" className="button" onClick={() => setPickingSource(true)}><Plus size={14} />添加照片</button><div className="book-search"><Search size={16} /><input aria-label="搜索可选照片" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索标题或标签" /></div>
+            <DropdownSelect label="照片来源" value={library} options={libraryOptions} disabled={blocked} onChange={setLibrary} />
+          </div>
           <div className="book-photo-picker">{visiblePhotos.map((photo) => <button type="button" key={photo.id} className={selected.includes(photo.id) ? 'selected' : ''} aria-pressed={selected.includes(photo.id)} onClick={() => toggle(photo.id)}><div className="book-picker-image">{photo.thumbnailAvailable ? <img src={photo.thumbnailUrl} alt="" loading="lazy" /> : <span>预览缺失</span>}<span className="book-picker-check" aria-hidden="true">{selected.includes(photo.id) && <Check size={13} />}</span></div><span><span className="book-picker-title" title={photo.title}>{photo.title}</span><small>{photo.library === 'work' ? '作品' : '收藏'}</small></span></button>)}{!available.length && <p className="book-picker-empty">{query || library !== 'all' ? '没有符合条件的照片' : '还没有照片'}</p>}</div>
           {available.length > 60 && <div className="book-picker-pagination"><button type="button" className="button button-quiet" disabled={currentPage === 0} onClick={() => setPickerPage(currentPage - 1)}>上一页</button><span>{currentPage + 1} / {lastPage + 1} · 共 {available.length} 张</span><button type="button" className="button button-quiet" disabled={currentPage === lastPage} onClick={() => setPickerPage(currentPage + 1)}>下一页</button></div>}
         </section> : <div className="book-create-arrange">
@@ -79,10 +85,17 @@ export function BookCreator({ photos, busy, onSnapshot, onBusyChange, onClose, o
           <section className="book-create-options" aria-label="画册设置">
             <label>画册名称<input value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} required /></label>
             <div><h3>版式</h3><div className="book-template-options">{templates.map((choice) => <button key={choice.value} type="button" className={template === choice.value ? 'active' : ''} aria-pressed={template === choice.value} onClick={() => setTemplate(choice.value)}><span className={`book-template-mark ${choice.value}`} aria-hidden="true"><i />{choice.value === 'pair' && <i />}</span>{choice.label}</button>)}</div><p className="muted book-template-note">{templateNotes[template]}</p></div>
-            <label>纸张比例<select value={paperSize} onChange={(e) => { const size = paperSizes[Number(e.target.value)]; if (size) { setWidth(size.width); setHeight(size.height); } }}><option value={-1} disabled>自定义比例</option>{paperSizes.map((size, index) => <option key={size.label} value={index}>{size.label}</option>)}</select></label>
+            <DropdownSelect label="纸张比例" field value={paperSize} options={paperOptions} disabled={blocked} onChange={(index) => {
+              const size = paperSizes[index];
+              setWidth(size.width);
+              setHeight(size.height);
+            }} />
             <details className="book-details"><summary>自定义尺寸</summary><div className="book-number-grid"><label>页宽<input type="number" min={400} max={4000} value={width} onChange={(e) => setWidth(Number(e.target.value))} /></label><label>页高<input type="number" min={400} max={4000} value={height} onChange={(e) => setHeight(Number(e.target.value))} /></label></div></details>
           </section>
-          <details className="book-details book-create-order"><summary>选片顺序与章节 <span>{selected.length} 张 · {chapters.length} 章</span></summary><div className="book-selected-list">{orderedChapters.map((chapter, chapterIndex) => <section className="book-create-chapter" key={chapter.id}><div className="book-order-row"><span>{String(chapterIndex + 1).padStart(2, '0')}</span><input aria-label={`章节 ${chapterIndex + 1} 名称`} value={chapter.title} maxLength={200} onChange={(e) => setChapters(chapters.map((c) => c.id === chapter.id ? { ...c, title: e.target.value } : c))} /><span>{chapter.photoIds.length} 张</span></div>{chapter.photoIds.map((id, index) => { const photo = photos.find((p) => p.id === id); return <div className="book-order-row book-selected-row" key={id}>{photo?.thumbnailAvailable && <img src={photo.thumbnailUrl} alt="" loading="lazy" />}<span className="book-row-title" title={photo?.title}>{photo?.title}</span><select aria-label={`${photo?.title} 所属章节`} value={assignments[id]} onChange={(e) => setAssignments({ ...assignments, [id]: e.target.value })}>{chapters.map((c) => <option value={c.id} key={c.id}>{c.title || '未命名章节'}</option>)}</select><button type="button" aria-label="上移照片" disabled={!index} onClick={() => move(id, -1)}>↑</button><button type="button" aria-label="下移照片" disabled={index === chapter.photoIds.length - 1} onClick={() => move(id, 1)}>↓</button><button type="button" aria-label="移除选片" onClick={() => toggle(id)}>×</button></div>; })}</section>)}</div><button type="button" className="button button-quiet" onClick={() => setChapters([...chapters, { id: crypto.randomUUID(), title: `第 ${chapters.length + 1} 章`, photoIds: [] }])}><Plus size={14} />添加章节</button></details>
+          <details className="book-details book-create-order"><summary>选片顺序与章节 <span>{selected.length} 张 · {chapters.length} 章</span></summary><div className="book-selected-list">{orderedChapters.map((chapter, chapterIndex) => <section className="book-create-chapter" key={chapter.id}><div className="book-order-row"><span>{String(chapterIndex + 1).padStart(2, '0')}</span><input aria-label={`章节 ${chapterIndex + 1} 名称`} value={chapter.title} maxLength={200} onChange={(e) => setChapters(chapters.map((c) => c.id === chapter.id ? { ...c, title: e.target.value } : c))} /><span>{chapter.photoIds.length} 张</span></div>{chapter.photoIds.map((id, index) => { const photo = photos.find((p) => p.id === id); return <div className="book-order-row book-selected-row" key={id}>{photo?.thumbnailAvailable && <img src={photo.thumbnailUrl} alt="" loading="lazy" />}<span className="book-row-title" title={photo?.title}>{photo?.title}</span>
+            <DropdownSelect label={`${photo?.title} 所属章节`} value={assignments[id]} options={chapterOptions} disabled={blocked}
+              onChange={(chapterId) => setAssignments({ ...assignments, [id]: chapterId })} />
+            <button type="button" aria-label="上移照片" disabled={!index} onClick={() => move(id, -1)}>↑</button><button type="button" aria-label="下移照片" disabled={index === chapter.photoIds.length - 1} onClick={() => move(id, 1)}>↓</button><button type="button" aria-label="移除选片" onClick={() => toggle(id)}>×</button></div>; })}</section>)}</div><button type="button" className="button button-quiet" onClick={() => setChapters([...chapters, { id: crypto.randomUUID(), title: `第 ${chapters.length + 1} 章`, photoIds: [] }])}><Plus size={14} />添加章节</button></details>
         </div>}
       </fieldset>
       {error && <p className="form-error" role="alert">{error}</p>}

@@ -111,16 +111,11 @@ fn album_deletion_hides_history_only_photo_and_preserves_current_book_on_restore
         crate::backup::create(&store, &archive).unwrap().photo_count,
         1
     );
-    let restored = crate::backup::restore(&store, &archive).unwrap();
+    let target = Store::open(root.path().join("target")).unwrap();
+    let restored = crate::backup::restore(&target, &archive).unwrap();
     assert_eq!(restored.photo_count, 1);
-    let state = crate::libraries::switch(
-        &store,
-        &crate::curation::CurationStore::default(),
-        &restored.library.id,
-    )
-    .unwrap();
-    assert_eq!(state.hidden_photo_ids, [history_photo.clone()]);
-    let mut conn = store.connection.lock().unwrap();
+    assert_eq!(restored.snapshot.hidden_photo_ids, [history_photo.clone()]);
+    let mut conn = target.connection.lock().unwrap();
     assert_eq!(stored_rows(&conn, &saved.book.id), rows_before_delete);
     let detail = books::get(&conn, &saved.book.id).unwrap();
     assert_eq!(&detail.book.current_version_id, current_id);

@@ -1,26 +1,23 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Folder, FolderX } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
-import { IconButton, Modal } from '../components/ui';
+import { Modal } from '../components/ui';
 import { currentModalHost, subscribeModalStack } from '../lib/modal-stack';
 import * as api from '../lib/work-directory-api';
+import { WorkDirectorySourceIcon } from './WorkDirectorySourceIcon';
 import { isContextMenuTracking, subscribeContextMenu } from './use-context-menu';
 import type { useWorkDirectory } from './use-work-directory';
 import './work-directory.css';
 
 type Directory = ReturnType<typeof useWorkDirectory>;
 
-export function WorkDirectoryControl({ directory, disabled }: { directory: Directory; disabled: boolean }) {
-  const [managing, setManaging] = useState(false);
+export function WorkDirectorySettings({ directory, disabled }: { directory: Directory; disabled: boolean }) {
   const [error, setError] = useState('');
   const toast = useToast();
   const { state, busy, run } = directory;
   const path = state?.path;
-  const unavailable = state?.status === 'unavailable';
   const syncBlocksChanges = !!directory.retrying?.size || directory.jobs.some((job) =>
     job.status === 'running' || (job.status === 'queued' && state?.status === 'connected'));
-  const canChange = !busy && !syncBlocksChanges;
-  const label = unavailable ? '作品目录不可用' : path ? '管理作品目录' : '绑定作品目录';
+  const canChange = !!state && !disabled && !busy && !syncBlocksChanges;
 
   async function choose(relink: boolean) {
     setError('');
@@ -30,13 +27,8 @@ export function WorkDirectoryControl({ directory, disabled }: { directory: Direc
         if (!selected) return null;
         return relink ? api.relinkWorkDirectory(selected) : api.bindWorkDirectory(selected);
       }, relink);
-      if (!next) return;
-      setManaging(false);
-      if (!next.candidates.length) toast({ title: relink ? '已重新定位作品目录' : '已绑定作品目录' });
-    } catch (cause) {
-      if (relink) setError(message(cause));
-      else toast({ title: message(cause), status: 'error' });
-    }
+      if (next && !next.candidates.length) toast({ title: relink ? '已更新作品目录位置' : '已绑定作品目录' });
+    } catch (cause) { setError(message(cause)); }
   }
 
   async function unbind() {
@@ -44,30 +36,26 @@ export function WorkDirectoryControl({ directory, disabled }: { directory: Direc
     try {
       const next = await run(api.unbindWorkDirectory, true);
       if (!next) return;
-      setManaging(false);
       toast({ title: '已解除作品目录绑定' });
     } catch (cause) { setError(message(cause)); }
   }
 
-  return <>
-    <IconButton label={label} disabled={disabled || busy || !state} onClick={() => {
-      if (!path) { void choose(false); return; }
-      setError(''); setManaging(true);
-    }}>{unavailable ? <FolderX size={16} /> : <Folder size={16} />}</IconButton>
-    {managing && path && <Modal title="作品目录" onClose={busy ? undefined : () => setManaging(false)}>
-      <p className="replacement-path">{path}</p>
-      {unavailable && <p role="status">目录当前不可用。可重新连接设备或选择目录的新位置。</p>}
-      {syncBlocksChanges && <p className="muted" role="status">同步完成后可更改目录。</p>}
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <div className="form-actions">
+  return <section className="settings-content" aria-labelledby="settings-work-directory-title">
+    <h2 id="settings-work-directory-title">作品目录</h2>
+    <p className="muted">绑定存放作品的总目录后，一级子文件夹可同步为作品相簿，照片数量后会显示 <WorkDirectorySourceIcon /> 标识。发现新照片时，确认后即可加入对应相簿，原片留在原处。</p>
+    {path ? <p className="file-path">{path}</p> : <p className="muted" role="status">{state ? '尚未绑定' : '正在读取作品目录…'}</p>}
+    {state?.status === 'unavailable' && <p className="muted" role="status">作品目录离线。可重新连接设备，或选择目录的新位置。</p>}
+    {syncBlocksChanges && <p className="muted" role="status">同步完成后可更改目录。</p>}
+    {busy && <p className="muted" role="status">正在处理作品目录…</p>}
+    {error && <p className="form-error settings-error" role="alert">{error}</p>}
+    <div className="settings-actions">
+      {path ? <>
+        <button type="button" className="button" title="选择原作品目录的新位置" disabled={!canChange} onClick={() => void choose(true)}>选择新目录…</button>
         <button type="button" className="button button-quiet" disabled={!canChange} onClick={() => void unbind()}>解除绑定</button>
-        <button type="button" className="button" disabled={!canChange} onClick={() => void choose(true)}>重新定位</button>
-        {directory.retryPending && <button type="button" className="button button-primary" disabled={busy} onClick={() => {
-          setManaging(false); directory.retryFailedBatch();
-        }}>重试同步</button>}
-      </div>
-    </Modal>}
-  </>;
+      </> : <button type="button" className="button" disabled={!canChange} onClick={() => void choose(false)}>选择目录…</button>}
+      {directory.retryPending && <button type="button" className="button button-primary" disabled={disabled || busy || !!directory.retrying?.size} onClick={directory.retryFailedBatch}>重试同步</button>}
+    </div>
+  </section>;
 }
 
 export function WorkDirectoryDiscovery({ directory, idle }: { directory: Directory; idle: boolean }) {

@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     db::{self, Store},
-    groups, libraries, local_photo,
+    groups, local_photo,
     models::Snapshot,
 };
 use rusqlite::{Connection, OptionalExtension};
@@ -110,7 +110,15 @@ impl Cache {
                 .map(|root| Queue::load(conn, root))
                 .transpose()?
                 .unwrap_or_default();
-            self.state.library_id = libraries::library_id(&store.root, &library)?;
+            self.state.library_id = if library == store.root {
+                "default".into()
+            } else {
+                library
+                    .file_name()
+                    .and_then(|id| id.to_str())
+                    .ok_or("图库路径无效")?
+                    .into()
+            };
             self.context_id = uuid::Uuid::new_v4();
             self.queue = queue;
             self.library = library;
@@ -201,7 +209,12 @@ pub(crate) struct WorkDirectoryMonitor {
 }
 
 pub(crate) fn start_monitor(app: &AppHandle) -> Result<(), String> {
-    if let Err(error) = super::staging::clean_abandoned_staging(&app.state::<Store>().root) {
+    let library = {
+        let store = app.state::<Store>();
+        let conn = store.connection.lock().map_err(|error| error.to_string())?;
+        db::library_root(&conn)?
+    };
+    if let Err(error) = super::staging::clean_abandoned_staging(&library) {
         eprintln!("{error}");
     }
     let (signal, receiver) = mpsc::sync_channel(1);
@@ -212,8 +225,7 @@ pub(crate) fn start_monitor(app: &AppHandle) -> Result<(), String> {
         work,
     });
     let worker_app = app.clone();
-    // Only one directory can be bound in the current library. Keeping one worker
-    // also serializes disk reads across a library switch while an old job winds down.
+    // A single worker serializes reads from the bound directory.
     std::thread::Builder::new()
         .name("work-directory-sync".into())
         .spawn(move || worker::run_jobs(worker_app, pending))
@@ -240,13 +252,6 @@ fn emit(app: &AppHandle, library_id: &str, refresh_snapshot: bool, synced: Optio
             synced,
         },
     );
-}
-
-pub(crate) fn library_switched(app: &AppHandle) {
-    let manager = app.state::<WorkDirectoryMonitor>();
-    if let Ok(mut cache) = manager.cache.lock() {
-        *cache = Cache::default();
-    };
 }
 
 fn path_stamp(path: &Path) -> Option<RootStamp> {

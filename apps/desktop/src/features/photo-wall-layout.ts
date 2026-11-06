@@ -17,6 +17,7 @@ export interface WallLayoutInput {
   width: number;
   viewportHeight: number;
   bleed: number;
+  compactAlbumPair?: boolean;
 }
 
 const FIRST_EXHIBITION_PHOTOS = 32;
@@ -24,7 +25,7 @@ const MAX_EXHIBITION_PHOTOS = 128;
 const NEXT_EXHIBITION_BATCH = 96;
 
 // Each batch appends exact coordinates. Earlier units never move as the wall grows.
-export function* photoWallLayoutBatches({ sections, layout, width, viewportHeight, bleed }: WallLayoutInput): Generator<PhotoWallBatch> {
+export function* photoWallLayoutBatches({ sections, layout, width, viewportHeight, bleed, compactAlbumPair }: WallLayoutInput): Generator<PhotoWallBatch> {
   let units: WallUnit[] = [];
   let top = 0;
   let offset = 0;
@@ -39,7 +40,8 @@ export function* photoWallLayoutBatches({ sections, layout, width, viewportHeigh
     }
     if (layout === 'exhibition') {
       const sectionCount = section.photos.length;
-      const left = sectionCount === 1 ? 0 : -bleed;
+      const compactPair = compactAlbumPair && photoCount === 2 && sectionCount === 2;
+      const left = sectionCount === 1 || compactPair ? 0 : -bleed;
       // Preserve the original search for small sections. In a long section the
       // first segment is short, then the remaining photos are evenly divided.
       const firstCount = sectionCount <= MAX_EXHIBITION_PHOTOS ? sectionCount : FIRST_EXHIBITION_PHOTOS;
@@ -47,7 +49,7 @@ export function* photoWallLayoutBatches({ sections, layout, width, viewportHeigh
       for (let start = 0; start < sectionCount; segmentsLeft--) {
         const count = start === 0 ? firstCount : Math.ceil((sectionCount - start) / segmentsLeft);
         const photos = count === sectionCount ? section.photos : section.photos.slice(start, start + count);
-        const blocks = exhibitionLayout(photos, width - left * 2, viewportHeight);
+        const blocks = exhibitionLayout(photos, width - left * 2, viewportHeight, compactPair);
         blocks.forEach((block, index) => {
           if (start || index) top += EXHIBITION_GAP;
           units.push({ top, height: block.height, left, tiles: block.tiles.map((tile) => ({ ...tile, index: tile.index + offset + start })) });

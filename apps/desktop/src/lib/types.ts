@@ -52,6 +52,13 @@ export interface PhotoMetadata {
   fileFormat: 'JPEG' | 'PNG' | 'WebP';
 }
 
+export interface AlbumCover {
+  photoId: string;
+  offsetX: number;
+  offsetY: number;
+  zoom: number;
+}
+
 export interface Group {
   id: string;
   library: LibraryKind;
@@ -60,6 +67,7 @@ export interface Group {
   capacity: number | null;
   createdAt: string;
   boundFolder?: string;
+  cover?: AlbumCover | null;
 }
 
 export interface Membership {
@@ -98,6 +106,7 @@ export interface GroupPatch {
   name?: string;
   description?: string;
   capacity?: number | null;
+  cover?: AlbumCover;
 }
 
 export interface ImportResult {

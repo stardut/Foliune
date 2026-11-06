@@ -3,6 +3,7 @@ import { revealContent } from '../../lib/content-reveal';
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { IconButton } from '../../components/ui';
+import { DropdownSelect } from '../../components/DropdownSelect';
 import type { BookVersion } from '../../lib/book-types';
 import type { Photo } from '../../lib/types';
 import { BookPageView } from './BookPageView';
@@ -48,17 +49,18 @@ export function BookReader({ version, photos, title, initialPageIndex, onClose, 
     onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
     onKeyDown={(event) => {
       const target = event.target;
-      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || !total || target instanceof HTMLSelectElement || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return;
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || !total || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
+        || (target instanceof HTMLElement && (target.isContentEditable || target.matches('[role="combobox"]')))) return;
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); move(event.key === 'ArrowRight' ? 1 : -1); }
       if (event.key === 'Home' || event.key === 'End') { event.preventDefault(); setPage(event.key === 'Home' ? 0 : total - 1); }
     }}>
     <header className="book-reader-header">
       <div className="book-reader-title"><h2 id={titleId}>{title}</h2></div>
       <div className="book-reader-options">
-        <select aria-label="跳转章节" disabled={!chapters.length} value={currentChapter} onChange={(event) => {
-          const index = version.pages.findIndex((entry) => entry.chapterId === event.target.value);
+        <DropdownSelect label="跳转章节" disabled={!chapters.length} value={currentChapter} onChange={(chapterId) => {
+          const index = version.pages.findIndex((entry) => entry.chapterId === chapterId);
           if (index >= 0) setPage(index);
-        }}>{chapters.length ? chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>{chapter.title || '未命名章节'}</option>) : <option value="">暂无章节</option>}</select>
+        }} options={chapters.length ? chapters.map((chapter) => ({ value: chapter.id, label: chapter.title || '未命名章节' })) : [{ value: '', label: '暂无章节' }]} />
         <div className="segmented book-reader-mode" role="group" aria-label="阅读页模式">
           <button type="button" disabled={!total} className={!spread ? 'active' : ''} aria-pressed={!spread} onClick={() => setSpread(false)}>单页</button>
           <button type="button" disabled={!total} className={spread ? 'active' : ''} aria-pressed={spread} onClick={() => setSpread(true)}>双页</button>

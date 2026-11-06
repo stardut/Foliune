@@ -75,10 +75,11 @@ fn part() -> PlanPart {
     }
 }
 
-fn input(ids: &[String]) -> ShootPlanInput {
+pub(crate) fn input(ids: &[String]) -> ShootPlanInput {
     ShootPlanInput {
         title: " 午后人像 ".into(),
         concept: "安静的窗光\n自然的情绪".into(),
+        execution_date: "2026-11-07".into(),
         shoot_date: "周六 15:00—18:00".into(),
         location: "老街工作室".into(),
         team: "摄影／模特／化妆".into(),
@@ -91,6 +92,32 @@ fn input(ids: &[String]) -> ShootPlanInput {
         references: ids.iter().map(|id| reference(id, "整体气质")).collect(),
         parts: vec![],
     }
+}
+
+#[test]
+fn album_deletion_preserves_plan_references_and_rejects_new_hidden_references() {
+    let (_dir, store, ids) = setup(2);
+    let mut conn = store.connection.lock().unwrap();
+    let album = crate::groups::create(
+        &conn,
+        crate::models::GroupInput {
+            library: "work".into(),
+            name: "策划素材".into(),
+            description: String::new(),
+            capacity: None,
+        },
+    )
+    .unwrap()
+    .groups[0]
+        .id
+        .clone();
+    crate::groups::add(&mut conn, &album, &ids).unwrap();
+    let plan = planning::save(&mut conn, None, input(&ids[..1])).unwrap();
+    let state = crate::work_directory::runtime::delete_album(&mut conn, &album).unwrap();
+    assert_eq!(state.hidden_photo_ids, ids[1..]);
+    assert_eq!(state.photos[0].id, ids[0]);
+    assert_eq!(planning::list(&conn).unwrap(), [plan]);
+    assert!(planning::save(&mut conn, None, input(&ids[1..])).is_err());
 }
 
 #[test]
@@ -121,6 +148,7 @@ fn planning_crud_persists_nested_order_and_keeps_originals_and_other_plans() {
     changed.parts[0].shots.reverse();
     changed.parts[0].references.reverse();
     changed.parts.reverse();
+    changed.execution_date = "2028-02-29".into();
     changed.preparation = "已确认时间".into();
     let updated = planning::save(&mut conn, Some(&saved.id), changed).unwrap();
     assert_eq!(saved.id, updated.id);
@@ -128,7 +156,7 @@ fn planning_crud_persists_nested_order_and_keeps_originals_and_other_plans() {
     drop(conn);
     drop(store);
     let store = Store::open(dir.path().join("managed")).unwrap();
-    let conn = store.connection.lock().unwrap();
+    let mut conn = store.connection.lock().unwrap();
     assert!(planning::list(&conn).unwrap().contains(&updated));
     let encoded = serde_json::to_value(&updated).unwrap();
     assert_eq!(
@@ -137,12 +165,13 @@ fn planning_crud_persists_nested_order_and_keeps_originals_and_other_plans() {
     );
     assert_eq!(encoded["parts"][1]["shotList"], "01 环境\n02 半身");
     assert_eq!(encoded["parts"][1]["focalLength"], "35mm 环境／85mm 半身");
+    assert_eq!(encoded["executionDate"], "2028-02-29");
     assert_eq!(encoded["shootDate"], "周六 15:00—18:00");
     assert_eq!(encoded["styling"], "自然妆／低马尾／白衬衫");
     assert_eq!(encoded["props"], "透明雨伞／旧书");
     assert_eq!(encoded["equipment"], "机身／35mm／85mm／反光板");
     assert!(encoded.get("input").is_none());
-    planning::delete(&conn, &saved.id).unwrap();
+    planning::delete(&mut conn, &saved.id).unwrap();
     assert_eq!(planning::list(&conn).unwrap(), [other]);
     assert_eq!(
         conn.query_row::<i64, _, _>(
@@ -153,7 +182,7 @@ fn planning_crud_persists_nested_order_and_keeps_originals_and_other_plans() {
         .unwrap(),
         0
     );
-    assert!(planning::delete(&conn, &saved.id)
+    assert!(planning::delete(&mut conn, &saved.id)
         .unwrap_err()
         .contains("不存在"));
     let state = db::snapshot(&conn).unwrap();
@@ -210,7 +239,7 @@ fn planning_validation_and_reference_failure_roll_back_the_whole_save() {
         .map(|_| reference(&ids[0], ""))
         .collect();
     let draft = planning::save(&mut conn, None, valid.clone()).unwrap();
-    planning::delete(&conn, &draft.id).unwrap();
+    planning::delete(&mut conn, &draft.id).unwrap();
     let mut invalids = vec![];
     let mut invalid = valid.clone();
     invalid.references.push(reference(&ids[0], ""));
@@ -260,6 +289,7 @@ fn planning_validate_all_rejects_corrupt_documents_timestamps_and_unions() {
         "UPDATE shoot_plans SET document_json=NULL",
         "UPDATE shoot_plans SET document_json=json_set(document_json,'$.version',3)",
         "UPDATE shoot_plans SET document_json=json_set(document_json,'$.input.title','')",
+        "UPDATE shoot_plans SET document_json=json_set(document_json,'$.input.executionDate','2027-02-29')",
         "UPDATE shoot_plans SET created_at='invalid'",
         "UPDATE shoot_plans SET updated_at='2000-01-01T00:00:00Z'",
         "UPDATE shoot_plan_photos SET position=8 WHERE position=1",
@@ -347,7 +377,7 @@ fn planning_restore_preserves_plans_migrates_old_backups_and_rejects_partial_or_
         planning::list(&store.connection.lock().unwrap()).unwrap(),
         [saved.clone()]
     );
-    planning::delete(&store.connection.lock().unwrap(), &saved.id).unwrap();
+    planning::delete(&mut store.connection.lock().unwrap(), &saved.id).unwrap();
     libraries::switch(&store, &CurationStore::default(), "default").unwrap();
     assert_eq!(
         planning::list(&store.connection.lock().unwrap()).unwrap(),
@@ -358,6 +388,7 @@ fn planning_restore_preserves_plans_migrates_old_backups_and_rejects_partial_or_
         "UPDATE shoot_plans SET document_json='bad json';",
         "UPDATE shoot_plans SET document_json=NULL;",
         "UPDATE shoot_plans SET document_json=json_set(document_json,'$.input.title','');",
+        "UPDATE shoot_plans SET document_json=json_set(document_json,'$.input.executionDate','2026-11-31');",
         "DELETE FROM shoot_plan_photos WHERE position=1;",
         "ALTER TABLE shoot_plans DROP COLUMN concept;",
         "DROP TABLE shoot_plan_photos; CREATE TABLE shoot_plan_photos (plan_id TEXT);",
@@ -392,6 +423,8 @@ fn planning_restore_preserves_plans_migrates_old_backups_and_rejects_partial_or_
     assert!(migrated.input.styling.is_empty());
     assert!(migrated.input.props.is_empty());
     assert!(migrated.input.equipment.is_empty());
+    assert!(migrated.input.execution_date.is_empty());
+    assert_eq!(migrated.input.shoot_date, saved.input.shoot_date);
     assert_eq!(migrated.input.preparation, "准备服装");
     assert_eq!(
         migrated
@@ -421,7 +454,7 @@ fn planning_restore_preserves_plans_migrates_old_backups_and_rejects_partial_or_
 }
 
 #[test]
-fn planning_png_export_validates_before_replacing_destination() {
+fn planning_png_export_validates_content_and_preserves_existing_destinations() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("plan.png");
     fs::write(&path, b"existing").unwrap();
@@ -431,15 +464,14 @@ fn planning_png_export_validates_before_replacing_destination() {
         .unwrap();
     let bytes = valid.into_inner();
     for invalid in [&b"not png"[..], &bytes[..40], &[]] {
-        assert!(planning_export::export_png(&path, invalid).is_err());
+        assert!(planning_export::export_png(dir.path(), "plan", invalid).is_err());
         assert_eq!(fs::read(&path).unwrap(), b"existing");
     }
-    assert!(planning_export::export_png(&dir.path().join("plan.jpg"), &bytes).is_err());
     let mut oversized = Cursor::new(Vec::new());
     RgbImage::new(32_769, 1)
         .write_to(&mut oversized, image::ImageFormat::Png)
         .unwrap();
-    assert!(planning_export::export_png(&path, &oversized.into_inner()).is_err());
+    assert!(planning_export::export_png(dir.path(), "plan", &oversized.into_inner()).is_err());
     // A checksum-correct IHDR isolates the pixel budget from the edge limit.
     let mut too_many_pixels = bytes.clone();
     too_many_pixels[16..20].copy_from_slice(&8000u32.to_be_bytes());
@@ -452,14 +484,21 @@ fn planning_png_export_validates_before_replacing_destination() {
         }
     }
     too_many_pixels[29..33].copy_from_slice(&(!crc).to_be_bytes());
-    assert!(planning_export::export_png(&path, &too_many_pixels)
-        .unwrap_err()
-        .contains("4000 万"));
+    assert!(
+        planning_export::export_png(dir.path(), "plan", &too_many_pixels)
+            .unwrap_err()
+            .contains("4000 万")
+    );
     assert_eq!(fs::read(&path).unwrap(), b"existing");
-    planning_export::export_png(&path, &bytes).unwrap();
-    assert_eq!(fs::read(&path).unwrap(), bytes);
     assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
-    assert!(planning_export::export_png(&dir.path().join("missing/plan.png"), &bytes).is_err());
+    let exported = planning_export::export_png(dir.path(), "plan", &bytes).unwrap();
+    assert_eq!(exported, dir.path().join("plan (2).png"));
+    assert_eq!(fs::read(&exported).unwrap(), bytes);
+    assert_eq!(fs::read(&path).unwrap(), b"existing");
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    assert!(planning_export::export_png(&dir.path().join("missing"), "plan", &bytes).is_err());
+    assert!(planning_export::export_png(&path, "plan", &bytes).is_err());
+    assert!(planning_export::export_png(Path::new("."), "plan", &bytes).is_err());
 }
 
 #[path = "planning_tests/compatibility.rs"]

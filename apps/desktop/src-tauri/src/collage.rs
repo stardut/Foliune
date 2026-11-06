@@ -1,14 +1,16 @@
 use crate::{
-    curation::{self, CurationDraft, CurationStore},
     db::{self, Store},
     models::{self, Photo},
     photos,
+    png_export::write_png,
 };
 use image::{
-    imageops::FilterType, DynamicImage, GenericImageView, ImageFormat, Rgb, RgbImage, Rgba,
+    codecs::png::PngEncoder, imageops::FilterType, DynamicImage, ExtendedColorType,
+    GenericImageView, ImageEncoder, Rgb, RgbImage, Rgba,
 };
+use rusqlite::params;
 use serde::Deserialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 const MAX_EDGE: u32 = 32_768;
@@ -20,7 +22,6 @@ const MAX_SOURCE_PIXELS: u64 = MAX_PIXELS;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CollageInput {
     pub library: String,
-    pub group_id: String,
     pub title: String,
     pub width: u32,
     pub height: u32,
@@ -133,9 +134,9 @@ fn fitted_image(image: DynamicImage, item: &CollageItem) -> DynamicImage {
 fn render(
     input: &CollageInput,
     sources: &[Photo],
+    originals: &[crate::work_directory::Original],
     background: Rgba<u8>,
-    target: &Path,
-) -> Result<(), String> {
+) -> Result<RgbImage, String> {
     // The opaque RGB canvas uses 3 bytes/pixel (480 MB at the 160 MP limit).
     // Keep sources sequential and encode this buffer directly, avoiding an
     // additional full-size RGBA canvas and an RGB conversion at save time.
@@ -150,10 +151,10 @@ fn render(
     }
     let mut canvas =
         RgbImage::from_raw(input.width, input.height, pixels).ok_or("无法创建拼图画布")?;
-    for (item, source) in input.items.iter().zip(sources) {
-        let path = Path::new(&source.original_path);
-        let dimensions = image::ImageReader::open(path)
-            .map_err(|e| format!("读取来源照片失败：{e}"))?
+    for ((item, source), original) in input.items.iter().zip(sources).zip(originals) {
+        use std::io::{BufReader, Seek};
+        let mut file = original.open()?;
+        let dimensions = image::ImageReader::new(BufReader::new(&mut file))
             .with_guessed_format()
             .map_err(|e| format!("识别来源照片失败：{e}"))?
             .into_dimensions()
@@ -161,7 +162,8 @@ fn render(
         if u64::from(dimensions.0) * u64::from(dimensions.1) > MAX_SOURCE_PIXELS {
             return Err("来源照片超过 1.6 亿像素，请先使用尺寸较小的照片".into());
         }
-        let image = photos::load_oriented_image(path)?;
+        file.rewind().map_err(|e| e.to_string())?;
+        let image = photos::load_oriented_image(Path::new(&source.original_name), file)?;
         let fitted = fitted_image(image, item);
         let x = item.x + (item.width - fitted.width()) / 2;
         let y = item.y + (item.height - fitted.height()) / 2;
@@ -177,19 +179,12 @@ fn render(
             }));
         }
     }
-    // 背景不透明，输出 RGB PNG，避免引入 JPEG 代际损失和多余 alpha。
-    canvas
-        .save_with_format(target, ImageFormat::Png)
-        .map_err(|e| format!("保存拼图失败：{e}"))
+    Ok(canvas)
 }
 
-pub fn prepare(
-    store: &Store,
-    drafts: &CurationStore,
-    input: CollageInput,
-) -> Result<CurationDraft, String> {
+pub fn export_png(store: &Store, directory: &Path, input: CollageInput) -> Result<PathBuf, String> {
     let background = validate(&input)?;
-    let (root, sources) = {
+    let (root, sources, originals) = {
         let conn = store.connection.lock().map_err(|e| e.to_string())?;
         let root = db::library_root(&conn)?;
         let state = db::snapshot(&conn)?;
@@ -203,36 +198,49 @@ pub fn prepare(
                     .find(|photo| photo.id == item.photo_id && photo.library == input.library)
                     .cloned()
                     .ok_or("来源照片不存在或不属于当前图库类别")?;
-                let path = Path::new(&photo.original_path)
-                    .canonicalize()
-                    .map_err(|_| "来源原件缺失，请先重新定位照片")?;
-                if path.parent() != Some(root.join("originals").as_path()) {
-                    return Err("来源原件不在当前图库的管理目录中".into());
-                }
-                Ok(photo)
+                let original =
+                    crate::work_directory::original(&conn, &photo.id, &photo.original_path)?;
+                Ok((photo, original))
             })
             .collect::<Result<Vec<_>, String>>()?;
-        (root, sources)
+        let (sources, originals): (Vec<_>, Vec<_>) = sources.into_iter().unzip();
+        (root, sources, originals)
     };
-    curation::prepare_generated(
-        store,
-        drafts,
-        &root,
-        &input.library,
-        &input.group_id,
-        &input.title,
-        &sources,
-        |target| render(&input, &sources, background, target),
-    )
+    let canvas = render(&input, &sources, &originals, background)?;
+    {
+        let conn = store.connection.lock().map_err(|e| e.to_string())?;
+        if db::library_root(&conn)? != root {
+            return Err("图库已切换，请重新开始拼图。".into());
+        }
+        for source in &sources {
+            let path: String = conn
+                .query_row(
+                    "SELECT original_path FROM photos WHERE id=?1 AND library=?2",
+                    params![source.id, source.library],
+                    |row| row.get(0),
+                )
+                .map_err(|_| "来源照片已变化，请重新生成拼图。")?;
+            if path != source.original_path {
+                return Err("来源照片已重新定位，请重新生成拼图。".into());
+            }
+        }
+    }
+    // 背景不透明，输出 RGB PNG，避免引入 JPEG 代际损失和多余 alpha。
+    write_png(directory, &input.title, "拼图", |writer| {
+        PngEncoder::new(writer)
+            .write_image(&canvas, input.width, input.height, ExtendedColorType::Rgb8)
+            .map_err(|e| e.to_string())
+    })
 }
 
 #[tauri::command]
-pub async fn prepare_collage(
+pub async fn export_collage_png(
     app: tauri::AppHandle,
+    directory: String,
     input: CollageInput,
-) -> Result<CurationDraft, String> {
+) -> Result<PathBuf, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        prepare(&app.state::<Store>(), &app.state::<CurationStore>(), input)
+        export_png(&app.state::<Store>(), Path::new(&directory), input)
     })
     .await
     .map_err(|e| e.to_string())?

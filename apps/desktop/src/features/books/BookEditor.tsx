@@ -1,10 +1,12 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, MoreHorizontal, Plus } from 'lucide-react';
 import { useToast } from '../../components/ToastProvider';
 import { Modal } from '../../components/ui';
 import * as api from '../../lib/book-api';
-import { templates, versionInput, type BookDetail, type BookItem, type BookTemplate, type VersionInput } from '../../lib/book-types';
-import type { Photo } from '../../lib/types';
+import { versionInput, type BookDetail, type BookItem, type VersionInput } from '../../lib/book-types';
+import { revealContent } from '../../lib/content-reveal';
+import type { LibrarySnapshot, Photo } from '../../lib/types';
+import { PhotoSourceDialog } from '../../components/PhotoSourceDialog';
 import { BookPageView } from './BookPageView';
 import { BookReader } from './BookReader';
 
@@ -13,16 +15,31 @@ function organize(input: VersionInput): VersionInput {
   const pages = input.chapters.flatMap((chapter) => input.pages.filter((page) => page.chapterId === chapter.id));
   return { ...input, pages, chapters: input.chapters.map((chapter) => ({ ...chapter, photoIds: pages.filter((page) => page.chapterId === chapter.id).flatMap((page) => page.items.map((item) => item.photoId)) })) };
 }
-export function BookEditor({ detail, photos, onChange, onBack, onPlay, onDirtyChange, onRelink }: { detail: BookDetail; photos: Photo[]; onChange: (next: BookDetail) => void; onBack: () => void; onPlay?: (photoIds: string[]) => void; onDirtyChange?: (dirty: boolean) => void; onRelink?: (photo: Photo) => Promise<void> }) {
+export function BookEditor({ detail, photos, onSnapshot, onChange, onBack, onPlay, onDirtyChange, onBusyChange, onRelink, fromSearch = false }: {
+  detail: BookDetail; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onChange: (next: BookDetail) => void; onBack: () => void;
+  onPlay?: (photoIds: string[]) => void; onDirtyChange?: (dirty: boolean) => void; onBusyChange?: (busy: boolean) => void; onRelink?: (photo: Photo) => Promise<void>; fromSearch?: boolean;
+}) {
   const version = detail.versions.find((v) => v.id === detail.book.currentVersionId)!;
   const [draft, setDraft] = useState<VersionInput>(() => versionInput(version));
   const [pageIndex, setPageIndex] = useState(0); const [itemIndex, setItemIndex] = useState(0);
   const [inspector, setInspector] = useState<Inspector>('photo'); const [more, setMore] = useState(false);
-  const [dirty, setDirty] = useState(false); const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false); const [working, setBusy] = useState(false);
+  const [sourceBusy, setSourceBusy] = useState(false);
+  const busy = working || sourceBusy;
   const toast = useToast();
-  const [reading, setReading] = useState(false); const [leaving, setLeaving] = useState(false); const [style, setStyle] = useState<BookTemplate>(version.template);
-  const [addingPhoto, setAddingPhoto] = useState('');
-  useEffect(() => { setDraft(versionInput(version)); setDirty(false); setStyle(version.template); setPageIndex(0); setItemIndex(0); setAddingPhoto(''); }, [version]);
+  const [reading, setReading] = useState(false); const [leaving, setLeaving] = useState(false);
+  const [pickingSource, setPickingSource] = useState(false);
+  const busyRef = useRef(false);
+  const editorHeading = useRef<HTMLElement>(null);
+  const editorLayout = useRef<HTMLDivElement>(null);
+  const wasReading = useRef(false);
+  useLayoutEffect(() => {
+    const returning = wasReading.current && !reading;
+    wasReading.current = reading;
+    if (returning) return revealContent([editorHeading.current, editorLayout.current].filter((element) => element !== null));
+  }, [reading]);
+  useEffect(() => { setDraft(versionInput(version)); setDirty(false); setPageIndex(0); setItemIndex(0); setPickingSource(false); }, [version]);
+  useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false); }, [busy, onBusyChange]);
   useEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
   const currentPageIndex = Math.min(pageIndex, draft.pages.length - 1);
   const page = draft.pages[currentPageIndex]; const currentItemIndex = Math.min(itemIndex, page.items.length - 1); const item = page.items[currentItemIndex];
@@ -42,25 +59,26 @@ export function BookEditor({ detail, photos, onChange, onBack, onPlay, onDirtyCh
     const chapters = [...draft.chapters]; [chapters[index], chapters[index + offset]] = [chapters[index + offset], chapters[index]]; change({ ...draft, chapters }); selectPage(0);
   }
   async function perform(task: () => Promise<void>) {
-    setBusy(true);
-    try { await task(); } catch (cause) { toast({ title: cause instanceof Error ? cause.message : String(cause), status: 'error' }); } finally { setBusy(false); }
+    if (busyRef.current || sourceBusy) return;
+    busyRef.current = true; setBusy(true);
+    try { await task(); } catch (cause) { toast({ title: cause instanceof Error ? cause.message : String(cause), status: 'error' }); } finally { busyRef.current = false; setBusy(false); }
   }
-  async function save() { const next = await api.saveVersion(detail.book.id, version.id, draft); onChange(next); toast({ title: '手工版本已保存' }); return next; }
-  function addPhoto() {
-    if (!addingPhoto) return;
-    const photoItem: BookItem = { photoId: addingPhoto, x: 10, y: 8, width: 80, height: 77, cropX: 50, cropY: 50, fit: 'contain' };
-    const id = crypto.randomUUID();
-    const next = organize({ ...draft, pages: [...draft.pages, { id, chapterId: page.chapterId, title: '', caption: '', items: [photoItem] }] });
-    change(next); selectPage(next.pages.findIndex((p) => p.id === id)); setInspector('photo'); setAddingPhoto('');
+  async function save() { const next = await api.saveVersion(detail.book.id, version.id, draft); onChange(next); toast({ title: '已保存' }); }
+  function addPhotos(photoIds: string[]) {
+    const ids = [...new Set(photoIds)].filter((id) => !used.includes(id));
+    if (!ids.length) return;
+    const pages = ids.map((photoId) => ({ id: crypto.randomUUID(), chapterId: page.chapterId, title: '', caption: '', items: [{ photoId, x: 10, y: 8, width: 80, height: 77, cropX: 50, cropY: 50, fit: 'contain' as const }] }));
+    const next = organize({ ...draft, pages: [...draft.pages, ...pages] });
+    change(next); selectPage(next.pages.findIndex((p) => p.id === pages[0].id)); setInspector('photo');
   }
   return <section className="book-editor">
-    <header className="book-editor-heading">
-      <button type="button" className="back-link" disabled={busy} onClick={() => dirty ? setLeaving(true) : onBack()}><ChevronLeft size={15} />书架</button>
-      <div className="book-editor-title"><h1>{detail.book.title}</h1><p>{version.kind === 'manual' ? '手工版' : '自动版'} · {draft.pages.length} 页<span className={dirty ? 'book-unsaved' : ''}>{dirty ? '未保存修改' : '已保存'}</span></p></div>
-      <div className="book-editor-primary"><button type="button" className="button button-quiet" disabled={busy} onClick={() => setReading(true)}>{dirty ? '预览' : '阅读'}</button><button type="button" className="button button-primary" disabled={busy || !dirty} onClick={() => void perform(async () => { await save(); })}>{busy ? '处理中…' : '保存手工版'}</button><button type="button" className="button button-quiet book-more-button" aria-label="更多画册操作" aria-expanded={more} aria-controls="book-secondary-tools" onClick={() => setMore(!more)}><MoreHorizontal size={19} /></button></div>
+    <header ref={editorHeading} className="book-editor-heading">
+      <button type="button" className="back-link" disabled={busy} onClick={() => dirty ? setLeaving(true) : onBack()}><ChevronLeft size={15} />{fromSearch ? '返回搜索' : '书架'}</button>
+      <div className="book-editor-title"><h1>{detail.book.title}</h1><p>{draft.pages.length} 页<span className={dirty ? 'book-unsaved' : ''}>{dirty ? '未保存修改' : '已保存'}</span></p></div>
+      <div className="book-editor-primary"><button type="button" className="button button-quiet" disabled={busy} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); setReading(true); }}>{dirty ? '预览' : '阅读'}</button><button type="button" className="button button-primary" disabled={busy || !dirty} onClick={() => void perform(save)}>{busy ? '处理中…' : '保存'}</button><button type="button" className="button button-quiet book-more-button" aria-label="更多画册操作" aria-expanded={more} aria-controls="book-secondary-tools" disabled={busy} onClick={() => setMore(!more)}><MoreHorizontal size={19} /></button></div>
     </header>
-    {more && <div className="book-secondary-tools" id="book-secondary-tools"><label>历史版本<select disabled={busy || dirty} value={version.id} onChange={(e) => void perform(async () => onChange(await api.selectVersion(detail.book.id, e.target.value)))}>{[...detail.versions].reverse().map((v) => <option key={v.id} value={v.id}>{v.kind === 'manual' ? '手工' : '自动'} · {v.label} · {new Date(v.createdAt).toLocaleString('zh-CN')}</option>)}</select></label>{onPlay && <button type="button" className="button button-quiet" disabled={busy || dirty} onClick={() => onPlay(version.pages.flatMap((p) => p.items.map((entry) => entry.photoId)))}>播放画册</button>}<button type="button" className="button button-quiet" disabled={busy || dirty} onClick={() => void perform(async () => { const path = await api.exportBook(detail, version.id); if (path) toast({ title: `已导出自包含 HTML：${path}` }); })}>导出 HTML</button>{dirty && <span>保存后可切换版本、播放和导出</span>}</div>}
-    <div className="book-edit-layout">
+    {more && <div className="book-secondary-tools" id="book-secondary-tools">{onPlay && <button type="button" className="button button-quiet" disabled={busy || dirty} onClick={() => onPlay(version.pages.flatMap((p) => p.items.map((entry) => entry.photoId)))}>播放画册</button>}<button type="button" className="button button-quiet" disabled={busy || dirty} onClick={() => void perform(async () => { const path = await api.exportBook(detail, version.id); if (path) toast({ title: `已导出自包含 HTML：${path}` }); })}>导出 HTML</button>{dirty && <span>保存后可播放和导出</span>}</div>}
+    <div ref={editorLayout} className="book-edit-layout">
       <nav className="book-page-list" aria-label="画册页面"><h3>页面 <span>{draft.pages.length}</span></h3>{draft.pages.map((p, index) => { const photo = photos.find((entry) => entry.id === p.items[0]?.photoId); return <button type="button" key={p.id} className={index === currentPageIndex ? 'active' : ''} aria-current={index === currentPageIndex ? 'page' : undefined} onClick={() => selectPage(index)}><span className="book-page-thumb">{photo?.thumbnailAvailable ? <img src={photo.thumbnailUrl} alt="" loading="lazy" /> : <span>无预览</span>}</span><span className="book-page-list-label"><span>{String(index + 1).padStart(2, '0')}</span><span>{p.title || photo?.title || '照片页'}</span></span></button>; })}</nav>
       <section className="book-edit-preview" aria-label="当前画册页面"><div className="book-canvas-heading"><span>{currentChapter?.title || '未命名章节'}</span><div><button type="button" className="button button-quiet" aria-label="上一页" disabled={!currentPageIndex} onClick={() => selectPage(currentPageIndex - 1)}><ChevronLeft size={15} /></button><span>{currentPageIndex + 1} / {draft.pages.length}</span><button type="button" className="button button-quiet" aria-label="下一页" disabled={currentPageIndex === draft.pages.length - 1} onClick={() => selectPage(currentPageIndex + 1)}><ChevronRight size={15} /></button></div></div>
         <div className="book-preview-stage" style={{ '--book-page-ratio': draft.pageWidth / draft.pageHeight } as CSSProperties}><BookPageView page={page} pageWidth={draft.pageWidth} pageHeight={draft.pageHeight} photos={photos} number={currentPageIndex + 1} selectedItem={inspector === 'photo' ? currentItemIndex : undefined} onSelectItem={(index) => { setItemIndex(index); setInspector('photo'); }} onRelink={onRelink} /></div>
@@ -85,19 +103,18 @@ export function BookEditor({ detail, photos, onChange, onBack, onPlay, onDirtyCh
             <button type="button" className="button button-quiet button-danger" disabled={draft.pages.length <= 1} onClick={() => { change({ ...draft, pages: draft.pages.filter((p) => p.id !== page.id) }); selectPage(Math.max(0, currentPageIndex - 1)); }}>移除此页</button>
           </>}
           {inspector === 'book' && <>
-            <div className="book-inspector-context"><span>{version.kind === 'manual' ? '手工版本' : '自动版本'}</span><h3>画册设置</h3></div>
-            <label>版本名<input value={draft.label} maxLength={200} onChange={(e) => change({ ...draft, label: e.target.value })} /></label>
+            <div className="book-inspector-context"><h3>画册设置</h3></div>
             <details className="book-details"><summary>纸张尺寸 <span>{draft.pageWidth} × {draft.pageHeight}</span></summary><div className="book-number-grid"><label>页宽<input type="number" min={400} max={4000} value={draft.pageWidth} onChange={(e) => change({ ...draft, pageWidth: Number(e.target.value) })} /></label><label>页高<input type="number" min={400} max={4000} value={draft.pageHeight} onChange={(e) => change({ ...draft, pageHeight: Number(e.target.value) })} /></label></div></details>
             <section className="book-inspector-section"><h3>章节与选片</h3>{draft.chapters.map((c, index) => <div className="book-order-row" key={c.id}><input aria-label={`章节 ${index + 1}`} value={c.title} maxLength={200} onChange={(e) => { const first = draft.pages.find((p) => p.chapterId === c.id)?.id; change({ ...draft, chapters: draft.chapters.map((chapter) => chapter.id === c.id ? { ...chapter, title: e.target.value } : chapter), pages: draft.pages.map((p) => p.id === first ? { ...p, title: e.target.value } : p) }); }} /><span>{c.photoIds.length}</span><button type="button" aria-label="前移章节" disabled={!index} onClick={() => moveChapter(index, -1)}>↑</button><button type="button" aria-label="后移章节" disabled={index === draft.chapters.length - 1} onClick={() => moveChapter(index, 1)}>↓</button><button type="button" aria-label="删除空章节" disabled={draft.chapters.length === 1 || c.photoIds.length > 0} onClick={() => change({ ...draft, chapters: draft.chapters.filter((chapter) => chapter.id !== c.id) })}>×</button></div>)}<button type="button" className="button button-quiet" onClick={() => change({ ...draft, chapters: [...draft.chapters, { id: crypto.randomUUID(), title: '新章节', photoIds: [] }] })}><Plus size={14} />添加章节</button>
-              <div className="book-add-photo"><label>追加到「{currentChapter?.title || '当前章'}」<select aria-label="添加照片" value={addingPhoto} onChange={(e) => setAddingPhoto(e.target.value)}><option value="">{available.length ? '选择未入册照片' : '全部照片已在画册中'}</option>{available.map((p) => <option key={p.id} value={p.id}>{p.library === 'work' ? '作品' : '收藏'} · {p.title}</option>)}</select></label><button type="button" className="button" disabled={!addingPhoto} onClick={addPhoto}>添加到当前章</button></div>
+              <div className="book-add-photo"><button type="button" className="button" onClick={() => setPickingSource(true)}><Plus size={14} />添加照片到「{currentChapter?.title || '当前章'}」</button></div>
             </section>
-            <section className="book-inspector-section"><h3>重新排版</h3><label>自动模板<select value={style} onChange={(e) => setStyle(e.target.value as BookTemplate)}>{templates.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></label><button type="button" className="button" onClick={() => void perform(async () => { const source = dirty ? await save() : detail; onChange(await api.reflow(source.book.id, source.book.currentVersionId, style)); toast({ title: '已另存自动版本，手工版仍可切换查看' }); })}>{dirty ? '保存并另存自动版' : '另存自动排版版本'}</button><p className="muted">已保存的版本都会保留。</p></section>
           </>}
         </fieldset></div>
-        {dirty && <p className="book-inspector-footnote">保存手工版后，修改才会保留</p>}
+
       </aside>
     </div>
-    {reading && <BookReader version={{ ...version, ...draft }} photos={photos} title={`${detail.book.title}${dirty ? ' · 未保存预览' : ''}`} onClose={() => setReading(false)} onRelink={onRelink} />}
-    {leaving && <Modal title="离开编辑？" onClose={() => setLeaving(false)}><p>当前修改尚未保存。返回书架会放弃这些修改。</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setLeaving(false)}>继续编辑</button><button type="button" className="button" onClick={onBack}>放弃并返回</button></div></Modal>}
+    {pickingSource && <PhotoSourceDialog photos={available} library="collection" title="添加画册照片" onBusyChange={setSourceBusy} onClose={() => setPickingSource(false)} onConfirm={({ photoIds, snapshot }) => { if (snapshot) onSnapshot(snapshot); addPhotos(photoIds); setPickingSource(false); }} />}
+    {reading && <BookReader version={{ ...version, ...draft }} photos={photos} title={`${detail.book.title}${dirty ? ' · 未保存预览' : ''}`} initialPageIndex={currentPageIndex} onClose={() => setReading(false)} onRelink={onRelink} />}
+    {leaving && <Modal title="离开编辑？" onClose={() => setLeaving(false)}><p>当前修改尚未保存。{fromSearch ? '返回搜索' : '返回书架'}会放弃这些修改。</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setLeaving(false)}>继续编辑</button><button type="button" className="button" onClick={onBack}>放弃并返回</button></div></Modal>}
   </section>;
 }

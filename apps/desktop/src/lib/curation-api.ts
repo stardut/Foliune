@@ -1,10 +1,15 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { call, withImageUrls } from './api';
+import { isLocalPhoto } from './photo-availability';
 import type { LibraryKind, LibrarySnapshot } from './types';
 import type { CurationDraft, GroupCurationPatch } from './curation-types';
 
-function draftImages(draft: CurationDraft): CurationDraft {
-  return { ...draft, candidates: withImageUrls({ photos: draft.candidates, groups: [], memberships: [] }).photos };
+function draftImages(draft: CurationDraft, localImport = false): CurationDraft {
+  const photos = withImageUrls({ photos: draft.candidates, groups: [], memberships: [] }).photos;
+  const pending = new Set(localImport ? draft.pendingIds : []);
+  return { ...draft, candidates: photos.map((photo) => pending.has(photo.id) && isLocalPhoto(photo)
+    ? { ...photo, originalUrl: photo.thumbnailUrl }
+    : photo) };
 }
 
 export async function prepareImport(library: LibraryKind, groupId?: string): Promise<CurationDraft | null> {
@@ -18,7 +23,7 @@ export async function prepareImport(library: LibraryKind, groupId?: string): Pro
 }
 
 export async function prepareImportFiles(paths: string[], library: LibraryKind, groupId?: string): Promise<CurationDraft> {
-  return draftImages(await call<CurationDraft>('prepare_import', { paths, library, groupId: groupId ?? null }));
+  return draftImages(await call<CurationDraft>('prepare_import', { paths, library, groupId: groupId ?? null }), true);
 }
 
 export async function prepareGroupCuration(groupId: string, patch: GroupCurationPatch): Promise<CurationDraft> {

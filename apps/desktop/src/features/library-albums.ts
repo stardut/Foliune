@@ -1,4 +1,4 @@
-import type { Group, LibraryKind, LibrarySnapshot, Photo } from '../lib/types';
+import type { Group, LibraryKind, LibrarySnapshot, Membership, Photo } from '../lib/types';
 
 export interface LibraryAlbum {
   group: Group;
@@ -6,16 +6,27 @@ export interface LibraryAlbum {
 }
 
 export function libraryAlbums(snapshot: LibrarySnapshot, library: LibraryKind) {
-  const photos = snapshot.photos.filter((photo) => photo.library === library);
-  const byId = new Map(photos.map((photo) => [photo.id, photo]));
-  // A discarded membership still belongs to its album; it must not become ungrouped.
-  const associated = new Set(snapshot.memberships.map((member) => member.photoId));
-  const albums: LibraryAlbum[] = snapshot.groups.filter((group) => group.library === library).map((group) => {
-    const ids = [...new Set(snapshot.memberships
-      .filter((member) => member.groupId === group.id && member.status === 'active')
-      .sort((a, b) => a.position - b.position)
-      .map((member) => member.photoId))];
-    return { group, photos: ids.map((id) => byId.get(id)).filter((photo): photo is Photo => !!photo) };
+  const photosById = new Map<string, Photo>();
+  for (const photo of snapshot.photos) {
+    if (photo.library === library) photosById.set(photo.id, photo);
+  }
+  const membersByGroup = new Map<string, { group: Group; members: Membership[] }>();
+  for (const group of snapshot.groups) {
+    if (group.library === library) membersByGroup.set(group.id, { group, members: [] });
+  }
+  for (const member of snapshot.memberships) {
+    membersByGroup.get(member.groupId)?.members.push(member);
+  }
+  const albums = Array.from(membersByGroup.values(), ({ group, members }) => {
+    const active = new Set<Photo>();
+    const discarded = new Set<Photo>();
+    for (const member of members.sort((a, b) => a.position - b.position)) {
+      const photo = photosById.get(member.photoId);
+      if (!photo) continue;
+      if (member.status === 'active') active.add(photo);
+      else if (member.status === 'discarded') discarded.add(photo);
+    }
+    return { group, photos: [...active], discardedPhotos: [...discarded] };
   });
-  return { albums, ungrouped: photos.filter((photo) => !associated.has(photo.id)) };
+  return { albums, byGroupId: new Map(albums.map((album) => [album.group.id, album])) };
 }

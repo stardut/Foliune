@@ -1,0 +1,21 @@
+.photo-source-tabs { align-self: flex-start; margin-bottom: 22px; }
+.photo-source-input { display: flex; flex-shrink: 0; align-items: center; gap: 12px; margin-bottom: 22px; }
+.photo-source-input .search-field { flex: 1; max-width: none; margin: 0; }
+.photo-source-input .search-field input { min-height: 34px; }
+.photo-source-input > .button { flex-shrink: 0; }
+.photo-source-input:has(+ .photo-source-link-hint) { margin-bottom: 6px; }
+.photo-source-link-hint { flex-shrink: 0; margin: 0 0 16px; }
+.photo-source-empty, .photo-source-wait { display: flex; flex: 1; min-height: 180px; align-items: center; justify-content: center; }
+.photo-source-empty .empty-state { min-height: 180px; }
+.photo-source-wait { flex-direction: column; gap: 14px; }
+.photo-source-wait .busy { min-height: 0; padding: 0; }
+.photo-source-failures { flex-shrink: 0; max-height: 118px; overflow: auto; margin-top: 18px; color: var(--danger); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.photo-source-failures strong { font-weight: 500; }
+.photo-source-failures ul { margin: 4px 0 0; padding-left: 18px; }
+.photo-source-error { flex-shrink: 0; margin-top: 14px; }
+@media (max-width: 580px) {
+  .photo-source-input { align-items: stretch; flex-direction: column; }
+  .photo-source-input > .button { align-self: flex-start; }
+  .photo-source .photo-picker-footer { flex-wrap: wrap; }
+  .photo-source .photo-picker-footer .form-actions { flex-basis: 100%; margin-top: 8px; }
+}

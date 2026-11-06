@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import { ImageOff, MoreHorizontal } from 'lucide-react';
+import type { KeyboardEvent, MouseEvent } from 'react';
+import { ImageOff } from 'lucide-react';
 import type { Photo } from '../../lib/types';
 import { PhotoImage } from '../../components/PhotoImage';
 import { PhotoReview } from '../PhotoReview';
@@ -17,9 +18,10 @@ export function ModelSamples({ ids, coverId, photos, disabled, onChange, onCover
   const current = useRef({ context, disabled }); current.current = { context, disabled };
   const menu = useContextMenu('photo', context, setError);
   function open(id: string, at: { x: number; y: number }, trigger: HTMLElement) {
+    if (disabled) return;
     const index = ids.indexOf(id);
     const allowed = () => current.current.context === context && !current.current.disabled;
-    const action = (key: string, text: string, run: () => void, unavailable = false): ContextMenuAction => ({ id: key, text, run, allowed, disabled: disabled || unavailable });
+    const action = (key: string, text: string, run: () => void, unavailable = false): ContextMenuAction => ({ id: key, text, run, allowed, disabled: unavailable });
     function move(offset: number) { const next = [...ids]; [next[index], next[index + offset]] = [next[index + offset], next[index]]; onChange(next); }
     void menu([
       action('preview', '查看大图', () => setPreview(id), !map.has(id)),
@@ -33,13 +35,30 @@ export function ModelSamples({ ids, coverId, photos, disabled, onChange, onCover
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="model-samples">{ids.map((id, index) => {
       const photo = map.get(id);
+      const label = photo ? `查看 ${photo.title || photo.originalName}` : `第 ${index + 1} 张样片记录缺失`;
+      const menuTrigger = {
+        'aria-label': id === coverId ? `${label}，当前封面` : label,
+        'aria-haspopup': 'menu' as const,
+        'aria-keyshortcuts': 'ContextMenu Shift+F10',
+        onContextMenu(event: MouseEvent<HTMLElement>) {
+          event.preventDefault();
+          event.stopPropagation();
+          open(id, { x: event.clientX, y: event.clientY }, event.currentTarget);
+        },
+        onKeyDown(event: KeyboardEvent<HTMLElement>) {
+          if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const bounds = event.currentTarget.getBoundingClientRect();
+          open(id, { x: bounds.left + 16, y: bounds.top + 16 }, event.currentTarget);
+        },
+      };
       return <article className="model-sample" key={id}>
-        <button type="button" className="model-sample-image" aria-label={photo ? `查看 ${photo.title || photo.originalName}` : '样片记录缺失'} disabled={disabled || !photo} onClick={() => setPreview(id)}
-          onContextMenu={(event) => { event.preventDefault(); open(id, { x: event.clientX, y: event.clientY }, event.currentTarget); }}
-          onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) { event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); open(id, { x: bounds.left + 16, y: bounds.top + 16 }, event.currentTarget); } }}>
-          {photo ? <PhotoImage photo={photo} lazy /> : <span className="model-missing"><ImageOff size={22} />样片记录缺失</span>}
-        </button>
-        <div className="model-sample-caption"><span>{id === coverId ? '封面' : String(index + 1).padStart(2, '0')}</span><button type="button" className="icon-button" aria-label={`第 ${index + 1} 张样片操作`} disabled={disabled} onClick={(event) => { const bounds = event.currentTarget.getBoundingClientRect(); open(id, { x: bounds.right, y: bounds.bottom }, event.currentTarget); }}><MoreHorizontal size={16} /></button></div>
+        {photo ? <button type="button" className="model-sample-image" disabled={disabled} onClick={() => setPreview(id)} {...menuTrigger}>
+          <PhotoImage photo={photo} lazy />
+        </button> : <div className="model-sample-image model-missing" role="img" tabIndex={disabled ? -1 : 0} aria-disabled={disabled || undefined} {...menuTrigger}>
+          <ImageOff size={22} aria-hidden="true" />样片记录缺失
+        </div>}
       </article>;
     })}</div>
     {preview && <PhotoReview photos={ordered} initialPhotoId={preview} context="模特样片" returnLabel="返回模特样片" busy={disabled} onClose={() => setPreview(null)} onRelink={onRelink ?? (async () => { throw new Error('请返回图库重新定位这张照片。'); })} />}

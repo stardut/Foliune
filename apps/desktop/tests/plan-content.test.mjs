@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inputOf, newPart, newShot, hasContent, referenceCount, shotCount, planSearchText, moved, sceneReferenceLimitError } from '../src/features/planning/plan-content.ts';
+import { comparePlanExecutionDate, inputOf, newPart, newShot, hasContent, referenceCount, shotCount, planSearchText, moved, sceneReferenceLimitError } from '../src/features/planning/plan-content.ts';
 import { planExportBlocks } from '../src/features/planning/plan-export-content.ts';
 
 function exportedText(blocks) { return blocks.flatMap((block) => block.kind === 'scene-heading' ? [block.title, block.time] : block.kind === 'field' ? [`${block.label}\n${block.value}`] : ['text', 'section'].includes(block.kind) ? [block.value] : []); }
@@ -155,6 +155,32 @@ test('scene shoot time preserves existing values, remains independent of overvie
   emptyScene.timeWindow = '日落前';
   assert.equal(hasContent(emptyScene), true);
   assert.deepEqual(plan, original);
+});
+
+test('execution date is independent of free-text shoot time and searchable without changing PNG content', () => {
+  const oldPlan = { ...fixture(), id: 'saved', createdAt: '', updatedAt: '' };
+  delete oldPlan.executionDate;
+  assert.equal(inputOf().executionDate, '');
+  assert.equal(inputOf(oldPlan).executionDate, '');
+
+  const saved = { ...oldPlan, executionDate: '2028-02-29' };
+  const draft = inputOf(saved);
+  assert.equal(draft.executionDate, saved.executionDate);
+  assert.equal(draft.shootDate, '周日');
+  assert.ok(planSearchText(draft).includes(saved.executionDate));
+  assert.deepEqual(planExportBlocks(draft), planExportBlocks(inputOf(oldPlan)));
+});
+
+test('execution date sorts newest dates first, then uses actual update time, and keeps undated plans last', () => {
+  const plans = [
+    { id: 'legacy', executionDate: '', updatedAt: '2030-01-01T00:00:00Z' },
+    { id: 'earlier date', executionDate: '2026-11-01', updatedAt: '2026-11-10T00:00:00Z' },
+    { id: 'earlier update', executionDate: '2026-12-01', updatedAt: '2026-11-06T10:30:00+08:00' },
+    { id: 'later update', executionDate: '2026-12-01', updatedAt: '2026-11-06T04:30:00Z' },
+  ];
+  assert.deepEqual([...plans].sort(comparePlanExecutionDate).map((plan) => plan.id), [
+    'later update', 'earlier update', 'earlier date', 'legacy',
+  ]);
 });
 
 test('historical shot and global references preserve ordered nonempty notes without images', () => {

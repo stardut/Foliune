@@ -1,14 +1,24 @@
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { GroupInput, GroupPatch, ImportResult, LibraryKind, LibrarySnapshot, MembershipStatus, PhotoPatch } from './types';
+import { isLocalPhoto } from './photo-availability';
+import type { GroupInput, GroupPatch, ImportResult, LibraryKind, LibrarySnapshot, MembershipStatus, Photo, PhotoMetadata, PhotoPatch } from './types';
 
 export const isDesktop = () => isTauri();
 
-export function withImageUrls(snapshot: LibrarySnapshot): LibrarySnapshot {
-  return { ...snapshot, photos: snapshot.photos.map(photo => ({ ...photo,
-    originalUrl: convertFileSrc(photo.originalPath),
+export function withPhotoUrls(photo: Photo): Photo {
+  const originalUrl = isLocalPhoto(photo)
+    ? convertFileSrc(photo.id, 'work-photo')
+    : photo.originalPath.startsWith('work-photo:')
+      ? convertFileSrc(photo.originalPath.slice('work-photo:'.length), 'work-photo')
+      : convertFileSrc(photo.originalPath);
+  return { ...photo,
+    originalUrl,
     thumbnailUrl: convertFileSrc(photo.thumbnailPath),
-  })) };
+  };
+}
+
+export function withImageUrls(snapshot: LibrarySnapshot): LibrarySnapshot {
+  return { ...snapshot, photos: snapshot.photos.map(withPhotoUrls) };
 }
 
 export async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -44,7 +54,11 @@ export async function importPhotos(library: LibraryKind, groupId?: string): Prom
 export const createGroup = (input: GroupInput) => mutate('create_group', { input });
 export const updateGroup = (id: string, patch: GroupPatch) => mutate('update_group', { id, patch });
 export const deleteGroup = (id: string) => mutate('delete_group', { id });
+export const shareAlbumAirDrop = (groupId: string, photoIds?: string[]) =>
+  call<void>('share_album_airdrop', { groupId, photoIds: photoIds ?? null });
 export const updatePhoto = (id: string, patch: PhotoPatch) => mutate('update_photo', { id, patch });
+export const readPhotoMetadata = (photoId: string, expectedOriginalPath: string) =>
+  call<PhotoMetadata>('read_photo_metadata', { photoId, expectedOriginalPath });
 export const addPhotosToGroup = (groupId: string, photoIds: string[]) => mutate('add_photos_to_group', { groupId, photoIds });
 export const setMembershipStatus = (groupId: string, photoId: string, status: MembershipStatus) =>
   setMembershipStatuses(groupId, [photoId], status);

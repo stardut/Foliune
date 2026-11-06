@@ -8,15 +8,19 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
-    fs,
-    path::PathBuf,
+    fs, io,
+    path::{Path, PathBuf},
     sync::Mutex,
 };
 use tauri::{Manager, State};
 
-#[path = "curation_generated.rs"]
-mod generated;
-pub(crate) use generated::prepare_generated;
+#[path = "link_import_source.rs"]
+mod link_source;
+pub(crate) use link_source::set_pending_source;
+#[path = "link_import_curation.rs"]
+mod import_files;
+pub use import_files::prepare_import_files;
+pub(crate) use import_files::prepare_link_import_files;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,8 +40,13 @@ struct Draft {
     target: Option<Group>,
     signature: Option<String>,
     staging: Option<PathBuf>,
-    staged_ids: HashSet<String>,
+    staged_originals: HashMap<String, StagedOriginal>,
     library_root: PathBuf,
+}
+
+enum StagedOriginal {
+    Managed,
+    Local { signature: String },
 }
 
 #[derive(Default)]
@@ -158,7 +167,7 @@ fn group_draft(conn: &Connection, group_id: &str, patch: Value) -> Result<Draft,
         target: Some(group),
         signature: Some(signature(conn, group_id)?),
         staging: None,
-        staged_ids: HashSet::new(),
+        staged_originals: HashMap::new(),
         library_root: crate::db::library_root(conn)?,
     })
 }
@@ -171,84 +180,6 @@ pub fn prepare_group(
 ) -> Result<CurationDraft, String> {
     let conn = store.connection.lock().map_err(|e| e.to_string())?;
     let draft = group_draft(&conn, group_id, patch)?;
-    let view = draft.view.clone();
-    drafts
-        .0
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(view.id.clone(), draft);
-    Ok(view)
-}
-
-pub fn prepare_import_files(
-    store: &Store,
-    drafts: &CurationStore,
-    paths: Vec<String>,
-    library: &str,
-    group_id: Option<&str>,
-) -> Result<CurationDraft, String> {
-    models::library(library)?;
-    let mut draft = if let Some(id) = group_id {
-        let draft = group_draft(
-            &*store.connection.lock().map_err(|e| e.to_string())?,
-            id,
-            serde_json::json!({}),
-        )?;
-        if draft
-            .target
-            .as_ref()
-            .is_none_or(|group| group.library != library)
-        {
-            return Err("目标分组不属于该图库".into());
-        }
-        draft
-    } else {
-        Draft {
-            view: CurationDraft {
-                id: uuid::Uuid::new_v4().to_string(),
-                group_id: None,
-                group_name: "全部照片".into(),
-                capacity: None,
-                candidates: Vec::new(),
-                active_ids: Vec::new(),
-                pending_ids: Vec::new(),
-                failures: Vec::new(),
-            },
-            target: None,
-            signature: None,
-            staging: None,
-            staged_ids: HashSet::new(),
-            library_root: crate::db::library_root(
-                &*store.connection.lock().map_err(|e| e.to_string())?,
-            )?,
-        }
-    };
-    let staging = draft.library_root.join("staging").join(&draft.view.id);
-    let prepared = (|| {
-        let temporary = Store::open(staging.clone())?;
-        photos::import(&temporary, paths, library, None)
-    })();
-    let imported = match prepared {
-        Ok(imported) => imported,
-        Err(message) => {
-            if staging.exists() {
-                fs::remove_dir_all(&staging)
-                    .map_err(|e| format!("{message}；清理候选失败：{e}"))?;
-            }
-            return Err(message);
-        }
-    };
-    draft.view.pending_ids = imported.imported_ids;
-    draft.staged_ids = draft.view.pending_ids.iter().cloned().collect();
-    draft.view.candidates.extend(imported.snapshot.photos);
-    draft.view.failures = imported.failures;
-    draft.staging = Some(staging);
-    // 解码期间可切换图库；只允许把候选注册到其所属的仍在使用的图库。
-    let conn = store.connection.lock().map_err(|e| e.to_string())?;
-    if crate::db::library_root(&conn)? != draft.library_root {
-        cleanup(store, &draft)?;
-        return Err("图库已切换，本次候选已取消。".into());
-    }
     let view = draft.view.clone();
     drafts
         .0
@@ -301,7 +232,7 @@ pub fn commit(
         for path in created {
             if path.exists() {
                 if let Err(error) = fs::remove_file(path) {
-                    errors.push(format!("回滚副本失败：{error}"));
+                    errors.push(format!("回滚候选文件失败：{error}"));
                 }
             }
         }
@@ -311,6 +242,32 @@ pub fn commit(
         return Err(errors.join("；"));
     }
     result
+}
+
+fn save_staged_file(
+    staging: &Path,
+    library_root: &Path,
+    folder: &str,
+    source: &str,
+    created: &mut Vec<PathBuf>,
+) -> Result<PathBuf, String> {
+    let source = Path::new(source);
+    if source.parent() != Some(staging.join(folder).as_path()) {
+        return Err("候选文件目录不合法".into());
+    }
+    let target = library_root
+        .join(folder)
+        .join(source.file_name().ok_or("候选文件名无效")?);
+    let mut input = fs::File::open(source).map_err(|error| format!("读取候选文件失败：{error}"))?;
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)
+        .map_err(|error| format!("创建图库文件失败：{error}"))?;
+    // 只记录本次创建的文件，复制失败时也清理部分写入。
+    created.push(target.clone());
+    io::copy(&mut input, &mut output).map_err(|error| format!("保存图库文件失败：{error}"))?;
+    Ok(target)
 }
 
 fn commit_inner(
@@ -348,39 +305,58 @@ fn commit_inner(
         if Some(signature(&tx, group_id)?) != draft.signature {
             return Err("分组已被其他操作修改，请重新开始取舍。".into());
         }
+        let existing: Vec<_> = draft
+            .view
+            .pending_ids
+            .iter()
+            .filter(|id| keep.contains(*id) && !draft.staged_originals.contains_key(*id))
+            .cloned()
+            .collect();
+        crate::content_refs::validate_photos(&tx, &existing)?;
     }
     for photo in &draft.view.candidates {
-        if !keep.contains(&photo.id) || !draft.staged_ids.contains(&photo.id) {
+        if !keep.contains(&photo.id) {
             continue;
         }
+        let Some(original) = draft.staged_originals.get(&photo.id) else {
+            continue;
+        };
         let staging = draft.staging.as_ref().ok_or("新照片缺少暂存目录")?;
-        let original_source = PathBuf::from(&photo.original_path);
-        let thumbnail_source = PathBuf::from(&photo.thumbnail_path);
-        if original_source.parent() != Some(staging.join("originals").as_path())
-            || thumbnail_source.parent() != Some(staging.join("thumbnails").as_path())
-        {
-            return Err("候选文件目录不合法".into());
-        }
-        let original = draft
-            .library_root
-            .join("originals")
-            .join(original_source.file_name().ok_or("候选原件路径无效")?);
-        let thumbnail = draft
-            .library_root
-            .join("thumbnails")
-            .join(thumbnail_source.file_name().ok_or("候选缩略图路径无效")?);
-        for (source, target) in [
-            (&original_source, &original),
-            (&thumbnail_source, &thumbnail),
-        ] {
-            if target.exists() {
-                return Err("管理副本标识冲突".into());
+        let original = match original {
+            StagedOriginal::Managed => save_staged_file(
+                staging,
+                &draft.library_root,
+                "originals",
+                &photo.original_path,
+                created,
+            )?
+            .to_string_lossy()
+            .into_owned(),
+            StagedOriginal::Local { signature } => {
+                let current =
+                    crate::local_photo::signature(&photo.original_path).map_err(|_| {
+                        format!(
+                            "无法读取「{}」的原件，请检查原件位置后重新导入。",
+                            photo.original_name
+                        )
+                    })?;
+                if current != *signature {
+                    return Err(format!(
+                        "「{}」的原件已变化，请重新导入。",
+                        photo.original_name
+                    ));
+                }
+                photo.original_path.clone()
             }
-            // 先记录路径，以便磁盘写入中途失败时也能清理部分副本。
-            created.push(target.clone());
-            fs::copy(source, target).map_err(|e| format!("保存管理副本失败：{e}"))?;
-        }
-        tx.execute("INSERT INTO photos(id,library,title,original_name,original_path,thumbnail_path,width,height,tags,regions,annotation,source,captured_at,location,project,imported_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)", params![photo.id,photo.library,photo.title,photo.original_name,original.to_string_lossy(),thumbnail.to_string_lossy(),photo.width,photo.height,serde_json::to_string(&photo.tags).map_err(|e| e.to_string())?,serde_json::to_string(&photo.regions).map_err(|e| e.to_string())?,photo.annotation,photo.source,photo.captured_at,photo.location,photo.project,photo.imported_at]).map_err(|e| e.to_string())?;
+        };
+        let thumbnail = save_staged_file(
+            staging,
+            &draft.library_root,
+            "thumbnails",
+            &photo.thumbnail_path,
+            created,
+        )?;
+        tx.execute("INSERT INTO photos(id,library,title,original_name,original_path,thumbnail_path,width,height,tags,regions,annotation,source,captured_at,location,project,imported_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)", params![photo.id,photo.library,photo.title,photo.original_name,original,thumbnail.to_string_lossy(),photo.width,photo.height,serde_json::to_string(&photo.tags).map_err(|e| e.to_string())?,serde_json::to_string(&photo.regions).map_err(|e| e.to_string())?,photo.annotation,photo.source,photo.captured_at,photo.location,photo.project,photo.imported_at]).map_err(|e| e.to_string())?;
     }
     if let Some(group) = &draft.target {
         tx.execute(

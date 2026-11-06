@@ -1,33 +1,16 @@
-use crate::{credentials, db::Store};
+use crate::{
+    ai_settings::{self, AiSettings, SettingsInput, SystemCredentials},
+    credentials,
+    db::Store,
+};
+pub use ai_settings::{config, init, provider};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
+use rusqlite::params;
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::{fs, time::Duration};
 use tauri::Manager;
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderSettings {
-    pub provider: String,
-    pub model: String,
-    pub vision: bool,
-    pub has_key: bool,
-}
-#[derive(Serialize)]
-pub struct AiSettings {
-    pub providers: Vec<ProviderSettings>,
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SettingsInput {
-    provider: String,
-    model: String,
-    vision: bool,
-    api_key: Option<String>,
-    #[serde(default)]
-    remove_key: bool,
-}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Analysis {
@@ -36,76 +19,6 @@ pub struct Analysis {
     pub model: String,
     pub text: String,
     pub analyzed_at: String,
-}
-
-pub fn init(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS ai_settings(provider TEXT PRIMARY KEY,model TEXT NOT NULL,vision INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS photo_analyses(photo_id TEXT PRIMARY KEY REFERENCES photos(id),provider TEXT NOT NULL,model TEXT NOT NULL,text TEXT NOT NULL,analyzed_at TEXT NOT NULL);").map_err(|e|e.to_string())
-}
-
-pub fn provider(value: &str) -> Result<(), String> {
-    if ["openai", "anthropic", "deepseek"].contains(&value) {
-        Ok(())
-    } else {
-        Err("未知 AI 服务".into())
-    }
-}
-
-fn config(conn: &Connection, provider_name: &str) -> Result<(String, bool), String> {
-    provider(provider_name)?;
-    let saved = conn
-        .query_row(
-            "SELECT model,vision FROM ai_settings WHERE provider=?1",
-            [provider_name],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
-    Ok(saved.unwrap_or_else(|| {
-        (
-            match provider_name {
-                "openai" => "gpt-5.4-mini",
-                "anthropic" => "claude-opus-5-5",
-                _ => "deepseek-flash",
-            }
-            .into(),
-            true,
-        )
-    }))
-}
-
-pub fn settings(conn: &Connection) -> Result<AiSettings, String> {
-    let mut providers = Vec::new();
-    for name in ["openai", "anthropic", "deepseek"] {
-        let (model, vision) = config(conn, name)?;
-        providers.push(ProviderSettings {
-            provider: name.into(),
-            model,
-            vision,
-            has_key: credentials::has(name)?,
-        });
-    }
-    Ok(AiSettings { providers })
-}
-
-fn save_settings(conn: &Connection, input: SettingsInput) -> Result<AiSettings, String> {
-    provider(&input.provider)?;
-    let model = input.model.trim();
-    if model.is_empty() || model.len() > 200 || model.contains(char::is_whitespace) {
-        return Err("请输入有效的模型标识".into());
-    }
-    if input.remove_key && input.api_key.is_some() {
-        return Err("不能同时保存与删除 API Key".into());
-    }
-    // Key 只交给 OS 凭据库，永不进入 SQLite、导出或日志。
-    if let Some(key) = input.api_key {
-        credentials::set(&input.provider, &key)?;
-    }
-    if input.remove_key {
-        credentials::delete(&input.provider)?;
-    }
-    conn.execute("INSERT INTO ai_settings(provider,model,vision) VALUES(?1,?2,?3) ON CONFLICT(provider) DO UPDATE SET model=excluded.model,vision=excluded.vision",params![input.provider,model,input.vision]).map_err(|e|e.to_string())?;
-    settings(conn)
 }
 
 fn request_body(provider: &str, model: &str, prompt: &str, image: Option<&str>) -> Value {
@@ -240,12 +153,13 @@ async fn request(
 #[tauri::command]
 pub async fn ai_settings(app: tauri::AppHandle) -> Result<AiSettings, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        settings(
+        ai_settings::settings(
             &*app
                 .state::<Store>()
                 .connection
                 .lock()
                 .map_err(|e| e.to_string())?,
+            &SystemCredentials,
         )
     })
     .await
@@ -257,13 +171,33 @@ pub async fn ai_save_settings(
     input: SettingsInput,
 ) -> Result<AiSettings, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        save_settings(
+        ai_settings::save(
             &*app
                 .state::<Store>()
                 .connection
                 .lock()
                 .map_err(|e| e.to_string())?,
             input,
+            &SystemCredentials,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn ai_remove_settings(
+    app: tauri::AppHandle,
+    provider: String,
+) -> Result<AiSettings, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        ai_settings::remove(
+            &*app
+                .state::<Store>()
+                .connection
+                .lock()
+                .map_err(|e| e.to_string())?,
+            &provider,
+            &SystemCredentials,
         )
     })
     .await
@@ -298,7 +232,7 @@ pub async fn ai_analyze_photo(
     let cloned = app.clone();
     let selected = photo_id.clone();
     let service = provider.clone();
-    let (model, image, root, revision) = tauri::async_runtime::spawn_blocking(move || {
+    let (model, key, image, root, revision) = tauri::async_runtime::spawn_blocking(move || {
         let state = cloned.state::<Store>();
         let conn = state.connection.lock().map_err(|e| e.to_string())?;
         let (model, vision) = config(&conn, &service)?;
@@ -315,6 +249,7 @@ pub async fn ai_analyze_photo(
         let bytes = fs::read(&path).map_err(|_| "缩略图缺失，请重新定位照片后重试")?;
         Ok::<_, String>((
             model,
+            credentials::get(&service)?,
             STANDARD.encode(bytes),
             crate::db::library_root(&conn)?,
             path,
@@ -322,10 +257,6 @@ pub async fn ai_analyze_photo(
     })
     .await
     .map_err(|e| e.to_string())??;
-    let service = provider.clone();
-    let key = tauri::async_runtime::spawn_blocking(move || credentials::get(&service))
-        .await
-        .map_err(|e| e.to_string())??;
     let text=request(&provider,&model,&key,prompt.as_deref().unwrap_or("请用中文分析这张摄影作品的主体、色彩、光线、构图、氛围与可搜索关键词。区分观察与推测，不识别人物身份，不猜测精确拍摄地点。"),Some(&image)).await?;
     let analysis = Analysis {
         photo_id,
@@ -358,18 +289,15 @@ pub async fn ai_run_text(
     provider: String,
     prompt: String,
 ) -> Result<String, String> {
-    let state = app.state::<Store>();
-    let model = {
-        config(
-            &*state.connection.lock().map_err(|e| e.to_string())?,
-            &provider,
-        )?
-        .0
-    };
     let service = provider.clone();
-    let key = tauri::async_runtime::spawn_blocking(move || credentials::get(&service))
-        .await
-        .map_err(|e| e.to_string())??;
+    let (model, key) = tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<Store>();
+        let conn = state.connection.lock().map_err(|e| e.to_string())?;
+        let (model, _) = config(&conn, &service)?;
+        Ok::<_, String>((model, credentials::get(&service)?))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     request(&provider, &model, &key, &prompt, None).await
 }
 

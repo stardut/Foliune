@@ -1,11 +1,13 @@
 use crate::{
-    backup,
+    backup, book_layout, book_tests, books,
     curation::CurationStore,
     db::{self, Store},
-    libraries,
+    groups, libraries,
     model_profiles::{self, ModelInput},
-    photos,
+    models::{GroupInput, Snapshot},
+    photos, planning, planning_tests,
     social::{self, SocialInput, SocialPlatform},
+    work_directory::runtime::delete_album,
 };
 use image::{Rgb, RgbImage};
 use serde_json::json;
@@ -44,6 +46,7 @@ fn model(ids: &[String]) -> ModelInput {
         gender: "女".into(),
         birthday: "1996-02-29".into(),
         height_cm: Some(173.5),
+        weight_kg: Some(56.25),
         bust_cm: Some(85.0),
         waist_cm: Some(62.0),
         hips_cm: Some(89.0),
@@ -64,6 +67,189 @@ fn draft(ids: &[String]) -> SocialInput {
 }
 
 #[test]
+fn album_deletion_keeps_model_samples_and_legacy_social_photos() {
+    let (_dir, store, ids) = setup(3);
+    let mut conn = store.connection.lock().unwrap();
+    let album = crate::groups::create(
+        &conn,
+        crate::models::GroupInput {
+            library: "work".into(),
+            name: "素材".into(),
+            description: String::new(),
+            capacity: None,
+        },
+    )
+    .unwrap()
+    .groups[0]
+        .id
+        .clone();
+    crate::groups::add(&mut conn, &album, &ids).unwrap();
+    let profile = model_profiles::save(&mut conn, None, model(&ids[..1])).unwrap();
+    let social = social::save(&mut conn, None, draft(&ids[1..2])).unwrap();
+    let state = crate::work_directory::runtime::delete_album(&mut conn, &album).unwrap();
+    assert_eq!(state.hidden_photo_ids, ids[2..]);
+    assert_eq!(state.photos.len(), 2);
+    assert_eq!(model_profiles::list(&conn).unwrap(), [profile.clone()]);
+    assert_eq!(social::list(&conn).unwrap(), [social]);
+    assert!(model_profiles::save(&mut conn, Some(&profile.id), model(&ids[2..])).is_err());
+}
+
+#[test]
+fn whole_record_deletion_hides_only_photos_that_lose_their_last_current_reference() {
+    let (dir, store, ids) = setup(9);
+    let mut conn = store.connection.lock().unwrap();
+    let [shared, book_only, plan_only, model_only, legacy_social, discarded, history, standalone, other_book] =
+        ids.as_slice()
+    else {
+        panic!("expected nine photos")
+    };
+    let group = |name: &str| GroupInput {
+        library: "work".into(),
+        name: name.into(),
+        description: String::new(),
+        capacity: None,
+    };
+    let album = groups::create(&conn, group("待删除相簿")).unwrap().groups[0]
+        .id
+        .clone();
+    let kept_album = groups::create(&conn, group("废弃照片相簿"))
+        .unwrap()
+        .groups
+        .into_iter()
+        .find(|group| group.id != album)
+        .unwrap()
+        .id;
+    groups::add(&mut conn, &album, &[shared.clone(), discarded.clone()]).unwrap();
+    groups::add(&mut conn, &kept_album, std::slice::from_ref(discarded)).unwrap();
+    groups::set_status(&mut conn, &kept_album, discarded, "discarded").unwrap();
+
+    let book_with_history =
+        |conn: &mut rusqlite::Connection, current: Vec<String>, historical: &str| {
+            let mut initial = current.clone();
+            initial.push(historical.into());
+            let book = books::create(conn, book_tests::input(initial)).unwrap();
+            let input = book_tests::input(current);
+            let layout = book_layout::generate(
+                input.chapters,
+                &input.template,
+                input.page_width,
+                input.page_height,
+            )
+            .unwrap();
+            books::save_version(conn, &book.book.id, &book.book.current_version_id, layout).unwrap()
+        };
+    let book = book_with_history(
+        &mut conn,
+        vec![shared.clone(), book_only.clone(), discarded.clone()],
+        history,
+    );
+    let kept_book = book_with_history(&mut conn, vec![other_book.clone()], book_only);
+    let plan = planning::save(
+        &mut conn,
+        None,
+        planning_tests::input(&[
+            shared.clone(),
+            plan_only.clone(),
+            legacy_social.clone(),
+            other_book.clone(),
+        ]),
+    )
+    .unwrap();
+    let model = model_profiles::save(
+        &mut conn,
+        None,
+        model(&[
+            model_only.clone(),
+            shared.clone(),
+            discarded.clone(),
+            other_book.clone(),
+        ]),
+    )
+    .unwrap();
+    let social = social::save(&mut conn, None, draft(std::slice::from_ref(legacy_social))).unwrap();
+    photos::update(
+        &mut conn,
+        shared,
+        json!({"title": "保存标题", "annotation": "保留批注"}),
+    )
+    .unwrap();
+
+    let before = db::snapshot_with_hidden(&conn).unwrap();
+    let photo_metadata = serde_json::to_value(&before.photos).unwrap();
+    let files: Vec<_> = before
+        .photos
+        .iter()
+        .flat_map(|photo| [&photo.original_path, &photo.thumbnail_path])
+        .map(|path| (path, fs::read(path).unwrap()))
+        .collect();
+    let source = dir.path().join("photo.png");
+    let source_bytes = fs::read(&source).unwrap();
+
+    let assert_hidden = |snapshot: Snapshot, expected: &[&String]| {
+        let mut expected = expected.iter().map(|id| (*id).clone()).collect::<Vec<_>>();
+        expected.sort();
+        assert_eq!(snapshot.hidden_photo_ids, expected);
+        assert_eq!(snapshot.photos.len() + expected.len(), ids.len());
+        assert!(snapshot
+            .photos
+            .iter()
+            .all(|photo| !expected.contains(&photo.id)));
+    };
+    assert_hidden(delete_album(&mut conn, &album).unwrap(), &[]);
+    assert_hidden(
+        books::delete(&mut conn, &book.book.id).unwrap(),
+        &[book_only],
+    );
+    assert_hidden(
+        planning::delete(&mut conn, &plan.id).unwrap(),
+        &[book_only, plan_only],
+    );
+    assert_hidden(
+        model_profiles::delete(&mut conn, &model.id).unwrap(),
+        &[book_only, plan_only, model_only, shared],
+    );
+    assert_hidden(
+        books::delete(&mut conn, &kept_book.book.id).unwrap(),
+        &[book_only, plan_only, model_only, shared, other_book],
+    );
+    let last = delete_album(&mut conn, &kept_album).unwrap();
+    assert_eq!(
+        last.photos
+            .iter()
+            .map(|photo| &photo.id)
+            .collect::<std::collections::HashSet<_>>(),
+        [legacy_social, history, standalone].into_iter().collect()
+    );
+    assert_eq!(social::list(&conn).unwrap(), [social]);
+    assert_eq!(
+        serde_json::to_value(&db::snapshot_with_hidden(&conn).unwrap().photos).unwrap(),
+        photo_metadata
+    );
+    for (path, bytes) in files {
+        assert_eq!(fs::read(path).unwrap(), bytes);
+    }
+    assert_eq!(fs::read(source).unwrap(), source_bytes);
+}
+
+#[test]
+fn failed_delete_snapshot_rolls_back_entity_and_photo_visibility() {
+    let (_dir, store, ids) = setup(2);
+    let mut conn = store.connection.lock().unwrap();
+    let profile = model_profiles::save(&mut conn, None, model(&ids[..1])).unwrap();
+    // Corrupt an unrelated visible row after the hide, so building the snapshot fails.
+    conn.execute_batch(
+        "CREATE TRIGGER fail_delete_snapshot AFTER UPDATE OF hidden_after_album_delete ON photos
+                        BEGIN UPDATE photos SET regions='invalid' WHERE id<>NEW.id; END;",
+    )
+    .unwrap();
+    assert!(model_profiles::delete(&mut conn, &profile.id).is_err());
+    assert_eq!(model_profiles::list(&conn).unwrap(), [profile]);
+    let state = db::snapshot(&conn).unwrap();
+    assert!(state.hidden_photo_ids.is_empty());
+    assert_eq!(state.photos.len(), ids.len());
+}
+
+#[test]
 fn editorial_crud_preserves_order_identity_originals_and_other_references() {
     let (dir, store, ids) = setup(3);
     let mut conn = store.connection.lock().unwrap();
@@ -78,6 +264,7 @@ fn editorial_crud_preserves_order_identity_originals_and_other_references() {
     assert_eq!(social.input.photo_ids, [ids[1].clone(), ids[0].clone()]);
     let mut edited = saved.input.clone();
     edited.name = "  新名字  ".into();
+    edited.weight_kg = Some(57.75);
     edited.photo_ids.reverse();
     edited.cover_photo_id = Some(ids[0].clone());
     let updated = model_profiles::save(&mut conn, Some(&saved.id), edited).unwrap();
@@ -94,14 +281,15 @@ fn editorial_crud_preserves_order_identity_originals_and_other_references() {
     drop(conn);
     drop(store);
     let reopened = Store::open(dir.path().join("managed")).unwrap();
-    let conn = reopened.connection.lock().unwrap();
+    let mut conn = reopened.connection.lock().unwrap();
     assert!(model_profiles::list(&conn).unwrap().contains(&updated));
     assert_eq!(social::list(&conn).unwrap(), [updated_social.clone()]);
     let encoded = serde_json::to_value(&updated).unwrap();
     assert_eq!(encoded["heightCm"], 173.5);
+    assert_eq!(encoded["weightKg"], 57.75);
     assert_eq!(encoded["coverPhotoId"], ids[0]);
     assert!(encoded.get("input").is_none());
-    model_profiles::delete(&conn, &saved.id).unwrap();
+    model_profiles::delete(&mut conn, &saved.id).unwrap();
     assert_eq!(model_profiles::list(&conn).unwrap(), [other]);
     assert_eq!(social::list(&conn).unwrap(), [updated_social]);
     social::delete(&conn, &social.id).unwrap();
@@ -117,7 +305,7 @@ fn editorial_crud_preserves_order_identity_originals_and_other_references() {
         .photos
         .iter()
         .all(|p| p.original_available));
-    assert!(model_profiles::delete(&conn, &saved.id)
+    assert!(model_profiles::delete(&mut conn, &saved.id)
         .unwrap_err()
         .contains("不存在"));
     assert!(social::delete(&conn, &social.id)
@@ -183,6 +371,13 @@ fn editorial_validation_rejects_invalid_inputs_and_unknown_updates() {
     for bad in cases {
         assert!(model_profiles::save(&mut conn, None, bad).is_err());
     }
+    for value in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut bad = input.clone();
+        bad.weight_kg = Some(value);
+        assert!(model_profiles::save(&mut conn, None, bad)
+            .unwrap_err()
+            .contains("体重"));
+    }
     assert!(model_profiles::list(&conn).unwrap().is_empty());
     assert!(
         model_profiles::save(&mut conn, Some("absent"), input.clone())
@@ -196,10 +391,17 @@ fn editorial_validation_rejects_invalid_inputs_and_unknown_updates() {
     no_body.birthday.clear();
     no_body.gender.clear();
     no_body.height_cm = None;
+    no_body.weight_kg = None;
     no_body.bust_cm = None;
     no_body.waist_cm = None;
     no_body.hips_cm = None;
-    model_profiles::save(&mut conn, None, no_body).unwrap();
+    let mut with_weight = no_body.clone();
+    with_weight.weight_kg = Some(301.25);
+    let saved = model_profiles::save(&mut conn, None, with_weight).unwrap();
+    assert_eq!(model_profiles::list(&conn).unwrap(), [saved.clone()]);
+    let cleared = model_profiles::save(&mut conn, Some(&saved.id), no_body).unwrap();
+    assert_eq!(cleared.input.weight_kg, None);
+    assert_eq!(model_profiles::list(&conn).unwrap(), [cleared]);
     let mut unknown = serde_json::to_value(draft(&ids)).unwrap();
     unknown["platform"] = json!("other");
     assert!(serde_json::from_value::<SocialInput>(unknown).is_err());
@@ -379,9 +581,11 @@ fn editorial_old_backup_initializes_empty_tables_before_restore_validation() {
     let (dir, store, _ids) = setup(1);
     let path = dir.path().join("backup.zip");
     backup::create(&store, &path).unwrap();
-    let legacy = mutate_backup(dir.path(), &path, "legacy", "DROP TABLE model_photos; DROP TABLE model_profiles; DROP TABLE social_photos; DROP TABLE social_drafts;");
+    let legacy = mutate_backup(dir.path(), &path, "legacy", "DROP TABLE model_photos; DROP TABLE model_profiles; DROP TABLE social_photos; DROP TABLE social_drafts; ALTER TABLE photos DROP COLUMN hidden_after_album_delete; PRAGMA user_version=2;");
     let restored = backup::restore(&store, &legacy).unwrap();
-    libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
+    let state = libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
+    assert_eq!(state.photos.len(), 1);
+    assert!(state.hidden_photo_ids.is_empty());
     let mut conn = store.connection.lock().unwrap();
     assert!(model_profiles::list(&conn).unwrap().is_empty());
     assert!(social::list(&conn).unwrap().is_empty());
@@ -412,6 +616,8 @@ fn editorial_restore_rejects_invalid_content_references_and_order_without_changi
         "UPDATE model_profiles SET tag_options='[]'",
         "UPDATE model_profiles SET tag_options='[\"\"]'",
         "UPDATE model_profiles SET height_cm=-1",
+        "UPDATE model_profiles SET weight_kg=-1",
+        "UPDATE model_profiles SET weight_kg='not-a-number'",
         "UPDATE model_profiles SET name=''",
         "UPDATE model_profiles SET created_at='invalid'",
         bad_cover.as_str(),
@@ -437,6 +643,37 @@ fn editorial_restore_rejects_invalid_content_references_and_order_without_changi
             [draft.clone()]
         );
     }
+}
+
+#[test]
+fn editorial_model_weight_migrates_existing_library_on_open() {
+    let (dir, store, ids) = setup(3);
+    let mut input = model(&[ids[2].clone(), ids[0].clone()]);
+    input.cover_photo_id = Some(ids[0].clone());
+    input.weight_kg = None;
+    let saved = {
+        let mut conn = store.connection.lock().unwrap();
+        let saved = model_profiles::save(&mut conn, None, input).unwrap();
+        conn.execute("ALTER TABLE model_profiles DROP COLUMN weight_kg", [])
+            .unwrap();
+        saved
+    };
+    drop(store);
+
+    let root = dir.path().join("managed");
+    let reopened = Store::open(root.clone()).unwrap();
+    let updated = {
+        let mut conn = reopened.connection.lock().unwrap();
+        assert_eq!(model_profiles::list(&conn).unwrap(), [saved.clone()]);
+        let mut input = saved.input;
+        input.weight_kg = Some(57.75);
+        model_profiles::save(&mut conn, Some(&saved.id), input).unwrap()
+    };
+    drop(reopened);
+
+    let reopened = Store::open(root).unwrap();
+    let conn = reopened.connection.lock().unwrap();
+    assert_eq!(model_profiles::list(&conn).unwrap(), [updated]);
 }
 
 #[test]

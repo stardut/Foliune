@@ -15,6 +15,15 @@ export interface ContextMenuAction {
 // bounded, and never replace their handlers while another popup is tracking.
 let popupOwner: symbol | null = null;
 export function isContextMenuTracking() { return popupOwner !== null; }
+const popupListeners = new Set<() => void>();
+export function subscribeContextMenu(listener: () => void) {
+  popupListeners.add(listener);
+  return () => { popupListeners.delete(listener); };
+}
+function setPopupOwner(owner: symbol | null) {
+  popupOwner = owner;
+  popupListeners.forEach((listener) => listener());
+}
 
 export function useContextMenu(scope: 'photo' | 'album' | 'book', context: string, onError: (message: string) => void) {
   const label = { photo: '照片', album: '相簿', book: '画册' }[scope];
@@ -38,7 +47,7 @@ export function useContextMenu(scope: 'photo' | 'album' | 'book', context: strin
 
   return async (actions: ContextMenuAction[], at: { x: number; y: number }, trigger: HTMLElement) => {
     if (popupOwner !== null || !mounted.current) return;
-    popupOwner = owner.current;
+    setPopupOwner(owner.current);
     const request = ++generation.current;
     const requestedContext = context;
     const valid = () => mounted.current && request === generation.current && requestedContext === current.current.context;
@@ -74,7 +83,7 @@ export function useContextMenu(scope: 'photo' | 'album' | 'book', context: strin
     } catch (cause) {
       if (valid()) current.current.onError(`无法打开${label}操作菜单：${message(cause)}`);
     } finally {
-      if (popupOwner === owner.current) popupOwner = null;
+      if (popupOwner === owner.current) setPopupOwner(null);
       if (!acted && valid() && trigger.isConnected) trigger.focus({ preventScroll: true });
     }
   };

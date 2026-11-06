@@ -2,7 +2,7 @@
 .social-workspace-header { display: flex; align-items: center; height: 36px; flex-shrink: 0; margin-bottom: 16px; }
 .social-thumbnail-missing { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 3px; color: var(--muted); font-size: 10px; }
 .social-editor-layout { display: grid; grid-template-columns: minmax(290px, .85fr) minmax(340px, 1.15fr); align-items: stretch; gap: clamp(32px, 5vw, 76px); flex: 1; min-height: 0; }
-.social-editor-tools { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0 8px 6px 2px; container-type: inline-size; }
+.social-editor-tools { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 6px 2px; container-type: inline-size; }
 .social-fields { border: 0; margin: 0; padding: 0; display: grid; gap: 17px; }
 .social-fields textarea { min-height: 110px; }
 .social-platform-picker { min-width: 0; margin: 0; padding: 0; border: 0; }

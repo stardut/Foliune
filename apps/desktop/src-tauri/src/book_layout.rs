@@ -58,6 +58,7 @@ pub fn generate(
         }
     }
     Ok(VersionInput {
+        _legacy_reflow_undo_id: None,
         label: "自动排版".into(),
         template: style.into(),
         page_width: width,
@@ -68,12 +69,20 @@ pub fn generate(
 }
 
 pub fn validate(conn: &Connection, input: &VersionInput) -> Result<(), String> {
+    validate_snapshot(conn, input, true)
+}
+
+pub(crate) fn validate_snapshot(
+    conn: &Connection,
+    input: &VersionInput,
+    require_visible_photos: bool,
+) -> Result<(), String> {
     template(&input.template)?;
     if !(400..=4000).contains(&input.page_width) || !(400..=4000).contains(&input.page_height) {
         return Err("画册页宽高需在 400–4000 之间".into());
     }
     if input.label.trim().is_empty() || input.label.chars().count() > 200 {
-        return Err("版本名称应为 1–200 个字符".into());
+        return Err("画册内部名称应为 1–200 个字符".into());
     }
     let mut chapters = HashSet::new();
     let mut selected = HashMap::new();
@@ -86,12 +95,13 @@ pub fn validate(conn: &Connection, input: &VersionInput) -> Result<(), String> {
         }
         for id in &chapter.photo_ids {
             if selected.insert(id, &chapter.id).is_some() {
-                return Err("同一照片不能重复选入一个版本".into());
+                return Err("同一照片不能重复选入画册".into());
             }
             let exists: bool = conn
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM photos WHERE id=?1)",
-                    [id],
+                    "SELECT EXISTS(SELECT 1 FROM photos
+                                   WHERE id=?1 AND (NOT ?2 OR hidden_after_album_delete=0))",
+                    rusqlite::params![id, require_visible_photos],
                     |row| row.get(0),
                 )
                 .map_err(|e| e.to_string())?;

@@ -2,16 +2,16 @@ import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } fro
 import { Plus, Search, X } from 'lucide-react';
 import type { ModelProfile } from '../../lib/model-types';
 import * as modelsApi from '../../lib/model-api';
-import { Busy, EmptyState, IconButton, Modal } from '../../components/ui';
+import { Busy, EmptyState, IconButton, Modal, WorkspaceHeader } from '../../components/ui';
 import { ModelEditor } from './ModelEditor';
 import { ModelDetail } from './ModelDetail';
 import { ModelOverviewRow } from './ModelOverviewRow';
 import { modelViewReducer, type ModelWorkspaceProps } from './model-workspace-state';
 import './models.css';
 
-export function ModelWorkspace(props: ModelWorkspaceProps) {
+export function ModelWorkspace({ initialModel, onBackToSearch, ...props }: ModelWorkspaceProps & { initialModel?: ModelProfile; onBackToSearch?: () => void }) {
   const [models, setModels] = useState<ModelProfile[]>([]);
-  const [view, navigate] = useReducer(modelViewReducer, { page: 'home' });
+  const [view, navigate] = useReducer(modelViewReducer, initialModel ? { page: 'detail', model: initialModel } : { page: 'home' });
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -41,12 +41,13 @@ export function ModelWorkspace(props: ModelWorkspaceProps) {
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
   }, [view.page]);
   useEffect(() => {
+    if (initialModel) return;
     let current = true; setLoading(true); setError('');
     void modelsApi.listModels().then((items) => { if (current) setModels(items); })
       .catch((cause: unknown) => { if (current) setError(cause instanceof Error ? cause.message : String(cause)); })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
-  }, [revision]);
+  }, [initialModel, revision]);
   const filtered = useMemo(() => {
     const term = query.trim().toLocaleLowerCase();
     return models.filter((model) => [model.name, model.city, model.contact, model.notes, ...model.tags].join(' ').toLocaleLowerCase().includes(term));
@@ -59,11 +60,14 @@ export function ModelWorkspace(props: ModelWorkspaceProps) {
     const id = deleting.id;
     deletingNow.current = true; setDeleteBusy(true); setDeleteError('');
     try {
-      await modelsApi.deleteModel(id);
+      const next = await modelsApi.deleteModel(id);
       if (!mounted.current) return;
+      props.onSnapshot(next);
       setModels((items) => items.filter((item) => item.id !== id));
       setDeleting(null);
-      if (view.page === 'detail' && view.model.id === id) navigate({ type: 'deleted' });
+      if (view.page === 'detail' && view.model.id === id) {
+        if (onBackToSearch) onBackToSearch(); else navigate({ type: 'deleted' });
+      }
     } catch (cause) { if (mounted.current) setDeleteError(cause instanceof Error ? cause.message : String(cause)); }
     finally { deletingNow.current = false; if (mounted.current) setDeleteBusy(false); }
   }
@@ -72,9 +76,12 @@ export function ModelWorkspace(props: ModelWorkspaceProps) {
     onClose={() => navigate({ type: 'back' })}
     onSaved={(saved) => { setModels((items) => [saved, ...items.filter((item) => item.id !== saved.id)]); navigate({ type: 'saved', model: saved }); }} />;
   else if (view.page === 'detail') content = <ModelDetail model={view.model} photos={props.photos} onRelink={props.onRelink} disabled={deleteBusy}
-    onBack={() => navigate({ type: 'back' })} onEdit={() => navigate({ type: 'edit' })} onDelete={() => requestDelete(view.model)} />;
+    backLabel={onBackToSearch ? '返回搜索' : undefined} onBack={onBackToSearch ?? (() => navigate({ type: 'back' }))}
+    onEdit={() => navigate({ type: 'edit' })} onDelete={() => requestDelete(view.model)} />;
   else content = <section className="model-home" aria-label="模特档案">
-    <header className="workspace-intro"><div className="model-home-title"><h1>模特</h1><p className="photo-count">{models.length} 份档案</p></div><button type="button" className="button" disabled={loading} onClick={() => navigate({ type: 'new' })}><Plus size={15} />新建档案</button></header>
+    <WorkspaceHeader title="模特" count={`${models.length} 份档案`}>
+      <button type="button" className="button" disabled={loading} onClick={() => navigate({ type: 'new' })}><Plus size={15} />新建档案</button>
+    </WorkspaceHeader>
     <div className="model-workspace">
       {loading ? <Busy label="正在读取模特档案" /> : error ? <div className="model-load-error"><p className="form-error" role="alert">{error}</p><button type="button" className="button" onClick={() => setRevision((value) => value + 1)}>重新读取</button></div> : <>
         {!!models.length && <div className="search-field"><Search size={17} /><input aria-label="搜索模特" placeholder="搜索姓名、城市或风格" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <IconButton label="清空搜索" onClick={() => setQuery('')}><X size={15} /></IconButton>}</div>}
@@ -84,6 +91,6 @@ export function ModelWorkspace(props: ModelWorkspaceProps) {
   </section>;
   return <div className="model-workspace-view" ref={viewRoot}>{content}
     {deleteError && !deleting && <p className="form-error model-error" role="alert">{deleteError}</p>}
-    {deleting && <Modal title="删除模特档案？" onClose={closeDelete}><p>将删除“{deleting.name}”的资料与样片关联，图库照片和原件保留。</p>{deleteError && <p className="form-error" role="alert">{deleteError}</p>}<div className="form-actions"><button type="button" className="button" autoFocus disabled={deleteBusy} onClick={closeDelete}>取消</button><button type="button" className="button button-danger" disabled={deleteBusy} onClick={() => void remove()}>{deleteBusy ? '删除中…' : '删除档案'}</button></div></Modal>}
+    {deleting && <Modal title="删除模特档案？" onClose={closeDelete}><p>将删除“{deleting.name}”的资料。仅在此档案使用的样片将从全局搜索和图库选片中移除，照片文件会保留。</p>{deleteError && <p className="form-error" role="alert">{deleteError}</p>}<div className="form-actions"><button type="button" className="button" autoFocus disabled={deleteBusy} onClick={closeDelete}>取消</button><button type="button" className="button button-danger" disabled={deleteBusy} onClick={() => void remove()}>{deleteBusy ? '删除中…' : '删除档案'}</button></div></Modal>}
   </div>;
 }

@@ -21,6 +21,7 @@ export interface Photo {
   thumbnailUrl: string;
   originalAvailable: boolean;
   thumbnailAvailable: boolean;
+  availability?: 'available' | 'offline' | 'missing';
   width: number;
   height: number;
   tags: string[];
@@ -33,6 +34,24 @@ export interface Photo {
   importedAt: string;
 }
 
+export interface PhotoMetadata {
+  camera: string | null;
+  lens: string | null;
+  focalLengthMm: number | null;
+  focalLength35mm: number | null;
+  aperture: number | null;
+  exposureSeconds: number | null;
+  iso: number | null;
+  exposureCompensationEv: number | null;
+  exposureMode: 'auto' | 'manual' | 'autoBracket' | null;
+  meteringMode: 'average' | 'centerWeightedAverage' | 'spot' | 'multiSpot' | 'pattern' | 'partial' | null;
+  whiteBalance: 'auto' | 'manual' | null;
+  flashFired: boolean | null;
+  exifReadFailed: boolean;
+  fileSizeBytes: number;
+  fileFormat: 'JPEG' | 'PNG' | 'WebP';
+}
+
 export interface Group {
   id: string;
   library: LibraryKind;
@@ -40,6 +59,7 @@ export interface Group {
   description: string;
   capacity: number | null;
   createdAt: string;
+  boundFolder?: string;
 }
 
 export interface Membership {
@@ -51,6 +71,7 @@ export interface Membership {
 
 export interface LibrarySnapshot {
   photos: Photo[];
+  hiddenPhotoIds?: string[];
   groups: Group[];
   memberships: Membership[];
 }

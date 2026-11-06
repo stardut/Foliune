@@ -2,7 +2,7 @@
 .modal[open]:has(> .photo-picker) { display: flex; }
 .modal:has(> .photo-picker) > .modal-header { flex-shrink: 0; }
 .photo-picker { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.photo-picker-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 6px; margin: -6px; scrollbar-gutter: stable; }
+.photo-picker-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 6px; margin: -6px; }
 .photo-picker-scroll .empty-state { min-height: 200px; }
 .photo-picker > .page-controls { flex-shrink: 0; margin: 16px 0 0; padding: 0; }
 .photo-picker-tools { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; }

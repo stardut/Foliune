@@ -1,0 +1,26 @@
+/* Offline display faces for shelf covers only. Importing registers the fonts;
+   cover components opt in explicitly. App chrome, book pages and HTML export
+   keep their existing font systems. Sources and licences accompany the files. */
+@font-face {
+  font-family: 'Foliune Cover CJK';
+  src: url('../../assets/fonts/book-covers/lxgw-wenkai-regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Foliune Cover Latin';
+  src: url('../../assets/fonts/book-covers/bodoni-moda.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Foliune Cover Latin';
+  src: url('../../assets/fonts/book-covers/bodoni-moda-italic.woff2') format('woff2');
+  font-style: italic;
+  font-weight: 400 900;
+  font-display: swap;
+}

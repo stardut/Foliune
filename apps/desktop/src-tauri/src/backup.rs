@@ -86,7 +86,6 @@ pub fn create(store: &Store, path: &Path) -> Result<BackupResult, String> {
         return Err("备份文件请使用 .zip 扩展名".into());
     }
     let conn = store.connection.lock().map_err(|e| e.to_string())?;
-    let state = db::snapshot(&conn)?;
     let temporary = store.root.join(format!(".backup-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&temporary).map_err(|e| e.to_string())?;
     let output = path
@@ -97,14 +96,24 @@ pub fn create(store: &Store, path: &Path) -> Result<BackupResult, String> {
         let database = temporary.join("library.sqlite");
         conn.backup("main", &database, None)
             .map_err(|e| e.to_string())?;
+        let state = {
+            let copy = Connection::open(&database).map_err(|e| e.to_string())?;
+            crate::work_directory::discard_sync_jobs(&copy)?;
+            db::snapshot_with_hidden(&copy)?
+        };
         let mut files = vec![("library.sqlite".to_string(), database)];
         let mut names = HashSet::new();
         names.insert("library.sqlite".to_string());
         for photo in &state.photos {
+            let external = crate::work_directory::is_locator(&photo.original_path)
+                || crate::local_photo::is_locator(&photo.original_path);
             for (directory, source) in [
                 ("originals", &photo.original_path),
                 ("thumbnails", &photo.thumbnail_path),
             ] {
+                if external && directory == "originals" {
+                    continue;
+                }
                 let source = Path::new(source);
                 let filename = source
                     .file_name()
@@ -164,7 +173,7 @@ pub fn create(store: &Store, path: &Path) -> Result<BackupResult, String> {
         fs::rename(&output, path).map_err(|e| e.to_string())?;
         Ok(BackupResult {
             path: path.to_string_lossy().into(),
-            photo_count: state.photos.len(),
+            photo_count: state.photos.len() - state.hidden_photo_ids.len(),
         })
     })();
     let cleanup = fs::remove_dir_all(&temporary).map_err(|e| e.to_string());
@@ -254,6 +263,16 @@ pub fn restore(store: &Store, path: &Path) -> Result<RestoreResult, String> {
         if integrity != "ok" {
             return Err("备份数据库完整性检查失败".into());
         }
+        let has_triggers: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='trigger')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if has_triggers {
+            return Err("备份数据库包含不支持的触发器".into());
+        }
         // Only backups with none of the editorial tables predate these modules.
         // A partial schema can indicate lost records/references and must not be repaired as empty.
         let editorial_tables: i64 = conn.query_row(
@@ -270,10 +289,18 @@ pub fn restore(store: &Store, path: &Path) -> Result<RestoreResult, String> {
         if planning_tables != 0 && planning_tables != 2 {
             return Err("备份的拍摄策划数据表不完整".into());
         }
+        db::migrate_photos(&conn)?;
         crate::model_profiles::init(&conn)?;
         crate::social::init(&conn)?;
         crate::planning::init(&conn)?;
-        let state = db::snapshot(&conn)?;
+        crate::work_directory::prepare_restore(&conn)?;
+        // An archive cannot grant access to a local path on the restore host.
+        conn.execute(
+            "UPDATE photos SET original_path=?1 WHERE substr(original_path, 1, length(?1))=?1",
+            [crate::local_photo::PREFIX],
+        )
+        .map_err(|e| e.to_string())?;
+        let state = db::snapshot_with_hidden(&conn)?;
         let tx = conn.transaction().map_err(|e| e.to_string())?;
         let mut used = HashSet::from(["library.sqlite".to_string()]);
         for photo in &state.photos {
@@ -282,6 +309,13 @@ pub fn restore(store: &Store, path: &Path) -> Result<RestoreResult, String> {
                 ("originals", &photo.original_path),
                 ("thumbnails", &photo.thumbnail_path),
             ] {
+                if directory == "originals"
+                    && (crate::work_directory::is_locator(old)
+                        || crate::local_photo::is_locator(old))
+                {
+                    paths.push(old.clone());
+                    continue;
+                }
                 let filename = recorded_filename(old)?;
                 let relative = format!("{directory}/{filename}");
                 if !expected.contains(&relative) {
@@ -322,15 +356,31 @@ pub fn restore(store: &Store, path: &Path) -> Result<RestoreResult, String> {
         if bad_foreign_key {
             return Err("备份数据库引用不完整".into());
         }
-        for book in crate::books::list(&tx)? {
-            let detail = crate::books::get(&tx, &book.id)?;
-            for version in detail.versions {
-                crate::book_layout::validate(&tx, &version.input)?;
-            }
+        let hidden_album_member: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM memberships m JOIN photos p ON p.id=m.photo_id
+                               WHERE p.hidden_after_album_delete=1)",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if hidden_album_member {
+            return Err("备份的相簿引用了已移出图库的照片".into());
         }
+        crate::books::validate_archive(&tx)?;
         crate::model_profiles::validate_all(&tx)?;
         crate::social::validate_all(&tx)?;
         crate::planning::validate_all(&tx)?;
+        let authorized: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM work_directory_roots WHERE authorized<>0)",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if authorized {
+            return Err("恢复的作品目录尚未授权".into());
+        }
         tx.commit().map_err(|e| e.to_string())?;
         conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
             .map_err(|e| e.to_string())?;
@@ -351,7 +401,7 @@ pub fn restore(store: &Store, path: &Path) -> Result<RestoreResult, String> {
         fs::rename(&temporary, &destination).map_err(|e| e.to_string())?;
         Ok(RestoreResult {
             library,
-            photo_count: state.photos.len(),
+            photo_count: state.photos.len() - state.hidden_photo_ids.len(),
         })
     })();
     if result.is_err() && temporary.exists() {

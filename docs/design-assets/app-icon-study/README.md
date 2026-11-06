@@ -37,6 +37,8 @@
 
 ## 历史：C 折面结构稿
 
+以下历史渲染命令中的 `/path/to/node_modules/sharp` 需替换为本机已安装的 `sharp` 模块目录。
+
 失败双面稿的问题不是明暗不足：宽灰面占据竖干大部分，顶端、臂根和底端没有对应几何变化，64px 的轻折线消失后仍只是双色填充。本轮允许调整局部外轮廓，先构成闭合的面，再赋予明暗。
 
 先看 [fold-structure-board.png](fold-structure-board.png)：512px 主图、仅与失败 clean 稿比较，以及真实 128 / 64 / 32px 深浅底成对检查。失败稿不是另一个可选方向。
@@ -54,7 +56,7 @@
 资产为 `c-fold-structure.svg/png`、`c-fold-structure-128.png`、`c-fold-structure-64.png`、`c-fold-structure-32.png`，检查记录见 `c-fold-structure-checks.json`。SVG XML、无滤镜/渐变/描边/字体/外部资源和四张 RGBA PNG 的尺寸、透明留白检查通过。生产六文件仍与旧厚版哈希一致，没有应用构建、服务或 UI 改动。
 
 ```sh
-node docs/design-assets/app-icon-study/render-fold-structure.mjs /Users/junran/.codex/skills/zhinengbaoxiao/node_modules/sharp
+node docs/design-assets/app-icon-study/render-fold-structure.mjs /path/to/node_modules/sharp
 python3 docs/design-assets/app-icon-study/render-fold-structure-board.py
 ```
 
@@ -76,7 +78,7 @@ python3 docs/design-assets/app-icon-study/render-fold-structure-board.py
 资产为 `c-clean-planes.svg/png`、`c-clean-planes-128.png`、`c-clean-planes-64.png`、`c-clean-planes-32.png`；检查见 `c-clean-planes-checks.json`。已通过 SVG XML、无外部资源、正面轮廓一致、无 filter / gradient / stroke / transform，以及四张 PNG 的尺寸、RGBA 与透明外留白检查。本轮生产六文件 SHA-256 与旧厚版 manifest 保持一致，没有前端、服务或构建操作。
 
 ```sh
-node docs/design-assets/app-icon-study/render-clean-planes.mjs /Users/junran/.codex/skills/zhinengbaoxiao/node_modules/sharp
+node docs/design-assets/app-icon-study/render-clean-planes.mjs /path/to/node_modules/sharp
 python3 docs/design-assets/app-icon-study/render-clean-planes-board.py
 ```
 
@@ -96,7 +98,7 @@ python3 docs/design-assets/app-icon-study/render-clean-planes-board.py
 SVG 可解析、内部引用无外链，正面轮廓一致；四张 RGBA PNG 尺寸与透明留白检查通过。设计阶段确认生产资源未变后，主代理与独立审查实际看图无必须返修项，随后执行下述资源接入。本轮未修改界面、前端或服务，未重新构建应用；实际包与 Dock 待验证。
 
 ```sh
-node docs/design-assets/app-icon-study/render-c-depth.mjs /Users/junran/.codex/skills/zhinengbaoxiao/node_modules/sharp
+node docs/design-assets/app-icon-study/render-c-depth.mjs /path/to/node_modules/sharp
 python3 docs/design-assets/app-icon-study/render-depth-board.py
 ```
 
@@ -122,7 +124,7 @@ python3 docs/design-assets/app-icon-study/render-depth-board.py
 已实际查看新对照板：32px 中长短臂与竖干分离清楚，内弧在小尺寸中自然收敛，不依靠细装饰维持识别。SVG XML、无外链/字体/位图/滤镜检查，以及五张 PNG 的尺寸、RGBA 和透明外留白检查通过，记录见 `c-refined-checks.json`。主稿已通过主代理与独立视觉审查，已生成应用资源；原生包及 Dock 待验收。
 
 ```sh
-node docs/design-assets/app-icon-study/render-c-refined.mjs /Users/junran/.codex/skills/zhinengbaoxiao/node_modules/sharp
+node docs/design-assets/app-icon-study/render-c-refined.mjs /path/to/node_modules/sharp
 python3 docs/design-assets/app-icon-study/render-c-refined-board.py
 ```
 
@@ -167,7 +169,7 @@ python3 docs/design-assets/app-icon-study/render-c-refined-board.py
 本机使用已有 sharp 0.34.5 / librsvg 2.61.2，将 SVG 渲染为 RGBA PNG；未安装项目依赖。生成命令从仓库根目录执行：
 
 ```sh
-node docs/design-assets/app-icon-study/render-study.mjs /Users/junran/.codex/skills/zhinengbaoxiao/node_modules/sharp
+node docs/design-assets/app-icon-study/render-study.mjs /path/to/node_modules/sharp
 python3 docs/design-assets/app-icon-study/render-board.py
 ```
 

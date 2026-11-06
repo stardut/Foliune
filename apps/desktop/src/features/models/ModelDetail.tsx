@@ -6,17 +6,21 @@ import { PhotoImage } from '../../components/PhotoImage';
 import { EmptyState, IconButton } from '../../components/ui';
 import { PhotoReview } from '../PhotoReview';
 
-export function ModelDetail({ model, photos, onBack, onEdit, onDelete, disabled = false, onRelink }: {
+export function ModelDetail({ model, photos, onBack, onEdit, onDelete, disabled = false, onRelink, backLabel = '返回模特' }: {
   model: ModelProfile; photos: Photo[]; onBack: () => void; onEdit: () => void; onDelete: () => void; disabled?: boolean;
-  onRelink?: (photo: Photo) => Promise<void>;
+  onRelink?: (photo: Photo) => Promise<void>; backLabel?: string;
 }) {
   const [preview, setPreview] = useState<string | null>(null);
   const photoMap = useMemo(() => new Map(photos.map((photo) => [photo.id, photo])), [photos]);
   const ordered = model.photoIds.flatMap((id) => { const photo = photoMap.get(id); return photo ? [photo] : []; });
-  const fields = [['性别', model.gender], ['常驻城市', model.city], ['生日', model.birthday], ['联系方式', model.contact]].filter(([, value]) => value.trim());
+  const fields = [
+    ['性别', model.gender], ['常驻城市', model.city], ['生日', model.birthday], ['联系方式', model.contact],
+    ['身高', model.heightCm == null ? '' : `${model.heightCm} cm`],
+    ['体重', model.weightKg == null ? '' : `${model.weightKg} kg`],
+  ].filter(([, value]) => value.trim());
   const hasProfile = fields.length > 0 || model.tags.length > 0 || !!model.notes.trim();
   return <section className="model-workspace model-detail" aria-label={`${model.name}的档案`}>
-    <header className="workspace-intro model-editor-header"><div className="model-editor-heading"><IconButton label="返回模特" disabled={disabled} onClick={onBack}><ArrowLeft size={18} /></IconButton><h1>{model.name}</h1></div><div className="workspace-tools"><IconButton label="删除档案" disabled={disabled} onClick={onDelete}><Trash2 size={16} /></IconButton><button type="button" className="button" disabled={disabled} onClick={onEdit}><Pencil size={14} />编辑档案</button></div></header>
+    <header className="workspace-intro model-editor-header"><div className="model-editor-heading"><IconButton label={backLabel} disabled={disabled} onClick={onBack}><ArrowLeft size={18} /></IconButton><h1>{model.name}</h1></div><div className="workspace-tools"><IconButton label="删除档案" disabled={disabled} onClick={onDelete}><Trash2 size={16} /></IconButton><button type="button" className="button" disabled={disabled} onClick={onEdit}><Pencil size={14} />编辑档案</button></div></header>
     <div className="model-detail-layout">
       {hasProfile && <section className="model-profile-readonly model-profile-card" aria-label="基本资料">
         {fields.length > 0 && <dl>{fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}

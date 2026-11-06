@@ -69,6 +69,104 @@ fn import_preserves_original_and_persists_metadata() {
 }
 
 #[test]
+fn local_import_keeps_only_thumbnail_and_reads_original_at_selected_path() {
+    let (root, store) = store();
+    let path = fixture(&root, "潮汐 #1.webp");
+    let original = std::fs::read(&path).unwrap();
+    let (result, signatures) =
+        photos::import_local(&store, vec![path.clone()], "collection", None).unwrap();
+    assert!(result.failures.is_empty());
+    let photo = &result.snapshot.photos[0];
+    assert_eq!(result.imported_ids, [photo.id.clone()]);
+    assert_eq!(
+        photo.original_path,
+        crate::local_photo::locator(std::path::Path::new(&path)).unwrap()
+    );
+    assert_eq!(
+        signatures[&photo.id],
+        crate::local_photo::signature(&photo.original_path).unwrap()
+    );
+    assert!(photo.original_available && photo.thumbnail_available);
+    assert_eq!(photo.availability, None);
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    assert_eq!(
+        std::fs::read_dir(store.root.join("originals"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(
+        std::fs::read_dir(store.root.join("thumbnails"))
+            .unwrap()
+            .count(),
+        1
+    );
+
+    let renamed = root.path().join("renamed.webp");
+    std::fs::rename(&path, &renamed).unwrap();
+    let missing = snapshot(&store.connection.lock().unwrap()).unwrap();
+    assert!(!missing.photos[0].original_available);
+    assert!(missing.photos[0].thumbnail_available);
+    assert_eq!(missing.photos[0].availability, None);
+    assert!(photos::relink(&store, &photo.id, &renamed).is_err());
+    std::fs::rename(renamed, &path).unwrap();
+
+    let conn = store.connection.lock().unwrap();
+    assert!(snapshot(&conn).unwrap().photos[0].original_available);
+    let reader = crate::work_directory::original(&conn, &photo.id, &photo.original_path).unwrap();
+    assert_eq!(reader.read().unwrap(), original);
+    std::fs::write(path, b"RIFF\x04\x00\x00\x00WAVE").unwrap();
+    assert!(reader.read().is_err());
+}
+
+#[test]
+fn local_import_database_error_removes_thumbnail_and_keeps_source() {
+    let (root, store) = store();
+    let path = fixture(&root, "rollback.png");
+    let original = std::fs::read(&path).unwrap();
+    store
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER reject_photo BEFORE INSERT ON photos
+             BEGIN SELECT RAISE(ABORT, 'reject for rollback test'); END;",
+        )
+        .unwrap();
+    let (result, signatures) =
+        photos::import_local(&store, vec![path.clone()], "work", None).unwrap();
+    assert_eq!(result.failures.len(), 1);
+    assert!(result.snapshot.photos.is_empty() && signatures.is_empty());
+    assert_eq!(
+        std::fs::read_dir(store.root.join("thumbnails"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+}
+
+#[cfg(unix)]
+#[test]
+fn local_original_rejects_a_path_replaced_with_a_symlink() {
+    let (root, store) = store();
+    let path = fixture(&root, "selected.jpg");
+    let (result, _) = photos::import_local(&store, vec![path.clone()], "work", None).unwrap();
+    let photo = &result.snapshot.photos[0];
+    let unrelated = fixture(&root, "unrelated.jpg");
+    std::fs::remove_file(&path).unwrap();
+    std::os::unix::fs::symlink(unrelated, path).unwrap();
+    let conn = store.connection.lock().unwrap();
+    assert!(!snapshot(&conn).unwrap().photos[0].original_available);
+    assert!(
+        crate::work_directory::original(&conn, &photo.id, &photo.original_path)
+            .unwrap()
+            .read()
+            .is_err()
+    );
+}
+
+#[test]
 fn corrupt_photo_leaves_no_database_or_managed_files() {
     let (root, store) = store();
     let source = root.path().join("broken.jpg");
@@ -181,9 +279,14 @@ fn discard_is_local_and_restore_enforces_capacity_atomically() {
             .count(),
         2
     );
-    groups::delete(&store.connection.lock().unwrap(), &first_group).unwrap();
-    let after_delete = crate::db::snapshot(&store.connection.lock().unwrap()).unwrap();
-    assert_eq!(after_delete.photos.len(), 2);
+    let after_delete = crate::work_directory::runtime::delete_album(
+        &mut store.connection.lock().unwrap(),
+        &first_group,
+    )
+    .unwrap();
+    assert_eq!(after_delete.photos.len(), 1);
+    assert_eq!(after_delete.photos[0].id, first);
+    assert_eq!(after_delete.hidden_photo_ids, [second]);
     assert!(after_delete
         .memberships
         .iter()

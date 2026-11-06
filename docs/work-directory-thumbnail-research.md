@@ -2,7 +2,7 @@
 
 2026-11-05 初始调研。优先优化 JPEG 解码和缩小尺寸。**libjpeg-turbo 缩放解码是本机组件诊断中最快的候选。** Image I/O 直接生成缩略图在同一批样本上没有胜过同一框架的全图解码后缩放。若希望保留当前解码行为，还可单独测 Rust SIMD 缩放。EXIF 内嵌小图不适合作为正式缩略图的捷径。
 
-2026-11-06，macOS 作品目录 JPEG 已接入 Image I/O 全图解码后缩放，保留原件校验和相簿提交边界。相同 75 张照片的原生 release 对照中，确认到末本提交中位数从 8.80 秒降至 6.45 秒。见[桌面验收](desktop-verification.md#2026-11-06-作品目录-jpeg-同步)及[原生计时明细](../.build/verification/work-directory-imageio-ab/results.md)。
+2026-11-06，macOS 作品目录 JPEG 已接入 Image I/O 全图解码后缩放，保留原件校验和相簿提交边界。相同 75 张照片的原生 release 对照中，确认到末本提交中位数从 8.80 秒降至 6.45 秒。见本地桌面验收记录及[原生计时明细](../.build/verification/work-directory-imageio-ab/results.md)。
 
 ## 实测瓶颈与现有契约
 

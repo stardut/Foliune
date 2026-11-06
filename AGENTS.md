@@ -38,7 +38,7 @@ Foliune 面向资深摄影爱好者和摄影师。以下两条基调约束后续
 - 初次进入项目、安装或构建时，读 [README.md](README.md)，以当前配置核对入口、依赖和命令。
 - 改产品行为时，读 [产品约定](docs/product.md) 的相关规则；改 IPC、持久化、文件管理或模块边界时，读 [工程边界](docs/architecture.md) 并核对实现。
 - 改图库展览布局时，读 [展览布局说明](docs/exhibition-refinement.md)，并核对相关代码。
-- 处理构建问题时查 [构建验证记录](docs/build-verification.md)；规划桌面验收时查 [桌面验收记录](docs/desktop-verification.md)，据本次改动补充验证。
+- 处理构建问题时查本地 `docs/build-verification.md`，规划桌面验收时查本地 `docs/desktop-verification.md`。记录随本机工作区保存，如存在则核对并补充本次验证。
 - 文档中的旧布局、完成状态和机器信息只是历史证据；与当前代码或最新用户指令冲突时说明差异，不直接沿用。
 - 主代理负责范围、接口与交付；实际开发交给子代理，默认 `gpt-6.1-sol`、`high`、`fork_turns="none"`，提供完成子任务所需上下文。简单文档修改无需组建团队。
 - 开发与独立验收分工；验收者根据需求、代码和实际运行结果判断，不仅复述实现者结论。

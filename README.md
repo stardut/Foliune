@@ -89,4 +89,4 @@ Foliune 是一款面向摄影师和摄影爱好者的本地桌面应用。把喜
 
 Foliune 免费，计划开源。正式许可证尚未确定，当前仓库尚未授予开源许可。
 
-[反馈问题](https://github.com/stardut/Foliune/issues) · [开发与构建](docs/development.md) · [产品约定](docs/product.md) · [设计规范](docs/design.md)
+[反馈问题](https://github.com/stardut/Foliune/issues) · [产品约定](docs/product.md) · [设计规范](docs/design.md)

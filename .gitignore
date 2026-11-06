@@ -30,6 +30,12 @@ DerivedData/
 xcuserdata/
 .swiftpm/
 
+# 本地开发、构建和验收记录
+/docs/development.md
+/docs/build-verification.md
+/docs/rain-glass-material.md
+/docs/desktop-verification.md
+
 # macOS 应用与安装包
 *.app/
 *.dmg

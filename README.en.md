@@ -92,4 +92,4 @@ Use a command-line interface (CLI) to let external agents help organize photogra
 
 Foliune is free, with plans to become open source. A formal license has not yet been selected, and this repository does not currently grant an open-source license.
 
-[Report an issue](https://github.com/stardut/Foliune/issues) · [Development & build guide (中文)](docs/development.md) · [Product principles (中文)](docs/product.md) · [Design guidelines (中文)](docs/design.md)
+[Report an issue](https://github.com/stardut/Foliune/issues) · [Product principles (中文)](docs/product.md) · [Design guidelines (中文)](docs/design.md)

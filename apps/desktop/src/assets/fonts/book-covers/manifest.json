@@ -1,0 +1,58 @@
+[
+  {
+    "file": "lxgw-wenkai-regular.woff2",
+    "bytes": 8099268,
+    "sha256": "59e177a84866d4601c9f3930a59c6f18a28b356d9a7b8efd96d1e9e53f54eb58",
+    "sourceSha256": "2d73eea94ad808999d90c0000c239a84a33b09d4bc6ab6c5b8bbf1eda8a7fc8b",
+    "glyphs": 47336,
+    "unicodeMappings": 46926,
+    "cjkMappings": 30580,
+    "axes": []
+  },
+  {
+    "file": "bodoni-moda.woff2",
+    "bytes": 74372,
+    "sha256": "99846cc37bb4b3f43db103b15e259f333df784dd6252331f327d2cea7ceea6fb",
+    "sourceSha256": "550f5e34ee0a828d7941b1fe9bc58b34e5260d3f33a61532e6d0a0114e79a5cf",
+    "glyphs": 563,
+    "unicodeMappings": 428,
+    "cjkMappings": 0,
+    "axes": [
+      {
+        "tag": "wght",
+        "min": 400.0,
+        "default": 400.0,
+        "max": 900.0
+      },
+      {
+        "tag": "opsz",
+        "min": 6.0,
+        "default": 11.0,
+        "max": 96.0
+      }
+    ]
+  },
+  {
+    "file": "bodoni-moda-italic.woff2",
+    "bytes": 85000,
+    "sha256": "62755d5579f65068ef031614a3214a56bbe3c95d45fa957f8789a1fa931a8dbe",
+    "sourceSha256": "dfff1619f8f6871c6372f8855b67211f9a73b4e93d45aca868cd8f46a48622de",
+    "glyphs": 563,
+    "unicodeMappings": 428,
+    "cjkMappings": 0,
+    "axes": [
+      {
+        "tag": "wght",
+        "min": 400.0,
+        "default": 400.0,
+        "max": 900.0
+      },
+      {
+        "tag": "opsz",
+        "min": 6.0,
+        "default": 11.0,
+        "max": 96.0
+      }
+    ]
+  }
+]

@@ -49,15 +49,7 @@ pub fn info(base: &Path, id: &str) -> Result<LibraryInfo, String> {
 
 pub fn list(store: &Store) -> Result<LibraryList, String> {
     let current = db::library_root(&*store.connection.lock().map_err(|e| e.to_string())?)?;
-    let current_id = if current == store.root {
-        "default".into()
-    } else {
-        current
-            .file_name()
-            .and_then(|id| id.to_str())
-            .ok_or("图库路径无效")?
-            .into()
-    };
+    let current_id = library_id(&store.root, &current)?;
     let mut libraries = vec![info(&store.root, "default")?];
     let parent = store.root.join("libraries");
     if parent.exists() {
@@ -78,7 +70,30 @@ pub fn list(store: &Store) -> Result<LibraryList, String> {
     })
 }
 
+pub(crate) fn library_id(base: &Path, current: &Path) -> Result<String, String> {
+    Ok(if current == base {
+        "default".into()
+    } else {
+        current
+            .file_name()
+            .and_then(|id| id.to_str())
+            .ok_or("图库路径无效")?
+            .into()
+    })
+}
+
+#[cfg(test)]
 pub fn switch(store: &Store, drafts: &CurationStore, id: &str) -> Result<Snapshot, String> {
+    switch_inner(store, drafts, id, None, || {})
+}
+
+fn switch_inner(
+    store: &Store,
+    drafts: &CurationStore,
+    id: &str,
+    links: Option<&crate::link_import::LinkImportStore>,
+    on_switched: impl FnOnce(),
+) -> Result<Snapshot, String> {
     let library = info(&store.root, id)?;
     let root = PathBuf::from(&library.path);
     if !root.join("library.sqlite").is_file() {
@@ -93,8 +108,15 @@ pub fn switch(store: &Store, drafts: &CurationStore, id: &str) -> Result<Snapsho
         .connection
         .into_inner()
         .map_err(|e| e.to_string())?;
-    let state = db::snapshot(&next)?;
+    let mut state = db::snapshot(&next)?;
     let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
+    let changed = db::library_root(&conn)? != canonical;
+    if !changed {
+        state = db::snapshot(&conn)?;
+    }
+    if let Some(links) = links {
+        links.cancel_all()?;
+    }
     curation::cancel_all(store, drafts)?;
     let pointer = store.root.join("library-selection.json");
     if id == "default" {
@@ -113,6 +135,9 @@ pub fn switch(store: &Store, drafts: &CurationStore, id: &str) -> Result<Snapsho
         }
     }
     std::mem::swap(&mut *conn, &mut next);
+    if changed {
+        on_switched();
+    }
     Ok(state)
 }
 
@@ -123,7 +148,15 @@ pub fn libraries_list(store: State<'_, Store>) -> Result<LibraryList, String> {
 #[tauri::command]
 pub async fn libraries_switch(app: tauri::AppHandle, id: String) -> Result<Snapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        switch(&app.state::<Store>(), &app.state::<CurationStore>(), &id)
+        let snapshot = switch_inner(
+            &app.state::<Store>(),
+            &app.state::<CurationStore>(),
+            &id,
+            Some(&app.state::<crate::link_import::LinkImportStore>()),
+            || crate::work_directory::runtime::library_switched(&app),
+        )?;
+        crate::work_directory::wake_monitor(&app);
+        Ok(snapshot)
     })
     .await
     .map_err(|e| e.to_string())?

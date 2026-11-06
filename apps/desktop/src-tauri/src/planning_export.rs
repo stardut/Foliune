@@ -1,22 +1,14 @@
+use crate::png_export::write_png;
 use std::{
-    fs,
     io::{Cursor, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 const MAX_BYTES: usize = 64 * 1024 * 1024;
 const MAX_EDGE: u32 = 32_768;
 const MAX_PIXELS: u64 = 40_000_000;
 
-pub fn export_png(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if path
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.eq_ignore_ascii_case("png"))
-        != Some(true)
-    {
-        return Err("请选择 .png 文件路径".into());
-    }
+pub fn export_png(directory: &Path, title: &str, bytes: &[u8]) -> Result<PathBuf, String> {
     if bytes.is_empty() || bytes.len() > MAX_BYTES {
         return Err("策划长图不能为空，且不能超过 64 MiB".into());
     }
@@ -45,28 +37,18 @@ pub fn export_png(path: &Path, bytes: &[u8]) -> Result<(), String> {
     reader
         .decode()
         .map_err(|_| "策划长图 PNG 数据损坏或无法解码")?;
-    let parent = path.parent().ok_or("导出目录无效")?;
-    let temporary = parent.join(format!(".foliune-{}.tmp", uuid::Uuid::new_v4()));
-    let result = (|| {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-            .map_err(|e| e.to_string())?;
-        file.write_all(bytes).map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| e.to_string())?;
-        drop(file);
-        fs::rename(&temporary, path).map_err(|e| format!("保存策划长图失败：{e}"))
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
+    write_png(directory, title, "拍摄策划", |writer| {
+        writer.write_all(bytes).map_err(|error| error.to_string())
+    })
 }
 
 #[tauri::command]
-pub async fn plans_export_png(path: String, bytes: Vec<u8>) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || export_png(Path::new(&path), &bytes))
+pub async fn plans_export_png(
+    directory: String,
+    title: String,
+    bytes: Vec<u8>,
+) -> Result<PathBuf, String> {
+    tauri::async_runtime::spawn_blocking(move || export_png(Path::new(&directory), &title, &bytes))
         .await
         .map_err(|e| e.to_string())?
 }

@@ -1,14 +1,20 @@
 use crate::{
     db::{snapshot, Store},
-    groups,
+    groups, local_photo,
     models::{self, Snapshot},
+    photo_metadata::read_exif,
 };
 use exif::{In, Tag};
 use image::{imageops::FilterType, GenericImageView, ImageFormat};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use serde_json::Value;
-use std::{fs, io::BufReader, path::Path};
+use std::{
+    collections::HashMap,
+    fs,
+    io::{BufReader, Seek},
+    path::{Path, PathBuf},
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +36,25 @@ pub fn import(
     library: &str,
     group_id: Option<&str>,
 ) -> Result<ImportResult, String> {
+    import_files(store, paths, library, group_id, false).map(|(result, _)| result)
+}
+
+pub(crate) fn import_local(
+    store: &Store,
+    paths: Vec<String>,
+    library: &str,
+    group_id: Option<&str>,
+) -> Result<(ImportResult, HashMap<String, String>), String> {
+    import_files(store, paths, library, group_id, true)
+}
+
+fn import_files(
+    store: &Store,
+    paths: Vec<String>,
+    library: &str,
+    group_id: Option<&str>,
+    local: bool,
+) -> Result<(ImportResult, HashMap<String, String>), String> {
     models::library(library)?;
     let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
     if let Some(id) = group_id {
@@ -40,41 +65,45 @@ pub fn import(
         groups::ensure_capacity(&conn, id, paths.len())?;
     }
     let mut imported_ids = Vec::new();
+    let mut signatures = HashMap::new();
     let root = crate::db::library_root(&conn)?;
     let mut failures = Vec::new();
     for path in paths {
-        match import_one(&mut conn, &root, Path::new(&path), library, group_id) {
-            Ok(id) => imported_ids.push(id),
+        match import_one(&mut conn, &root, Path::new(&path), library, group_id, local) {
+            Ok((id, signature)) => {
+                if let Some(signature) = signature {
+                    signatures.insert(id.clone(), signature);
+                }
+                imported_ids.push(id);
+            }
             Err(message) => failures.push(ImportFailure { path, message }),
         }
     }
-    Ok(ImportResult {
-        snapshot: snapshot(&conn)?,
-        imported_ids,
-        failures,
-    })
+    Ok((
+        ImportResult {
+            snapshot: snapshot(&conn)?,
+            imported_ids,
+            failures,
+        },
+        signatures,
+    ))
 }
 
-fn metadata(path: &Path) -> Option<exif::Exif> {
-    let file = fs::File::open(path).ok()?;
-    exif::Reader::new()
-        .read_from_container(&mut BufReader::new(file))
-        .ok()
-}
-
-struct PreparedImage {
-    original_name: String,
+pub(crate) struct PreparedImage {
+    pub original_name: String,
     extension: String,
-    image: image::DynamicImage,
-    captured_at: Option<String>,
-    location: String,
+    pub image: image::DynamicImage,
+    pub captured_at: Option<String>,
+    pub location: String,
 }
 
-fn save_thumbnail(image: &image::DynamicImage, path: &Path) -> Result<(), String> {
+pub(crate) const THUMBNAIL_MAX_EDGE: u32 = 960;
+
+pub(crate) fn save_thumbnail(image: &image::DynamicImage, path: &Path) -> Result<(), String> {
     let rgba = image
         .resize(
-            image.width().min(960),
-            image.height().min(960),
+            image.width().min(THUMBNAIL_MAX_EDGE),
+            image.height().min(THUMBNAIL_MAX_EDGE),
             FilterType::Triangle,
         )
         .to_rgba8();
@@ -90,73 +119,38 @@ fn save_thumbnail(image: &image::DynamicImage, path: &Path) -> Result<(), String
         .map_err(|e| format!("生成缩略图失败：{e}"))
 }
 
+pub(crate) fn supported_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| {
+            ["jpg", "jpeg", "png", "webp"]
+                .iter()
+                .any(|supported| extension.eq_ignore_ascii_case(supported))
+        })
+}
+
 fn prepare_image(source: &Path) -> Result<PreparedImage, String> {
+    if !source.is_file() {
+        return Err("照片文件不存在或不是普通文件".into());
+    }
+    let file = fs::File::open(source).map_err(|e| e.to_string())?;
+    prepare_open_image(source, file)
+}
+
+pub(crate) fn prepare_open_image(source: &Path, file: fs::File) -> Result<PreparedImage, String> {
     let original_name = source
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or("文件名称无效")?
         .to_string();
-    if !source.is_file() {
-        return Err("照片文件不存在或不是普通文件".into());
-    }
+    let input = inspect_open_image(source, file)?;
     let extension = source
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or("")
         .to_lowercase();
-    if !["jpg", "jpeg", "png", "webp"].contains(&extension.as_str()) {
-        return Err("目前仅支持 JPEG、PNG、WebP，不支持 RAW 或 HEIC".into());
-    }
-    let reader = image::ImageReader::open(source)
-        .map_err(|e| e.to_string())?
-        .with_guessed_format()
-        .map_err(|e| e.to_string())?;
-    if !matches!(
-        reader.format(),
-        Some(ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::WebP)
-    ) {
-        return Err("文件内容不是受支持的照片格式".into());
-    }
-    let mut image = reader.decode().map_err(|e| format!("照片解码失败：{e}"))?;
-    let exif = metadata(source);
-    if let Some(field) = exif
-        .as_ref()
-        .and_then(|data| data.get_field(Tag::Orientation, In::PRIMARY))
-    {
-        if let Some(orientation) = field.value.get_uint(0) {
-            image = match orientation {
-                2 => image.fliph(),
-                3 => image.rotate180(),
-                4 => image.flipv(),
-                5 => image.rotate90().fliph(),
-                6 => image.rotate90(),
-                7 => image.rotate270().fliph(),
-                8 => image.rotate270(),
-                _ => image,
-            };
-        }
-    }
-    let captured_at = exif
-        .as_ref()
-        .and_then(|data| data.get_field(Tag::DateTimeOriginal, In::PRIMARY))
-        .and_then(|field| {
-            if let exif::Value::Ascii(values) = &field.value {
-                values
-                    .first()
-                    .and_then(|value| std::str::from_utf8(value).ok())
-                    .and_then(|value| {
-                        chrono::NaiveDateTime::parse_from_str(
-                            value.trim_matches(char::from(0)),
-                            "%Y:%m:%d %H:%M:%S",
-                        )
-                        .ok()
-                    })
-                    .map(|date| date.format("%Y-%m-%dT%H:%M:%S").to_string())
-            } else {
-                None
-            }
-        });
-    let location = exif.as_ref().and_then(gps_location).unwrap_or_default();
+    let (captured_at, location) = input.metadata();
+    let image = input.decode()?;
     Ok(PreparedImage {
         original_name,
         extension,
@@ -166,9 +160,150 @@ fn prepare_image(source: &Path) -> Result<PreparedImage, String> {
     })
 }
 
+pub(crate) struct OpenImage {
+    pub reader: image::ImageReader<BufReader<fs::File>>,
+    exif: Option<exif::Exif>,
+}
+
+pub(crate) fn inspect_open_image(source: &Path, file: fs::File) -> Result<OpenImage, String> {
+    if !supported_extension(source) {
+        return Err("目前仅支持 JPEG、PNG、WebP，不支持 RAW 或 HEIC".into());
+    }
+    let mut buffer = BufReader::new(file);
+    let exif = read_exif(&mut buffer).ok();
+    buffer.rewind().map_err(|e| e.to_string())?;
+    let reader = image::ImageReader::new(buffer)
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?;
+    if !matches!(
+        reader.format(),
+        Some(ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::WebP)
+    ) {
+        return Err("文件内容不是受支持的照片格式".into());
+    }
+    Ok(OpenImage { reader, exif })
+}
+
+impl OpenImage {
+    pub fn orientation(&self) -> u32 {
+        self.exif
+            .as_ref()
+            .and_then(|data| data.get_field(Tag::Orientation, In::PRIMARY))
+            .and_then(|field| field.value.get_uint(0))
+            .unwrap_or(1)
+    }
+
+    pub fn decode(self) -> Result<image::DynamicImage, String> {
+        let orientation = self.orientation();
+        let image = self
+            .reader
+            .decode()
+            .map_err(|e| format!("照片解码失败：{e}"))?;
+        Ok(match orientation {
+            2 => image.fliph(),
+            3 => image.rotate180(),
+            4 => image.flipv(),
+            5 => image.rotate90().fliph(),
+            6 => image.rotate90(),
+            7 => image.rotate270().fliph(),
+            8 => image.rotate270(),
+            _ => image,
+        })
+    }
+
+    pub fn metadata(&self) -> (Option<String>, String) {
+        let captured_at = self
+            .exif
+            .as_ref()
+            .and_then(|data| data.get_field(Tag::DateTimeOriginal, In::PRIMARY))
+            .and_then(|field| {
+                if let exif::Value::Ascii(values) = &field.value {
+                    values
+                        .first()
+                        .and_then(|value| std::str::from_utf8(value).ok())
+                        .and_then(|value| {
+                            chrono::NaiveDateTime::parse_from_str(
+                                value.trim_matches(char::from(0)),
+                                "%Y:%m:%d %H:%M:%S",
+                            )
+                            .ok()
+                        })
+                        .map(|date| date.format("%Y-%m-%dT%H:%M:%S").to_string())
+                } else {
+                    None
+                }
+            });
+        let location = self.exif.as_ref().and_then(gps_location).unwrap_or_default();
+        (captured_at, location)
+    }
+}
+
 /// 使用与导入一致的格式检查和 EXIF 旋正，调用方只读原件。
-pub(crate) fn load_oriented_image(source: &Path) -> Result<image::DynamicImage, String> {
-    prepare_image(source).map(|prepared| prepared.image)
+pub(crate) fn load_oriented_image(
+    source: &Path,
+    file: fs::File,
+) -> Result<image::DynamicImage, String> {
+    prepare_open_image(source, file).map(|prepared| prepared.image)
+}
+
+struct PreparedImport {
+    decoded: PreparedImage,
+    locator: String,
+    managed_path: Option<PathBuf>,
+    signature: Option<String>,
+}
+
+impl PreparedImport {
+    fn prepare(source: &Path, root: &Path, file_id: &str, local: bool) -> Result<Self, String> {
+        if local {
+            let locator = local_photo::locator(source)?;
+            let file = local_photo::open(&locator)?;
+            let signature = local_photo::file_signature(&file)?;
+            let decoded = prepare_open_image(source, file)?;
+            if local_photo::signature(&locator)? != signature {
+                return Err("本地照片在读取期间发生变化，请重新选择".into());
+            }
+            return Ok(Self {
+                decoded,
+                locator,
+                managed_path: None,
+                signature: Some(signature),
+            });
+        }
+        let decoded = prepare_image(source)?;
+        let path = root
+            .join("originals")
+            .join(format!("{file_id}.{}", decoded.extension));
+        Ok(Self {
+            decoded,
+            locator: path.to_string_lossy().into_owned(),
+            managed_path: Some(path),
+            signature: None,
+        })
+    }
+
+    fn save(
+        &self,
+        source: &Path,
+        thumbnail: &Path,
+        save_record: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), String> {
+        let result = (|| {
+            if let Some(path) = &self.managed_path {
+                fs::copy(source, path).map_err(|e| format!("复制原件失败：{e}"))?;
+            }
+            save_thumbnail(&self.decoded.image, thumbnail)?;
+            save_record()
+        })();
+        if let Err(message) = &result {
+            for path in self.managed_path.as_deref().into_iter().chain([thumbnail]) {
+                if path.exists() {
+                    fs::remove_file(path).map_err(|e| format!("{message}；清理失败：{e}"))?;
+                }
+            }
+        }
+        result
+    }
 }
 
 fn import_one(
@@ -177,20 +312,19 @@ fn import_one(
     source: &Path,
     library: &str,
     group_id: Option<&str>,
-) -> Result<String, String> {
-    let PreparedImage {
-        original_name,
-        extension,
-        image,
-        captured_at,
-        location,
-    } = prepare_image(source)?;
+    local: bool,
+) -> Result<(String, Option<String>), String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let original_path = root.join("originals").join(format!("{id}.{extension}"));
+    let prepared = PreparedImport::prepare(source, root, &id, local)?;
     let thumbnail_path = root.join("thumbnails").join(format!("{id}.jpg"));
-    let result = (|| {
-        fs::copy(source, &original_path).map_err(|e| format!("复制原件失败：{e}"))?;
-        save_thumbnail(&image, &thumbnail_path)?;
+    prepared.save(source, &thumbnail_path, || {
+        let PreparedImage {
+            original_name,
+            image,
+            captured_at,
+            location,
+            ..
+        } = &prepared.decoded;
         let (width, height) = image.dimensions();
         let title = source
             .file_stem()
@@ -198,7 +332,7 @@ fn import_one(
             .unwrap_or(&original_name);
         let tx = conn.transaction().map_err(|e| e.to_string())?;
         tx.execute("INSERT INTO photos(id,library,title,original_name,original_path,thumbnail_path,width,height,captured_at,location,imported_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
-            params![id,library,title,original_name,original_path.to_string_lossy(),thumbnail_path.to_string_lossy(),width,height,captured_at,location,chrono::Utc::now().to_rfc3339()]).map_err(|e| e.to_string())?;
+            params![id,library,title,original_name,prepared.locator,thumbnail_path.to_string_lossy(),width,height,captured_at,location,chrono::Utc::now().to_rfc3339()]).map_err(|e| e.to_string())?;
         if let Some(group_id) = group_id {
             groups::ensure_capacity(&tx, group_id, 1)?;
             let position: i64 = tx
@@ -211,61 +345,43 @@ fn import_one(
             tx.execute("INSERT INTO memberships(group_id,photo_id,status,position) VALUES(?1,?2,'active',?3)", params![group_id,id,position]).map_err(|e| e.to_string())?;
         }
         tx.commit().map_err(|e| e.to_string())?;
-        Ok(id.clone())
-    })();
-    if result.is_err() {
-        // 本次导入失败时只清理本次生成的管理副本，绝不触碰来源文件。
-        for path in [&original_path, &thumbnail_path] {
-            if path.exists() {
-                if let Err(error) = fs::remove_file(path) {
-                    return Err(format!("{}；清理失败：{error}", result.unwrap_err()));
-                }
-            }
-        }
-    }
-    result
+        Ok(())
+    })?;
+    Ok((id, prepared.signature))
 }
 
 pub fn relink(store: &Store, photo_id: &str, source: &Path) -> Result<Snapshot, String> {
     let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
-    let exists: bool = conn
+    use rusqlite::OptionalExtension;
+    let locator: String = conn
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM photos WHERE id=?1)",
+            "SELECT original_path FROM photos WHERE id=?1",
             [photo_id],
             |r| r.get(0),
         )
-        .map_err(|e| e.to_string())?;
-    if !exists {
-        return Err("照片不存在".into());
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or("照片不存在")?;
+    if crate::work_directory::is_locator(&locator) {
+        return Err("此照片引用作品目录，请在图库设置中重新定位作品目录".into());
     }
-    let prepared = prepare_image(source)?;
+    if local_photo::is_locator(&locator) {
+        return Err("本地照片使用导入时的文件路径，请将原件放回原处".into());
+    }
     let root = crate::db::library_root(&conn)?;
     let revision = uuid::Uuid::new_v4().to_string();
-    let original_path = root
-        .join("originals")
-        .join(format!("{photo_id}-{revision}.{}", prepared.extension));
-    let thumbnail_path = root
-        .join("thumbnails")
-        .join(format!("{photo_id}-{revision}.jpg"));
-    let result: Result<(), String> = (|| {
-        fs::copy(source, &original_path).map_err(|e| format!("复制原件失败：{e}"))?;
-        save_thumbnail(&prepared.image, &thumbnail_path)?;
-        let (width, height) = prepared.image.dimensions();
+    let file_id = format!("{photo_id}-{revision}");
+    let prepared = PreparedImport::prepare(source, &root, &file_id, false)?;
+    let thumbnail_path = root.join("thumbnails").join(format!("{file_id}.jpg"));
+    prepared.save(source, &thumbnail_path, || {
+        let (width, height) = prepared.decoded.image.dimensions();
         let tx = conn.transaction().map_err(|e| e.to_string())?;
-        tx.execute("UPDATE photos SET original_name=?1,original_path=?2,thumbnail_path=?3,width=?4,height=?5 WHERE id=?6", params![prepared.original_name,original_path.to_string_lossy(),thumbnail_path.to_string_lossy(),width,height,photo_id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE photos SET original_name=?1,original_path=?2,thumbnail_path=?3,width=?4,height=?5 WHERE id=?6", params![prepared.decoded.original_name,prepared.locator,thumbnail_path.to_string_lossy(),width,height,photo_id]).map_err(|e| e.to_string())?;
         tx.execute("DELETE FROM photo_analyses WHERE photo_id=?1", [photo_id])
             .map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
         Ok(())
-    })();
-    if let Err(message) = result {
-        for path in [&original_path, &thumbnail_path] {
-            if path.exists() {
-                fs::remove_file(path).map_err(|e| format!("{message}；清理失败：{e}"))?;
-            }
-        }
-        return Err(message);
-    }
+    })?;
     // 保留此前管理副本，避免重新定位时触发尚未定义的原件删除策略。
     snapshot(&conn)
 }

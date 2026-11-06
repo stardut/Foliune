@@ -97,6 +97,113 @@ fn backup_restore_builds_new_library_with_stable_photo_and_book_refs() {
 }
 
 #[test]
+fn backup_preserves_local_photo_index_and_thumbnail_without_authorizing_its_path() {
+    let (dir, store, managed_id) = setup();
+    let source = dir.path().join("photo.png");
+    let (imported, _) =
+        photos::import_local(&store, vec![source.to_str().unwrap().into()], "work", None).unwrap();
+    let local_id = &imported.imported_ids[0];
+    let archive_path = dir.path().join("mixed.zip");
+    backup::create(&store, &archive_path).unwrap();
+    let archive = ZipArchive::new(fs::File::open(&archive_path).unwrap()).unwrap();
+    assert_eq!(
+        archive
+            .file_names()
+            .filter(|name| name.starts_with("originals/"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        archive
+            .file_names()
+            .filter(|name| name.starts_with("thumbnails/"))
+            .count(),
+        2
+    );
+    let restored = backup::restore(&store, &archive_path).unwrap();
+    let snapshot =
+        libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
+    let local = snapshot
+        .photos
+        .iter()
+        .find(|photo| &photo.id == local_id)
+        .unwrap();
+    assert_eq!(local.original_path, crate::local_photo::PREFIX);
+    assert!(!local.original_available && local.thumbnail_available);
+    assert!(source.is_file());
+    let managed = snapshot
+        .photos
+        .iter()
+        .find(|photo| photo.id == managed_id)
+        .unwrap();
+    assert!(managed.original_available && managed.thumbnail_available);
+    assert_eq!(
+        fs::read_dir(std::path::Path::new(&restored.library.path).join("originals"))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn album_deletion_backups_keep_hidden_managed_files_and_local_index() {
+    let (dir, store, managed_id) = setup();
+    let source = dir.path().join("photo.png");
+    let source_bytes = fs::read(&source).unwrap();
+    let (imported, _) =
+        photos::import_local(&store, vec![source.to_str().unwrap().into()], "collection", None)
+            .unwrap();
+    let local_id = imported.imported_ids[0].clone();
+    let thumbnail_bytes = {
+        let mut conn = store.connection.lock().unwrap();
+        let group_id = crate::groups::create(
+            &conn,
+            crate::models::GroupInput {
+                library: "collection".into(),
+                name: "待删除".into(),
+                description: String::new(),
+                capacity: None,
+            },
+        )
+        .unwrap()
+        .groups[0]
+            .id
+            .clone();
+        crate::groups::add(&mut conn, &group_id, &[managed_id.clone(), local_id.clone()]).unwrap();
+        crate::groups::set_status(&mut conn, &group_id, &local_id, "discarded").unwrap();
+        let deleted = crate::work_directory::runtime::delete_album(&mut conn, &group_id).unwrap();
+        assert!(deleted.photos.is_empty());
+        assert_eq!(deleted.hidden_photo_ids.len(), 2);
+        db::snapshot_with_hidden(&conn)
+            .unwrap()
+            .photos
+            .into_iter()
+            .map(|photo| (photo.id, fs::read(photo.thumbnail_path).unwrap()))
+            .collect::<std::collections::HashMap<_, _>>()
+    };
+
+    let path = dir.path().join("hidden.zip");
+    assert_eq!(backup::create(&store, &path).unwrap().photo_count, 0);
+    let restored = backup::restore(&store, &path).unwrap();
+    assert_eq!(restored.photo_count, 0);
+    let state = libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
+    assert!(state.photos.is_empty());
+    assert!(state.hidden_photo_ids.contains(&managed_id));
+    assert!(state.hidden_photo_ids.contains(&local_id));
+    for photo in db::snapshot_with_hidden(&store.connection.lock().unwrap()).unwrap().photos {
+        assert!(photo.thumbnail_path.starts_with(&restored.library.path));
+        assert_eq!(fs::read(photo.thumbnail_path).unwrap(), thumbnail_bytes[&photo.id]);
+        if photo.id == managed_id {
+            assert!(photo.original_path.starts_with(&restored.library.path));
+            assert_eq!(fs::read(photo.original_path).unwrap(), source_bytes);
+        } else {
+            assert_eq!(photo.original_path, crate::local_photo::PREFIX);
+        }
+    }
+    assert_eq!(fs::read(source).unwrap(), source_bytes);
+}
+
+#[test]
 fn archive_tamper_and_traversal_never_modify_current_library() {
     let (dir, store, id) = setup();
     let path = dir.path().join("backup.zip");

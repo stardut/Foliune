@@ -34,6 +34,7 @@ export interface PlanPart {
 export interface ShootPlanInput {
   title: string;
   concept: string;
+  executionDate: string;
   shootDate: string;
   location: string;
   team: string;

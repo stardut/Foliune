@@ -24,11 +24,10 @@ pub fn document<W: Write>(
     output: &mut W,
 ) -> Result<(), String> {
     let detail = books::get(conn, book_id)?;
-    let version = detail
-        .versions
-        .iter()
-        .find(|v| v.id == version_id)
-        .ok_or("版本不属于该画册")?;
+    if detail.book.current_version_id != version_id {
+        return Err("画册内容已更改，请重新打开后导出".into());
+    }
+    let [version] = detail.versions;
     book_layout::validate(conn, &version.input)?;
     writeln!(output, "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><style>{}</style></head><body><header><h1>{}</h1><p>{} · {} 页</p><button onclick=\"document.body.classList.toggle('spread')\">切换单页 / 双页</button></header><main>", escape(&detail.book.title), STYLE, escape(&detail.book.title), escape(&version.input.label), version.input.pages.len()).map_err(|e|e.to_string())?;
     for (index, page) in version.input.pages.iter().enumerate() {
@@ -41,7 +40,8 @@ pub fn document<W: Write>(
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .map_err(|e| e.to_string())?;
-            let bytes = fs::read(&path)
+            let bytes = crate::work_directory::original(conn, &item.photo_id, &path)?
+                .read()
                 .map_err(|e| format!("原图缺失或无法读取，不能导出：{name}（{e}）"))?;
             let mime = match image::guess_format(&bytes)
                 .map_err(|e| format!("原图格式无效：{name}（{e}）"))?

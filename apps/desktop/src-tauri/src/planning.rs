@@ -1,8 +1,12 @@
-use crate::{content_refs, db::Store};
+use crate::{
+    content_refs,
+    db::{self, Store},
+    models::Snapshot,
+};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 pub const MAX_REFERENCES: usize = 120;
 pub const MAX_SCENE_REFERENCES: usize = 3;
@@ -66,6 +70,8 @@ pub struct PlanPart {
 pub struct ShootPlanInput {
     pub title: String,
     pub concept: String,
+    #[serde(default)]
+    pub execution_date: String,
     pub shoot_date: String,
     pub location: String,
     pub team: String,
@@ -218,6 +224,7 @@ fn migrate_v1(conn: &Connection) -> Result<(), String> {
                 ShootPlanInput {
                     title: row.get(1)?,
                     concept: row.get(2)?,
+                    execution_date: String::new(),
                     shoot_date: row.get(3)?,
                     location: row.get(4)?,
                     team: row.get(5)?,
@@ -286,6 +293,15 @@ fn photo_union(input: &ShootPlanInput) -> Vec<String> {
 fn validate(conn: &Connection, input: &ShootPlanInput) -> Result<(), String> {
     content_refs::name(&input.title)?;
     content_refs::text(&input.title, "策划名称", MAX_TITLE)?;
+    let date = &input.execution_date;
+    if !date.is_empty()
+        && (date.len() != 10
+            || date.starts_with("0000")
+            || !chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                .is_ok_and(|parsed| parsed.format("%Y-%m-%d").to_string() == *date))
+    {
+        return Err("执行日期须为有效的 YYYY-MM-DD 日期".into());
+    }
     content_refs::text(&input.shoot_date, "拍摄时间", MAX_DATE)?;
     for value in [
         &input.concept,
@@ -400,6 +416,9 @@ pub fn save(
     mut input: ShootPlanInput,
 ) -> Result<ShootPlan, String> {
     input.title = content_refs::name(&input.title)?;
+    if input.execution_date.is_empty() {
+        return Err("请选择执行日期".into());
+    }
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     validate(&tx, &input)?;
     for (index, part) in input.parts.iter().enumerate() {
@@ -454,15 +473,23 @@ pub fn save(
     })
 }
 
-pub fn delete(conn: &Connection, id: &str) -> Result<(), String> {
-    if conn
+pub fn delete(conn: &mut Connection, id: &str) -> Result<Snapshot, String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let candidates = content_refs::deletion_candidates(
+        &tx,
+        "SELECT photo_id FROM shoot_plan_photos WHERE plan_id=?1",
+        id,
+    )?;
+    if tx
         .execute("DELETE FROM shoot_plans WHERE id=?1", [id])
         .map_err(|e| e.to_string())?
         == 0
     {
         return Err("拍摄策划不存在".into());
     }
-    Ok(())
+    let snapshot = content_refs::snapshot_after_deletion(&tx, candidates)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -482,6 +509,6 @@ pub fn plans_save(
     )
 }
 #[tauri::command]
-pub fn plans_delete(store: State<'_, Store>, id: String) -> Result<(), String> {
-    delete(&*store.connection.lock().map_err(|e| e.to_string())?, &id)
+pub async fn plans_delete(app: AppHandle, id: String) -> Result<Snapshot, String> {
+    db::with_connection(app, move |conn| delete(conn, &id)).await
 }

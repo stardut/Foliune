@@ -2,7 +2,8 @@ import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { Check, ChevronLeft, ChevronRight, Plus, Search } from 'lucide-react';
 import { Modal } from '../../components/ui';
 import { templates, type BookChapter, type BookPage, type BookTemplate, type CreateBookInput } from '../../lib/book-types';
-import type { Photo } from '../../lib/types';
+import type { LibrarySnapshot, Photo } from '../../lib/types';
+import { PhotoSourceDialog } from '../../components/PhotoSourceDialog';
 import { BookPageView } from './BookPageView';
 
 const paperSizes = [
@@ -12,7 +13,11 @@ const paperSizes = [
 ];
 const templateNotes = { white: '单图留白，完整构图', full: '单图铺满，裁切填充', pair: '双图并置，完整构图' };
 
-export function BookCreator({ photos, busy, onClose, onCreate, initialSelected = [] }: { photos: Photo[]; busy: boolean; onClose: () => void; onCreate: (input: CreateBookInput) => Promise<void>; initialSelected?: string[] }) {
+export function BookCreator({ photos, busy, onSnapshot, onBusyChange, onClose, onCreate, initialSelected = [] }: { photos: Photo[]; busy: boolean; onSnapshot: (snapshot: LibrarySnapshot) => void; onBusyChange?: (busy: boolean) => void; onClose: () => void; onCreate: (input: CreateBookInput) => Promise<void>; initialSelected?: string[] }) {
+  const [pickingSource, setPickingSource] = useState(false);
+  const [sourceBusy, setSourceBusy] = useState(false);
+  const blocked = busy || sourceBusy;
+  useEffect(() => { onBusyChange?.(blocked); return () => onBusyChange?.(false); }, [blocked, onBusyChange]);
   const [title, setTitle] = useState('新的画册');
   const [template, setTemplate] = useState<BookTemplate>('white');
   const [width, setWidth] = useState(1200); const [height, setHeight] = useState(900);
@@ -53,20 +58,21 @@ export function BookCreator({ photos, busy, onClose, onCreate, initialSelected =
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (blocked || pickingSource) return;
     if (step === 0) { if (selected.length) setStep(1); return; }
     setError('');
     try { await onCreate({ title, template, pageWidth: width, pageHeight: height, chapters: orderedChapters }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
-  return <Modal title="创建画册" wide onClose={() => { if (!busy) onClose(); }}>
+  return <Modal title="创建画册" wide onClose={() => { if (!blocked) onClose(); }}>
     <form className="book-create" onSubmit={(event) => void submit(event)}>
       <nav className="book-create-steps" aria-label="创建步骤">
-        {['选照片', '设置画册'].map((label, index) => <button key={label} type="button" disabled={busy || (index === 1 && !selected.length)} className={step === index ? 'active' : ''} aria-current={step === index ? 'step' : undefined} onClick={() => { if (index === 0 || selected.length) setStep(index); }}><span>{index + 1}</span>{label}</button>)}
+        {['选照片', '设置画册'].map((label, index) => <button key={label} type="button" disabled={blocked || (index === 1 && !selected.length)} className={step === index ? 'active' : ''} aria-current={step === index ? 'step' : undefined} onClick={() => { if (index === 0 || selected.length) setStep(index); }}><span>{index + 1}</span>{label}</button>)}
       </nav>
-      <fieldset className="book-create-body" disabled={busy}>
+      <fieldset className="book-create-body" disabled={blocked}>
         {step === 0 ? <section className="book-choose-photos" aria-label="选择画册照片">
-          <div className="book-source-tools"><div className="book-search"><Search size={16} /><input aria-label="搜索可选照片" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索标题或标签" /></div><select aria-label="照片来源" value={library} onChange={(e) => setLibrary(e.target.value)}><option value="all">全部图库</option><option value="collection">收藏</option><option value="work">作品</option></select></div>
-          <div className="book-photo-picker">{visiblePhotos.map((photo) => <button type="button" key={photo.id} className={selected.includes(photo.id) ? 'selected' : ''} aria-pressed={selected.includes(photo.id)} onClick={() => toggle(photo.id)}><div className="book-picker-image">{photo.thumbnailAvailable ? <img src={photo.thumbnailUrl} alt="" loading="lazy" /> : <span>预览缺失</span>}<span className="book-picker-check" aria-hidden="true">{selected.includes(photo.id) && <Check size={13} />}</span></div><span><span className="book-picker-title" title={photo.title}>{photo.title}</span><small>{photo.library === 'work' ? '作品' : '收藏'}</small></span></button>)}{!available.length && <p className="book-picker-empty">{query || library !== 'all' ? '没有符合条件的照片' : '还没有照片，请先到图库导入。'}</p>}</div>
+          <div className="book-source-tools"><button type="button" className="button" onClick={() => setPickingSource(true)}><Plus size={14} />添加照片</button><div className="book-search"><Search size={16} /><input aria-label="搜索可选照片" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索标题或标签" /></div><select aria-label="照片来源" value={library} onChange={(e) => setLibrary(e.target.value)}><option value="all">全部图库</option><option value="collection">收藏</option><option value="work">作品</option></select></div>
+          <div className="book-photo-picker">{visiblePhotos.map((photo) => <button type="button" key={photo.id} className={selected.includes(photo.id) ? 'selected' : ''} aria-pressed={selected.includes(photo.id)} onClick={() => toggle(photo.id)}><div className="book-picker-image">{photo.thumbnailAvailable ? <img src={photo.thumbnailUrl} alt="" loading="lazy" /> : <span>预览缺失</span>}<span className="book-picker-check" aria-hidden="true">{selected.includes(photo.id) && <Check size={13} />}</span></div><span><span className="book-picker-title" title={photo.title}>{photo.title}</span><small>{photo.library === 'work' ? '作品' : '收藏'}</small></span></button>)}{!available.length && <p className="book-picker-empty">{query || library !== 'all' ? '没有符合条件的照片' : '还没有照片'}</p>}</div>
           {available.length > 60 && <div className="book-picker-pagination"><button type="button" className="button button-quiet" disabled={currentPage === 0} onClick={() => setPickerPage(currentPage - 1)}>上一页</button><span>{currentPage + 1} / {lastPage + 1} · 共 {available.length} 张</span><button type="button" className="button button-quiet" disabled={currentPage === lastPage} onClick={() => setPickerPage(currentPage + 1)}>下一页</button></div>}
         </section> : <div className="book-create-arrange">
           <section className="book-create-preview" aria-label="版式示意"><div className="book-create-paper" style={{ '--book-page-ratio': width / height } as CSSProperties}><BookPageView page={sample} pageWidth={width} pageHeight={height} photos={photos} number={1} /></div><p>版式示意 · {width} × {height}</p></section>
@@ -80,7 +86,13 @@ export function BookCreator({ photos, busy, onClose, onCreate, initialSelected =
         </div>}
       </fieldset>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <div className="book-create-footer"><span>已选 {selected.length} 张照片</span><div>{step === 1 ? <button className="button button-quiet" type="button" disabled={busy} onClick={() => setStep(0)}><ChevronLeft size={15} />返回选片</button> : <button className="button button-quiet" type="button" disabled={busy} onClick={onClose}>取消</button>}<button className="button button-primary" type="submit" disabled={busy || !selected.length}>{busy ? '创建中…' : step === 0 ? <>设置画册<ChevronRight size={15} /></> : '创建并排版'}</button></div></div>
+      <div className="book-create-footer"><span>已选 {selected.length} 张照片</span><div>{step === 1 ? <button className="button button-quiet" type="button" disabled={blocked} onClick={() => setStep(0)}><ChevronLeft size={15} />返回选片</button> : <button className="button button-quiet" type="button" disabled={blocked} onClick={onClose}>取消</button>}<button className="button button-primary" type="submit" disabled={blocked || !selected.length}>{busy ? '创建中…' : step === 0 ? <>设置画册<ChevronRight size={15} /></> : '创建并排版'}</button></div></div>
     </form>
+    {pickingSource && <PhotoSourceDialog photos={photos} selectedIds={selected} library="collection" title="选择画册照片" onBusyChange={setSourceBusy} onClose={() => setPickingSource(false)} onConfirm={({ photoIds, snapshot }) => {
+      if (snapshot) onSnapshot(snapshot);
+      setSelected(photoIds);
+      setAssignments((previous) => Object.fromEntries(photoIds.map((id) => [id, previous[id] || chapters[0].id])));
+      setPickingSource(false);
+    }} />}
   </Modal>;
 }

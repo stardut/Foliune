@@ -1,7 +1,8 @@
-use crate::{book_layout, db::Store};
+use crate::{book_layout, content_refs, db, models::Snapshot};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use std::collections::HashSet;
+use tauri::AppHandle;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -34,6 +35,9 @@ pub struct BookPage {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VersionInput {
+    // Older snapshots can still contain this field.
+    #[serde(rename = "reflowUndoId", default, skip_serializing)]
+    pub(crate) _legacy_reflow_undo_id: Option<String>,
     pub label: String,
     pub template: String,
     pub page_width: u32,
@@ -70,11 +74,12 @@ pub struct BookSummary {
     pub current_version_id: String,
     pub version_count: usize,
     pub photo_count: usize,
+    pub cover_photo_id: Option<String>,
 }
 #[derive(Serialize)]
 pub struct BookDetail {
     pub book: BookSummary,
-    pub versions: Vec<BookVersion>,
+    pub versions: [BookVersion; 1],
 }
 
 pub fn init(conn: &Connection) -> Result<(), String> {
@@ -83,83 +88,192 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS book_versions_book ON book_versions(book_id);").map_err(|e| e.to_string())
 }
 
+fn version_photo_ids(version: &VersionInput) -> impl Iterator<Item = &String> {
+    version
+        .chapters
+        .iter()
+        .flat_map(|chapter| &chapter.photo_ids)
+        .chain(
+            version
+                .pages
+                .iter()
+                .flat_map(|page| &page.items)
+                .map(|item| &item.photo_id),
+        )
+}
+
+pub(crate) fn exclude_currently_referenced_photos(
+    conn: &Connection,
+    candidates: &mut HashSet<String>,
+) -> Result<(), String> {
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    let mut statement = conn
+        .prepare(
+            "SELECT v.data FROM books b
+             LEFT JOIN book_versions v ON v.id=b.current_version_id AND v.book_id=b.id",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut rows = statement.query([]).map_err(|e| e.to_string())?;
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let data = row
+            .get::<_, Option<String>>(0)
+            .map_err(|e| e.to_string())?
+            .ok_or("画册当前内容不存在，无法确认照片是否仍被引用")?;
+        let version: VersionInput = serde_json::from_str(&data)
+            .map_err(|e| format!("画册内容损坏，无法确认照片是否仍被引用：{e}"))?;
+        for id in version_photo_ids(&version) {
+            candidates.remove(id);
+        }
+        if candidates.is_empty() {
+            break;
+        }
+    }
+    Ok(())
+}
+
 fn title(value: &str) -> Result<&str, String> {
     crate::models::name(value)
 }
 pub fn get(conn: &Connection, id: &str) -> Result<BookDetail, String> {
-    let mut statement = conn.prepare("SELECT id,book_id,created_at,kind,data FROM book_versions WHERE book_id=?1 ORDER BY created_at,id").map_err(|e| e.to_string())?;
-    let rows = statement
-        .query_map([id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-    let mut versions = Vec::new();
-    for row in rows {
-        let (id, book_id, created_at, kind, data) = row.map_err(|e| e.to_string())?;
-        versions.push(BookVersion {
-            id,
-            book_id,
-            created_at,
-            kind,
-            input: serde_json::from_str(&data).map_err(|e| format!("画册版本损坏：{e}"))?,
-        });
-    }
-    let raw = conn
+    let (mut book, version_created_at, kind, data) = conn
         .query_row(
-            "SELECT title,created_at,updated_at,current_version_id FROM books WHERE id=?1",
+            "SELECT b.title,b.created_at,b.updated_at,b.current_version_id,
+                (SELECT COUNT(*) FROM book_versions WHERE book_id=b.id),
+                v.created_at,v.kind,v.data
+             FROM books b
+             LEFT JOIN book_versions v ON v.id=b.current_version_id AND v.book_id=b.id
+             WHERE b.id=?1",
             [id],
             |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
+                    BookSummary {
+                        id: id.into(),
+                        title: row.get(0)?,
+                        created_at: row.get(1)?,
+                        updated_at: row.get(2)?,
+                        current_version_id: row.get(3)?,
+                        version_count: row.get(4)?,
+                        photo_count: 0,
+                        cover_photo_id: None,
+                    },
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             },
         )
         .optional()
         .map_err(|e| e.to_string())?
         .ok_or("画册不存在")?;
-    let photo_count = versions
-        .iter()
-        .find(|v| v.id == raw.3)
-        .ok_or("画册当前版本不存在")?
-        .input
-        .chapters
-        .iter()
-        .map(|c| c.photo_ids.len())
-        .sum();
+    let input: VersionInput = serde_json::from_str(&data.ok_or("画册当前内容不存在")?)
+        .map_err(|e| format!("画册内容损坏：{e}"))?;
+    book.photo_count = input.chapters.iter().map(|c| c.photo_ids.len()).sum();
+    book.cover_photo_id = cover_photo_id(conn, &input)?;
+    let version = BookVersion {
+        id: book.current_version_id.clone(),
+        book_id: id.into(),
+        created_at: version_created_at.ok_or("画册当前内容不存在")?,
+        kind: kind.ok_or("画册当前内容不存在")?,
+        input,
+    };
     Ok(BookDetail {
-        book: BookSummary {
-            id: id.into(),
-            title: raw.0,
-            created_at: raw.1,
-            updated_at: raw.2,
-            current_version_id: raw.3,
-            version_count: versions.len(),
-            photo_count,
-        },
-        versions,
+        book,
+        versions: [version],
     })
 }
 pub fn list(conn: &Connection) -> Result<Vec<BookSummary>, String> {
     let mut statement = conn
-        .prepare("SELECT id FROM books ORDER BY updated_at DESC,id")
+        .prepare(
+            "SELECT b.id,b.title,b.created_at,b.updated_at,b.current_version_id,
+            (SELECT COUNT(*) FROM book_versions WHERE book_id=b.id),v.data
+            FROM books b LEFT JOIN book_versions v ON v.id=b.current_version_id AND v.book_id=b.id
+            ORDER BY b.updated_at DESC,b.id",
+        )
         .map_err(|e| e.to_string())?;
-    let ids = statement
-        .query_map([], |row| row.get::<_, String>(0))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                BookSummary {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    created_at: row.get(2)?,
+                    updated_at: row.get(3)?,
+                    current_version_id: row.get(4)?,
+                    version_count: row.get(5)?,
+                    photo_count: 0,
+                    cover_photo_id: None,
+                },
+                row.get::<_, Option<String>>(6)?,
+            ))
+        })
         .map_err(|e| e.to_string())?;
-    ids.into_iter()
-        .map(|id| get(conn, &id).map(|d| d.book))
-        .collect()
+    let mut books = Vec::new();
+    for row in rows {
+        let (mut book, data) = row.map_err(|e| e.to_string())?;
+        let current: VersionInput = serde_json::from_str(&data.ok_or("画册当前内容不存在")?)
+            .map_err(|e| format!("画册内容损坏：{e}"))?;
+        book.photo_count = current
+            .chapters
+            .iter()
+            .map(|chapter| chapter.photo_ids.len())
+            .sum();
+        book.cover_photo_id = cover_photo_id(conn, &current)?;
+        books.push(book);
+    }
+    Ok(books)
+}
+
+pub(crate) fn validate_archive(conn: &Connection) -> Result<(), String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT v.data, v.id=b.current_version_id, current.id
+             FROM books b
+             LEFT JOIN book_versions current
+                ON current.id=b.current_version_id AND current.book_id=b.id
+             LEFT JOIN book_versions v ON v.book_id=b.id
+             ",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut rows = statement.query([]).map_err(|e| e.to_string())?;
+    while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        if row
+            .get::<_, Option<String>>(2)
+            .map_err(|e| e.to_string())?
+            .is_none()
+        {
+            return Err("画册当前内容不存在".into());
+        }
+        let data = row.get::<_, String>(0).map_err(|e| e.to_string())?;
+        let current = row.get::<_, bool>(1).map_err(|e| e.to_string())?;
+        let input: VersionInput =
+            serde_json::from_str(&data).map_err(|e| format!("画册内容损坏：{e}"))?;
+        book_layout::validate_snapshot(conn, &input, current)?;
+    }
+    Ok(())
+}
+
+fn cover_photo_id(conn: &Connection, current: &VersionInput) -> Result<Option<String>, String> {
+    let mut statement = conn
+        .prepare_cached("SELECT original_path,thumbnail_path FROM photos WHERE id=?1")
+        .map_err(|e| e.to_string())?;
+    for item in current.pages.iter().flat_map(|page| &page.items) {
+        let paths = statement
+            .query_row([&item.photo_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if let Some((original, thumbnail)) = paths {
+            let (available, _) =
+                crate::work_directory::original_status(conn, &item.photo_id, &original)?;
+            if available && std::path::Path::new(&thumbnail).is_file() {
+                return Ok(Some(item.photo_id.clone()));
+            }
+        }
+    }
+    Ok(None)
 }
 fn insert_version(
     conn: &Connection,
@@ -199,65 +313,28 @@ pub fn create(conn: &mut Connection, input: CreateBookInput) -> Result<BookDetai
     tx.commit().map_err(|e| e.to_string())?;
     get(conn, &id)
 }
-fn source(conn: &Connection, book_id: &str, version_id: &str) -> Result<BookVersion, String> {
-    get(conn, book_id)?
-        .versions
-        .into_iter()
-        .find(|v| v.id == version_id)
-        .ok_or_else(|| "版本不属于该画册".into())
-}
 pub fn save_version(
     conn: &mut Connection,
     book_id: &str,
     version_id: &str,
     input: VersionInput,
 ) -> Result<BookDetail, String> {
-    book_layout::validate(conn, &input)?;
-    let previous = source(conn, book_id, version_id)?;
-    let id = if previous.kind == "manual" {
-        previous.id
-    } else {
-        uuid::Uuid::new_v4().to_string()
-    };
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    if previous.kind == "manual" {
-        tx.execute(
-            "UPDATE book_versions SET data=?1 WHERE id=?2 AND book_id=?3",
-            params![
-                serde_json::to_string(&input).map_err(|e| e.to_string())?,
-                id,
-                book_id
-            ],
+    let current: String = tx
+        .query_row(
+            "SELECT current_version_id FROM books WHERE id=?1",
+            [book_id],
+            |row| row.get(0),
         )
-        .map_err(|e| e.to_string())?;
-    } else {
-        insert_version(&tx, book_id, &id, "manual", &input)?;
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or("画册不存在")?;
+    if current != version_id {
+        return Err("画册内容已在其他操作中更改，请重新打开后再试；当前修改仍保留。".into());
     }
-    tx.execute(
-        "UPDATE books SET current_version_id=?1,updated_at=?2 WHERE id=?3",
-        params![id, chrono::Utc::now().to_rfc3339(), book_id],
-    )
-    .map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())?;
-    get(conn, book_id)
-}
-pub fn reflow(
-    conn: &mut Connection,
-    book_id: &str,
-    version_id: &str,
-    template: &str,
-) -> Result<BookDetail, String> {
-    let previous = source(conn, book_id, version_id)?;
-    let input = book_layout::generate(
-        previous.input.chapters,
-        template,
-        previous.input.page_width,
-        previous.input.page_height,
-    )?;
-    book_layout::validate(conn, &input)?;
+    book_layout::validate(&tx, &input)?;
     let id = uuid::Uuid::new_v4().to_string();
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    insert_version(&tx, book_id, &id, "automatic", &input)?;
+    insert_version(&tx, book_id, &id, "manual", &input)?;
     tx.execute(
         "UPDATE books SET current_version_id=?1,updated_at=?2 WHERE id=?3",
         params![id, chrono::Utc::now().to_rfc3339(), book_id],
@@ -273,12 +350,8 @@ pub fn append_photos(
     photo_ids: Vec<String>,
 ) -> Result<BookDetail, String> {
     let detail = get(conn, book_id)?;
-    let previous = detail
-        .versions
-        .iter()
-        .find(|v| v.id == detail.book.current_version_id)
-        .ok_or("画册当前版本不存在")?;
-    let mut input = previous.input.clone();
+    let [previous] = detail.versions;
+    let mut input = previous.input;
     let used: std::collections::HashSet<String> = input
         .chapters
         .iter()
@@ -306,30 +379,7 @@ pub fn append_photos(
     input.chapters.push(chapter);
     input.pages.extend(layout.pages);
     input.label = "追加选片".into();
-    book_layout::validate(conn, &input)?;
-    let id = uuid::Uuid::new_v4().to_string();
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    insert_version(&tx, book_id, &id, "manual", &input)?;
-    tx.execute(
-        "UPDATE books SET current_version_id=?1,updated_at=?2 WHERE id=?3",
-        params![id, chrono::Utc::now().to_rfc3339(), book_id],
-    )
-    .map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())?;
-    get(conn, book_id)
-}
-pub fn select_version(
-    conn: &mut Connection,
-    book_id: &str,
-    version_id: &str,
-) -> Result<BookDetail, String> {
-    source(conn, book_id, version_id)?;
-    conn.execute(
-        "UPDATE books SET current_version_id=?1 WHERE id=?2",
-        params![version_id, book_id],
-    )
-    .map_err(|e| e.to_string())?;
-    get(conn, book_id)
+    save_version(conn, book_id, &detail.book.current_version_id, input)
 }
 pub fn rename(conn: &mut Connection, id: &str, name: &str) -> Result<BookDetail, String> {
     let name = title(name)?;
@@ -341,82 +391,67 @@ pub fn rename(conn: &mut Connection, id: &str, name: &str) -> Result<BookDetail,
     .map_err(|e| e.to_string())?;
     get(conn, id)
 }
-pub fn delete(conn: &mut Connection, id: &str) -> Result<(), String> {
-    if conn
-        .execute("DELETE FROM books WHERE id=?1", [id])
+pub fn delete(conn: &mut Connection, id: &str) -> Result<Snapshot, String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let data: Option<String> = tx
+        .query_row(
+            "SELECT v.data FROM books b
+         LEFT JOIN book_versions v ON v.id=b.current_version_id AND v.book_id=b.id
+         WHERE b.id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()
         .map_err(|e| e.to_string())?
-        == 0
-    {
-        return Err("画册不存在".into());
-    }
-    Ok(())
+        .ok_or("画册不存在")?;
+    let version: VersionInput = serde_json::from_str(&data.ok_or("画册当前内容不存在")?)
+        .map_err(|e| format!("画册内容损坏：{e}"))?;
+    let candidates = version_photo_ids(&version).cloned().collect();
+    tx.execute("DELETE FROM books WHERE id=?1", [id])
+        .map_err(|e| e.to_string())?;
+    let snapshot = content_refs::snapshot_after_deletion(&tx, candidates)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(snapshot)
 }
 
 #[tauri::command]
-pub fn books_list(store: State<'_, Store>) -> Result<Vec<BookSummary>, String> {
-    let conn = store.connection.lock().map_err(|e| e.to_string())?;
-    list(&conn)
+pub async fn books_list(app: AppHandle) -> Result<Vec<BookSummary>, String> {
+    db::with_connection(app, move |conn| list(conn)).await
 }
 #[tauri::command]
-pub fn books_get(store: State<'_, Store>, id: String) -> Result<BookDetail, String> {
-    let conn = store.connection.lock().map_err(|e| e.to_string())?;
-    get(&conn, &id)
+pub async fn books_get(app: AppHandle, id: String) -> Result<BookDetail, String> {
+    db::with_connection(app, move |conn| get(conn, &id)).await
 }
 #[tauri::command]
-pub fn books_create(store: State<'_, Store>, input: CreateBookInput) -> Result<BookDetail, String> {
-    let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
-    create(&mut conn, input)
+pub async fn books_create(app: AppHandle, input: CreateBookInput) -> Result<BookDetail, String> {
+    db::with_connection(app, move |conn| create(conn, input)).await
 }
 #[tauri::command]
-pub fn books_save_version(
-    store: State<'_, Store>,
+pub async fn books_save_version(
+    app: AppHandle,
     book_id: String,
     version_id: String,
     input: VersionInput,
 ) -> Result<BookDetail, String> {
-    let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
-    save_version(&mut conn, &book_id, &version_id, input)
+    db::with_connection(app, move |conn| {
+        save_version(conn, &book_id, &version_id, input)
+    })
+    .await
 }
 #[tauri::command]
-pub fn books_reflow(
-    store: State<'_, Store>,
-    book_id: String,
-    version_id: String,
-    template: String,
-) -> Result<BookDetail, String> {
-    let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
-    reflow(&mut conn, &book_id, &version_id, &template)
+pub async fn books_rename(app: AppHandle, id: String, title: String) -> Result<BookDetail, String> {
+    db::with_connection(app, move |conn| rename(conn, &id, &title)).await
 }
 #[tauri::command]
-pub fn books_select_version(
-    store: State<'_, Store>,
-    book_id: String,
-    version_id: String,
-) -> Result<BookDetail, String> {
-    let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
-    select_version(&mut conn, &book_id, &version_id)
-}
-#[tauri::command]
-pub fn books_rename(
-    store: State<'_, Store>,
-    id: String,
-    title: String,
-) -> Result<BookDetail, String> {
-    let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
-    rename(&mut conn, &id, &title)
-}
-#[tauri::command]
-pub fn books_delete(store: State<'_, Store>, id: String) -> Result<(), String> {
-    let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
-    delete(&mut conn, &id)
+pub async fn books_delete(app: AppHandle, id: String) -> Result<Snapshot, String> {
+    db::with_connection(app, move |conn| delete(conn, &id)).await
 }
 
 #[tauri::command]
-pub fn books_append_photos(
-    store: State<'_, Store>,
+pub async fn books_append_photos(
+    app: AppHandle,
     book_id: String,
     photo_ids: Vec<String>,
 ) -> Result<BookDetail, String> {
-    let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
-    append_photos(&mut conn, &book_id, photo_ids)
+    db::with_connection(app, move |conn| append_photos(conn, &book_id, photo_ids)).await
 }

@@ -8,6 +8,7 @@ export interface ModelInput {
   gender: string;
   birthday: string;
   heightCm: number | null;
+  weightKg: number | null;
   bustCm: number | null;
   waistCm: number | null;
   hipsCm: number | null;

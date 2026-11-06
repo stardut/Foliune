@@ -8,7 +8,7 @@ import { modelViewReducer, overviewSampleLayout, overviewSamples } from '../src/
 const model = {
   id: 'model', name: '林禾', gender: '女', city: '上海', birthday: '', contact: 'hello@example.test',
   tags: ['自然', '电影感'], tagOptions: ['自然', '电影感', '复古'], notes: '窗边自然光\n保留停顿',
-  heightCm: 172, bustCm: 86, waistCm: 62, hipsCm: 90,
+  heightCm: 172, weightKg: 56.25, bustCm: 86, waistCm: 62, hipsCm: 90,
   photoIds: ['one', 'two', 'three', 'four'], coverPhotoId: 'three', createdAt: '', updatedAt: '',
 };
 const home = { page: 'home' };
@@ -138,7 +138,7 @@ function detail(profile, photos = model.photoIds.map(photo)) {
   return renderToStaticMarkup(createElement(module.exports.ModelDetail, { model: profile, photos, onBack() {}, onEdit() {} }));
 }
 
-test('真实详情组件先展示已填资料，再展示全部有序样片，没有编辑控件或历史身体字段', () => {
+test('真实详情组件先展示已填资料和测量单位，再展示全部有序样片，不展示历史三围字段', () => {
   const html = detail(model);
   assert(html.includes('编辑档案'));
   assert(html.includes('返回模特'));
@@ -150,7 +150,9 @@ test('真实详情组件先展示已填资料，再展示全部有序样片，�
   assert(html.indexOf('aria-label="基本资料"') < html.indexOf('aria-label="全部样片"'));
   assert(html.indexOf('窗边自然光\n保留停顿') < html.indexOf('model-detail-samples'));
   assert(!html.includes('生日'));
-  assert(!html.includes('172'));
+  assert(html.includes('<dt>身高</dt><dd>172 cm</dd>'));
+  assert(html.includes('<dt>体重</dt><dd>56.25 kg</dd>'));
+  assert(!/胸围|腰围|臀围/.test(html));
   assert(!html.includes('复古'));
   assert(!/<(?:input|textarea|select)\b/.test(html));
   assert(!/移除样片|设为封面|向前移动|从图库选择|导入/.test(html));
@@ -160,10 +162,13 @@ test('真实详情组件先展示已填资料，再展示全部有序样片，�
 });
 
 test('详情空资料不显示资料区，缺失记录明确显示且不静默跳过', () => {
-  const empty = { ...model, gender: '', city: '', birthday: '', contact: '', tags: [], notes: '  ', photoIds: [] };
+  const empty = { ...model, gender: '', city: '', birthday: '', contact: '', heightCm: null, weightKg: null, tags: [], notes: '  ', photoIds: [] };
   const html = detail(empty, []);
   assert(html.includes('还没有样片'));
   assert(!html.includes('基本资料'));
+  const heightOnly = detail({ ...empty, heightCm: 172 }, []);
+  assert(heightOnly.includes('<dt>身高</dt><dd>172 cm</dd>'));
+  assert(!heightOnly.includes('<dt>体重</dt>'));
   const missing = detail({ ...empty, photoIds: ['missing'] }, []);
   assert(missing.includes('样片记录缺失'));
   assert(/disabled=""[^>]*aria-label="第 1 张样片记录缺失"/.test(missing));
@@ -185,7 +190,7 @@ const workspaceCompiled = await build({ entryPoints: [resolve('apps/desktop/src/
 
 test('列表和详情共用删除确认，取消不请求，失败保留目标，忙时不能重复删除或关闭，成功只删除指定档案', async () => {
   let active, finishDelete, rejectDelete;
-  const removed = [], busyStates = [], dirtyStates = [];
+  const removed = [], published = [], busyStates = [], dirtyStates = [];
   const other = { ...model, id: 'other', name: '另一位' };
   const jsx = (type, props) => ({ type, props });
   const flat = node => !node || typeof node !== 'object' ? [] : [node, ...[node.props?.children].flat(Infinity).flatMap(flat)];
@@ -206,7 +211,7 @@ test('列表和详情共用删除确认，取消不请求，失败保留目标�
     if (name === 'react-dom') return { createPortal: node => node };
     if (name === 'lucide-react') return new Proxy({}, { get: (_, key) => key });
     if (name === 'motion/react') return { motion: new Proxy({}, { get: (_, key) => key }) };
-    if (name === '@tauri-apps/api/core') return { isTauri: () => true, invoke: async (command, args) => {
+    if (name === '@tauri-apps/api/core') return { isTauri: () => true, convertFileSrc: (path) => `asset:${path}`, invoke: async (command, args) => {
       if (command === 'models_list') return [model, other];
       if (command === 'models_delete') { removed.push(args.id); return new Promise((resolve, reject) => { finishDelete = resolve; rejectDelete = reject; }); }
       throw Error(`Unexpected IPC ${command}`);
@@ -214,7 +219,7 @@ test('列表和详情共用删除确认，取消不请求，失败保留目标�
     return require(name);
   } });
   const h = { cells: [], effects: [], pending: [], cursor: 0, effectCursor: 0 };
-  const props = { photos: [], onSnapshot() {}, onDirtyChange: value => dirtyStates.push(value), onBusyChange: value => busyStates.push(value) };
+  const props = { photos: [], onSnapshot: next => published.push(next), onDirtyChange: value => dirtyStates.push(value), onBusyChange: value => busyStates.push(value) };
   let tree;
   function render() {
     h.cursor = 0; h.effectCursor = 0; h.pending = []; active = h;
@@ -240,7 +245,7 @@ test('列表和详情共用删除确认，取消不请求，失败保留目标�
   const firstDelete = deleteIcon(rows()[0]);
   assert.equal(firstDelete.props['aria-label'], '删除林禾的档案');
   firstDelete.props.onClick(); render();
-  assert(modal()); assert(text(modal()).includes('将删除“林禾”的资料与样片关联，图库照片和原件保留。'));
+  assert(modal()); assert.match(text(modal()), /将删除“林禾”的资料。.*全局搜索和图库选片中移除，照片文件会保留。/);
   assert.equal(removed.length, 0, 'Opening confirmation does not delete');
   cancel().props.onClick(); render(); assert(!modal()); assert.equal(removed.length, 0);
   deleteIcon(rows()[1]).props.onClick(); render();
@@ -250,15 +255,22 @@ test('列表和详情共用删除确认，取消不请求，失败保留目标�
   assert.equal(busyStates.at(-1), true); assert.equal(dirtyStates.at(-1), true);
   rejectDelete(Error('删除失败测试')); await pump(); render();
   assert(modal()); assert(text(modal()).includes('另一位')); assert(text(modal()).includes('删除失败测试')); assert.equal(rows().length, 2);
+  assert.equal(published.length, 0);
   assert.equal(busyStates.at(-1), false); assert.equal(dirtyStates.at(-1), false);
-  confirm().props.onClick(); finishDelete(); await pump(); render();
+  const retained = { id: 'one', originalPath: '/original.jpg', thumbnailPath: '/thumb.jpg' };
+  confirm().props.onClick(); finishDelete({ photos: [retained], groups: [], memberships: [], hiddenPhotoIds: ['other-only'] }); await pump(); render();
   assert(!modal()); assert.equal(rows().length, 1); assert.equal(rows()[0].props.model.id, 'model');
+  assert.deepEqual(published[0].hiddenPhotoIds, ['other-only']);
+  assert.equal(published[0].photos[0].id, retained.id);
+  assert.equal(published[0].photos[0].thumbnailUrl, 'asset:/thumb.jpg');
   rows()[0].props.onOpen(); render();
   const detail = flat(tree).find(node => node.type?.name === 'ModelDetail'); detail.props.onDelete(); render();
   assert(modal()); cancel().props.onClick(); render(); assert(flat(tree).some(node => node.type?.name === 'ModelDetail'));
   flat(tree).find(node => node.type?.name === 'ModelDetail').props.onDelete(); render();
-  confirm().props.onClick(); finishDelete(); await pump(); render();
+  confirm().props.onClick(); finishDelete({ photos: [], groups: [], memberships: [], hiddenPhotoIds: ['other-only', 'one'] }); await pump(); render();
   assert(!modal()); assert.equal(rows().length, 0); assert(flat(tree).some(node => node.props?.title === '建立第一份模特档案'));
+  assert.deepEqual(published[1].hiddenPhotoIds, ['other-only', 'one']);
+  assert.equal(published[1].photos.length, 0);
   assert.deepEqual(removed, ['other', 'other', 'model']);
   for (const effect of h.effects) effect?.cleanup?.();
 });

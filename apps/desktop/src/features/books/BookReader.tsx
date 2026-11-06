@@ -1,15 +1,19 @@
 import { presentModal } from '../../lib/modal-stack';
-import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import { revealContent } from '../../lib/content-reveal';
+import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { IconButton } from '../../components/ui';
 import type { BookVersion } from '../../lib/book-types';
 import type { Photo } from '../../lib/types';
 import { BookPageView } from './BookPageView';
 
-export function BookReader({ version, photos, title, onClose, onRelink }: { version: BookVersion; photos: Photo[]; title: string; onClose: () => void; onRelink?: (photo: Photo) => Promise<void> }) {
+export function BookReader({ version, photos, title, initialPageIndex, onClose, onRelink }: {
+  version: BookVersion; photos: Photo[]; title: string; initialPageIndex: number; onClose: () => void; onRelink?: (photo: Photo) => Promise<void>;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(initialPageIndex);
   const [spread, setSpread] = useState(() => typeof window === 'undefined' || window.matchMedia('(min-width: 761px)').matches);
   const total = version.pages.length;
   const step = spread ? 2 : 1;
@@ -21,13 +25,22 @@ export function BookReader({ version, photos, title, onClose, onRelink }: { vers
   const visiblePages = version.pages.slice(first, first + step);
   const chapters = version.chapters.filter((chapter) => version.pages.some((entry) => entry.chapterId === chapter.id));
   const currentChapter = version.pages[currentPage]?.chapterId || '';
-  function move(direction: number) { setPage(Math.max(0, Math.min(last, first + direction * step))); }
+  function move(direction: number) {
+    const next = first + direction * step;
+    if (next >= 0 && next <= last) setPage(next);
+  }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    const element = dialog.current;
-    const dismissModal = presentModal(element!);
-    return () => { dismissModal(); previous?.focus(); };
+    const element = dialog.current!;
+    const dismissModal = presentModal(element);
+    stage.current?.focus({ preventScroll: true });
+    const cancelReveal = revealContent([element]);
+    return () => {
+      dismissModal();
+      cancelReveal();
+      previous?.focus({ preventScroll: true });
+    };
   }, []);
 
   return <dialog ref={dialog} className="book-reader" aria-labelledby={titleId}
@@ -53,7 +66,7 @@ export function BookReader({ version, photos, title, onClose, onRelink }: { vers
       </div>
       <IconButton label="关闭阅读" onClick={onClose}><X size={18} /></IconButton>
     </header>
-    <div className="book-reader-stage">
+    <div ref={stage} className="book-reader-stage" tabIndex={-1} role="group" aria-label="阅读页面">
       <div className="book-reader-viewport" style={{ '--book-page-ratio': version.pageWidth / version.pageHeight, '--book-reader-columns': step, '--book-reader-gap': spread ? '12px' : '0px' } as CSSProperties}>
         {total ? <div className="book-reader-pages" aria-label={spread ? '双页阅读' : '单页阅读'}>
           {visiblePages.map((entry, index) => <BookPageView key={entry.id} page={entry} pageWidth={version.pageWidth} pageHeight={version.pageHeight} photos={photos} number={first + index + 1} onRelink={onRelink} />)}

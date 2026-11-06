@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 import { ImageOff } from 'lucide-react';
 import type { Photo } from '../../lib/types';
+import { originalReadUrl, photoUnavailableLabel } from '../../lib/photo-availability';
 import { cropFor, type CollageLayout, type CollageState, type PhotoCrop } from './collage-layout';
 
 export function CollagePreview({ state, layout, photos, activeId, editing, disabled, onSelect, onEdit, onCrop, onSwap }: {
@@ -39,6 +40,7 @@ function PreviewPhoto({ photo, rect, crop, active, editing, disabled, targeted, 
 }) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [readSession] = useState(() => crypto.randomUUID());
   const drag = useRef<{ x: number; y: number; crop: PhotoCrop; latest: PhotoCrop; moved: boolean; target: string | null; mode: 'crop' | 'swap' } | null>(null);
   const suppressClick = useRef(false);
   const factor = (crop.fit === 'contain' ? Math.min(rect.width / photo.width, rect.height / photo.height) : Math.max(rect.width / photo.width, rect.height / photo.height) * crop.zoom);
@@ -76,7 +78,7 @@ function PreviewPhoto({ photo, rect, crop, active, editing, disabled, targeted, 
       const next = { ...start.crop, offsetX: imageWidth > rect.width ? clamp(start.crop.offsetX - (event.clientX - start.x) / (imageWidth - rect.width)) : .5, offsetY: imageHeight > rect.height ? clamp(start.crop.offsetY - (event.clientY - start.y) / (imageHeight - rect.height)) : .5 };
       start.latest = next; onCrop(next, false);
     }} onPointerUp={(event) => endDrag(event)} onPointerCancel={(event) => endDrag(event, true)}>
-    {photo.originalAvailable && !failed ? <img src={photo.originalUrl} alt="" draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} style={{ width: imageWidth, height: imageHeight, left, top }} /> : <span className="collage-preview-missing"><ImageOff size={20} /><span>原图无法读取</span></span>}
+    {photo.originalAvailable && !failed ? <img src={originalReadUrl(photo, readSession)} alt="" draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} style={{ width: imageWidth, height: imageHeight, left, top }} /> : <span className="collage-preview-missing"><ImageOff size={20} /><span>{photoUnavailableLabel(photo)}</span></span>}
     {!failed && photo.originalAvailable && !loaded && <span className="collage-preview-loading">读取原图…</span>}
   </button>;
 }

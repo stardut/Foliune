@@ -57,6 +57,12 @@ function score(tiles: ExhibitionTile[], width: number, height: number, viewportH
 export function exhibitionLayout(photos: Pick<Photo, 'width' | 'height'>[], width: number, viewportHeight: number): ExhibitionBlock[] {
   if (!photos.length || !Number.isFinite(width) || width <= 0) return [];
   const ratios = photos.map(({ width: w, height: h }) => Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0 ? w / h : 1);
+  // A lone photograph is a browsing entry, not a full-width mosaic block.
+  if (photos.length === 1) {
+    const photoWidth = Math.min(width, 480, Math.min(360, viewportHeight * .5) * ratios[0]);
+    const height = photoWidth / ratios[0];
+    return [{ start: 0, height, tiles: [{ index: 0, x: 0, y: 0, width: photoWidth, height }] }];
+  }
   const spans = new Map<string, Slice[]>();
   function candidates(start: number, count: number): Slice[] {
     const key = `${start}:${count}`;
@@ -73,7 +79,7 @@ export function exhibitionLayout(photos: Pick<Photo, 'width' | 'height'>[], widt
     return result;
   }
   // Contiguous spans only: at most C(5)*2^5 = 1344 trees per six-photo span.
-  // Each span is generated once, without permutations. The page stays in business
+  // Each span is generated once, without permutations. The wall stays in business
   // order; only the geometric partition and the block boundaries change.
   const costs = Array<number>(photos.length + 1).fill(Infinity);
   const choices = new Map<number, ExhibitionBlock>();
@@ -91,6 +97,10 @@ export function exhibitionLayout(photos: Pick<Photo, 'width' | 'height'>[], widt
         }
       }
     }
+    // The next start can only reach five photos ahead. Drop older map roots;
+    // chosen tiles contain no tree references, so large walls keep bounded
+    // candidate memory without changing any score or partition decision.
+    for (let count = 1; count <= MAX_BLOCK_PHOTOS; count++) spans.delete(`${start + MAX_BLOCK_PHOTOS - 1}:${count}`);
   }
   const blocks: ExhibitionBlock[] = [];
   for (let start = 0; start < photos.length;) {

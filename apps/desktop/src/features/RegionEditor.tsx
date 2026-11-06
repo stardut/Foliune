@@ -1,6 +1,7 @@
 import { useRef, useState, type PointerEvent } from 'react';
 import { Plus, Scan, Trash2 } from 'lucide-react';
 import type { Photo, PhotoRegion } from '../lib/types';
+import { canReadOriginal, isLocalPhoto, originalReadUrl, photoUnavailableLabel } from '../lib/photo-availability';
 import { IconButton } from '../components/ui';
 
 export function RegionEditor({ photo, regions, onChange }: { photo: Photo; regions: PhotoRegion[]; onChange: (regions: PhotoRegion[]) => void }) {
@@ -9,6 +10,7 @@ export function RegionEditor({ photo, regions, onChange }: { photo: Photo; regio
   const [active, setActive] = useState<string | null>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
   const [imageFailed, setImageFailed] = useState(false);
+  const [readSession] = useState(() => crypto.randomUUID());
   function point(event: PointerEvent<HTMLDivElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
     return { x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)), y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)) };
@@ -32,10 +34,10 @@ export function RegionEditor({ photo, regions, onChange }: { photo: Photo; regio
     const id = crypto.randomUUID(); onChange([...regions, { id, ...bounds, text: '' }]); setActive(id); setDrawing(false);
   }
   function addWithKeyboard() { const id = crypto.randomUUID(); onChange([...regions, { id, x: .25, y: .25, width: .5, height: .5, text: '' }]); setActive(id); }
-  if (!photo.originalAvailable || imageFailed) return <p className="muted">重新定位原图后可编辑区域标注。</p>;
+  if (!canReadOriginal(photo) || imageFailed) return <p className="muted">{isLocalPhoto(photo) ? photoUnavailableLabel(photo) : '重新定位原图后可编辑区域标注。'}</p>;
   return <section className="region-editor"><div className="region-toolbar"><span>区域标注 · {regions.length}</span><button type="button" className={`button ${drawing ? 'button-primary' : ''}`} onClick={() => setDrawing(!drawing)}><Scan size={13} />{drawing ? '取消框选' : '框选区域'}</button><IconButton label="添加居中标注框，可用下方坐标编辑" onClick={addWithKeyboard}><Plus size={15} /></IconButton></div>
     <div className={`region-image ${drawing ? 'drawing' : ''}`} style={{ maxWidth: `${55 * photo.width / photo.height}vh` }} onPointerDown={begin} onPointerMove={move} onPointerUp={finish} onPointerCancel={() => { start.current = null; setPreview(null); }}>
-      <img src={photo.originalUrl} width={photo.width} height={photo.height} alt={photo.title} draggable={false} onError={() => setImageFailed(true)} />
+      <img src={originalReadUrl(photo, readSession)} width={photo.width} height={photo.height} alt={photo.title} draggable={false} onError={() => setImageFailed(true)} />
       {regions.map((region, index) => <button type="button" key={region.id} className={`region-box ${active === region.id ? 'region-active' : ''}`} style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.width * 100}%`, height: `${region.height * 100}%` }} aria-label={`标注 ${index + 1}：${region.text || '未填写'}`} onClick={() => setActive(region.id)}><span>{index + 1}</span></button>)}
       {preview && <span className="region-box region-preview" style={{ left: `${preview.x * 100}%`, top: `${preview.y * 100}%`, width: `${preview.width * 100}%`, height: `${preview.height * 100}%` }} />}
     </div>

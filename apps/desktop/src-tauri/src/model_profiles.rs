@@ -1,7 +1,11 @@
-use crate::{content_refs, db::Store};
+use crate::{
+    content_refs,
+    db::{self, Store},
+    models::Snapshot,
+};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -16,6 +20,7 @@ pub struct ModelInput {
     pub gender: String,
     pub birthday: String,
     pub height_cm: Option<f64>,
+    pub weight_kg: Option<f64>,
     pub bust_cm: Option<f64>,
     pub waist_cm: Option<f64>,
     pub hips_cm: Option<f64>,
@@ -38,7 +43,7 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         "CREATE TABLE IF NOT EXISTS model_profiles (
             id TEXT PRIMARY KEY, name TEXT NOT NULL, contact TEXT NOT NULL, city TEXT NOT NULL,
             tags TEXT NOT NULL, tag_options TEXT, notes TEXT NOT NULL, gender TEXT NOT NULL, birthday TEXT NOT NULL,
-            height_cm REAL, bust_cm REAL, waist_cm REAL, hips_cm REAL,
+            height_cm REAL, weight_kg REAL, bust_cm REAL, waist_cm REAL, hips_cm REAL,
             cover_photo_id TEXT REFERENCES photos(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL
          );
          CREATE TABLE IF NOT EXISTS model_photos (
@@ -57,6 +62,10 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     if !columns.iter().any(|column| column == "tag_options") {
         conn.execute("ALTER TABLE model_profiles ADD COLUMN tag_options TEXT", [])
+            .map_err(|e| e.to_string())?;
+    }
+    if !columns.iter().any(|column| column == "weight_kg") {
+        conn.execute("ALTER TABLE model_profiles ADD COLUMN weight_kg REAL", [])
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -119,6 +128,12 @@ fn validate(conn: &Connection, input: &ModelInput) -> Result<(), String> {
             return Err("身体数值须大于 0 且不超过 300 厘米".into());
         }
     }
+    if input
+        .weight_kg
+        .is_some_and(|value| !value.is_finite() || value <= 0.0)
+    {
+        return Err("体重须为大于 0 的有效数值".into());
+    }
     content_refs::validate_photos(conn, &input.photo_ids)?;
     if input
         .cover_photo_id
@@ -161,6 +176,7 @@ fn read(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProfile> {
             gender: row.get(6)?,
             birthday: row.get(7)?,
             height_cm: row.get(8)?,
+            weight_kg: row.get(16)?,
             bust_cm: row.get(9)?,
             waist_cm: row.get(10)?,
             hips_cm: row.get(11)?,
@@ -171,7 +187,7 @@ fn read(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProfile> {
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<ModelProfile>, String> {
-    let mut statement = conn.prepare("SELECT id,name,contact,city,tags,notes,gender,birthday,height_cm,bust_cm,waist_cm,hips_cm,cover_photo_id,created_at,updated_at,tag_options FROM model_profiles ORDER BY updated_at DESC,id").map_err(|e| e.to_string())?;
+    let mut statement = conn.prepare("SELECT id,name,contact,city,tags,notes,gender,birthday,height_cm,bust_cm,waist_cm,hips_cm,cover_photo_id,created_at,updated_at,tag_options,weight_kg FROM model_profiles ORDER BY updated_at DESC,id").map_err(|e| e.to_string())?;
     let mut profiles = statement
         .query_map([], read)
         .map_err(|e| e.to_string())?
@@ -231,9 +247,9 @@ pub fn save(
         }
         None => (uuid::Uuid::new_v4().to_string(), now.clone()),
     };
-    tx.execute("INSERT INTO model_profiles (id,name,contact,city,tags,notes,gender,birthday,height_cm,bust_cm,waist_cm,hips_cm,cover_photo_id,created_at,updated_at,tag_options) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
-        ON CONFLICT(id) DO UPDATE SET name=excluded.name,contact=excluded.contact,city=excluded.city,tags=excluded.tags,tag_options=excluded.tag_options,notes=excluded.notes,gender=excluded.gender,birthday=excluded.birthday,height_cm=excluded.height_cm,bust_cm=excluded.bust_cm,waist_cm=excluded.waist_cm,hips_cm=excluded.hips_cm,cover_photo_id=excluded.cover_photo_id,updated_at=excluded.updated_at",
-        params![id,input.name,input.contact,input.city,serde_json::to_string(&input.tags).map_err(|e| e.to_string())?,input.notes,input.gender,input.birthday,input.height_cm,input.bust_cm,input.waist_cm,input.hips_cm,input.cover_photo_id,created_at,now,input.tag_options.as_ref().map(serde_json::to_string).transpose().map_err(|e| e.to_string())?])
+    tx.execute("INSERT INTO model_profiles (id,name,contact,city,tags,notes,gender,birthday,height_cm,bust_cm,waist_cm,hips_cm,cover_photo_id,created_at,updated_at,tag_options,weight_kg) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name,contact=excluded.contact,city=excluded.city,tags=excluded.tags,tag_options=excluded.tag_options,notes=excluded.notes,gender=excluded.gender,birthday=excluded.birthday,height_cm=excluded.height_cm,bust_cm=excluded.bust_cm,waist_cm=excluded.waist_cm,hips_cm=excluded.hips_cm,cover_photo_id=excluded.cover_photo_id,updated_at=excluded.updated_at,weight_kg=excluded.weight_kg",
+        params![id,input.name,input.contact,input.city,serde_json::to_string(&input.tags).map_err(|e| e.to_string())?,input.notes,input.gender,input.birthday,input.height_cm,input.bust_cm,input.waist_cm,input.hips_cm,input.cover_photo_id,created_at,now,input.tag_options.as_ref().map(serde_json::to_string).transpose().map_err(|e| e.to_string())?,input.weight_kg])
         .map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM model_photos WHERE model_id=?1", [&id])
         .map_err(|e| e.to_string())?;
@@ -253,15 +269,24 @@ pub fn save(
     })
 }
 
-pub fn delete(conn: &Connection, id: &str) -> Result<(), String> {
-    if conn
+pub fn delete(conn: &mut Connection, id: &str) -> Result<Snapshot, String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let candidates = content_refs::deletion_candidates(
+        &tx,
+        "SELECT photo_id FROM model_photos WHERE model_id=?1
+         UNION ALL SELECT cover_photo_id FROM model_profiles WHERE id=?1 AND cover_photo_id IS NOT NULL",
+        id,
+    )?;
+    if tx
         .execute("DELETE FROM model_profiles WHERE id=?1", [id])
         .map_err(|e| e.to_string())?
         == 0
     {
         return Err("模特档案不存在".into());
     }
-    Ok(())
+    let snapshot = content_refs::snapshot_after_deletion(&tx, candidates)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -281,6 +306,6 @@ pub fn models_save(
     )
 }
 #[tauri::command]
-pub fn models_delete(store: State<'_, Store>, id: String) -> Result<(), String> {
-    delete(&*store.connection.lock().map_err(|e| e.to_string())?, &id)
+pub async fn models_delete(app: AppHandle, id: String) -> Result<Snapshot, String> {
+    db::with_connection(app, move |conn| delete(conn, &id)).await
 }

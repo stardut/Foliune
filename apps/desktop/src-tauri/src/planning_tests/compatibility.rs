@@ -30,6 +30,85 @@ fn planning_old_v2_without_scene_fields_keeps_content_and_saves_explicit_default
 }
 
 #[test]
+fn planning_old_v2_without_execution_date_can_reopen_and_restore_but_must_set_date_to_resave() {
+    let (dir, store, ids) = setup(1);
+    let mut conn = store.connection.lock().unwrap();
+    let mut draft = input(&ids);
+    draft.shoot_date = "2026-11-07".into();
+    let mut legacy = planning::save(&mut conn, None, draft).unwrap();
+    conn.execute_batch(
+        "UPDATE shoot_plans SET document_json=json_remove(document_json,'$.input.executionDate')",
+    )
+    .unwrap();
+    legacy.input.execution_date.clear();
+    drop(conn);
+    drop(store);
+    let store = Store::open(dir.path().join("managed")).unwrap();
+    assert_eq!(
+        planning::list(&store.connection.lock().unwrap()).unwrap(),
+        [legacy.clone()]
+    );
+    let path = dir.path().join("old-v2-without-execution-date.zip");
+    backup::create(&store, &path).unwrap();
+    let restored = backup::restore(&store, &path).unwrap();
+    libraries::switch(&store, &CurationStore::default(), &restored.library.id).unwrap();
+    let mut conn = store.connection.lock().unwrap();
+    let mut loaded = planning::list(&conn).unwrap().remove(0);
+    assert_eq!(loaded, legacy);
+    let error = planning::save(&mut conn, Some(&loaded.id), loaded.input.clone()).unwrap_err();
+    assert!(error.contains("执行日期"), "{error}");
+    assert_eq!(planning::list(&conn).unwrap(), [legacy]);
+    loaded.input.execution_date = "9999-12-31".into();
+    let updated = planning::save(&mut conn, Some(&loaded.id), loaded.input.clone()).unwrap();
+    assert_eq!(updated.id, loaded.id);
+    assert_eq!(updated.created_at, loaded.created_at);
+    assert_eq!(updated.input, loaded.input);
+    assert_eq!(planning::list(&conn).unwrap(), [updated]);
+}
+
+#[test]
+fn planning_save_rejects_missing_or_invalid_execution_date_without_mutation() {
+    let (_dir, store, ids) = setup(2);
+    let mut conn = store.connection.lock().unwrap();
+    let saved = planning::save(&mut conn, None, input(&ids[..1])).unwrap();
+    let base = serde_json::to_value(input(&ids[1..])).unwrap();
+    for invalid in [
+        None,
+        Some(""),
+        Some("2026-2-07"),
+        Some("2026-02-7"),
+        Some("2026-02-29"),
+        Some("1900-02-29"),
+        Some("2026-13-01"),
+        Some("2026-02-00"),
+        Some("0000-01-01"),
+        Some("10000-01-01"),
+        Some("２０２６-11-07"),
+        Some("2026-11-07T00:00:00Z"),
+        Some("2026-11-07 "),
+    ] {
+        let mut value = base.clone();
+        match invalid {
+            Some(date) => value["executionDate"] = json!(date),
+            None => {
+                value.as_object_mut().unwrap().remove("executionDate");
+            }
+        }
+        let draft: ShootPlanInput = serde_json::from_value(value).unwrap();
+        for id in [None, Some(saved.id.as_str())] {
+            let error = planning::save(&mut conn, id, draft.clone()).unwrap_err();
+            assert!(error.contains("执行日期"), "{invalid:?}: {error}");
+        }
+        assert_eq!(planning::list(&conn).unwrap(), [saved.clone()]);
+    }
+    let mut earliest = saved.input;
+    earliest.execution_date = "0001-01-01".into();
+    let updated = planning::save(&mut conn, Some(&saved.id), earliest).unwrap();
+    assert_eq!(updated.input.execution_date, "0001-01-01");
+    assert_eq!(planning::list(&conn).unwrap(), [updated]);
+}
+
+#[test]
 fn planning_invalid_scene_focal_length_rolls_back_without_losing_saved_content() {
     let (_dir, store, ids) = setup(1);
     let mut conn = store.connection.lock().unwrap();
@@ -146,13 +225,15 @@ fn planning_migrates_v1_once_preserving_fields_and_does_not_revive_removed_conte
     let (dir, store, ids) = setup(2);
     let mut conn = store.connection.lock().unwrap();
     let saved = planning::save(&mut conn, None, input(&ids)).unwrap();
-    conn.execute_batch("ALTER TABLE shoot_plans DROP COLUMN document_json; UPDATE shoot_plans SET styling='  白衬衫  ', lighting='窗光', shot_list='01 半身\n02 环境', notes='携带备用衣服';").unwrap();
+    conn.execute_batch("ALTER TABLE shoot_plans DROP COLUMN document_json; UPDATE shoot_plans SET shoot_date='2026-11-07', styling='  白衬衫  ', lighting='窗光', shot_list='01 半身\n02 环境', notes='携带备用衣服';").unwrap();
     planning::init(&conn).unwrap();
     let migrated = planning::list(&conn).unwrap().remove(0);
     assert_eq!(migrated.id, saved.id);
     assert_eq!(migrated.created_at, saved.created_at);
     assert_eq!(migrated.updated_at, saved.updated_at);
     assert_eq!(migrated.input.concept, saved.input.concept);
+    assert_eq!(migrated.input.shoot_date, "2026-11-07");
+    assert!(migrated.input.execution_date.is_empty());
     assert_eq!(migrated.input.preparation, "携带备用衣服");
     assert_eq!(migrated.input.parts[0].title, "原拍摄安排");
     assert_eq!(migrated.input.parts[0].styling, "  白衬衫  ");
@@ -184,6 +265,7 @@ fn planning_migrates_v1_once_preserving_fields_and_does_not_revive_removed_conte
     removed.parts.clear();
     removed.references.clear();
     removed.preparation.clear();
+    removed.execution_date = "2026-12-07".into();
     let updated = planning::save(&mut conn, Some(&saved.id), removed).unwrap();
     planning::init(&conn).unwrap();
     assert_eq!(planning::list(&conn).unwrap(), [updated]);

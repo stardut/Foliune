@@ -8,6 +8,13 @@ export function IconButton({ label, children, onClick, disabled = false, active 
   return <button type="button" className={`icon-button ${active ? 'is-active' : ''}`} aria-label={label} title={label} onClick={onClick} disabled={disabled}>{children}</button>;
 }
 
+export function WorkspaceHeader({ title, count, children }: { title: ReactNode; count?: string; children?: ReactNode }) {
+  return <header className="workspace-intro workspace-home-intro">
+    <div className="workspace-title"><h1>{title}</h1>{count && <p className="photo-count">{count}</p>}</div>
+    {children && <div className="workspace-tools">{children}</div>}
+  </header>;
+}
+
 export function EmptyState({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
   return <div className="empty-state"><span className="empty-mark" aria-hidden="true">F.</span><h2>{title}</h2>{description && <p>{description}</p>}{action}</div>;
 }
@@ -16,7 +23,7 @@ export function Busy({ label = '正在读取图库' }: { label?: string }) {
   return <div className="busy" role="status"><LoaderCircle size={18} className="spin" />{label}</div>;
 }
 
-export function Modal({ title, children, onClose, wide = false }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
+export function Modal({ title, children, onClose, wide = false }: { title: string; children: ReactNode; onClose?: () => void; wide?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
@@ -25,7 +32,7 @@ export function Modal({ title, children, onClose, wide = false }: { title: strin
     const dismissModal = presentModal(dialog!);
     return () => { dismissModal(); previous?.focus(); };
   }, []);
-  return <dialog ref={ref} aria-labelledby={titleId} className={`modal ${wide ? 'modal-wide' : ''}`} onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div className="modal-header"><h2 id={titleId}>{title}</h2><IconButton label="关闭" onClick={onClose}><X size={18} /></IconButton></div>{children}
+  return <dialog ref={ref} aria-labelledby={titleId} className={`modal ${wide ? 'modal-wide' : ''}`} onCancel={(event) => { event.preventDefault(); onClose?.(); }} onClick={(event) => { if (event.target === event.currentTarget) onClose?.(); }}>
+    <div className="modal-header"><h2 id={titleId}>{title}</h2>{onClose && <IconButton label="关闭" onClick={onClose}><X size={18} /></IconButton>}</div>{children}
   </dialog>;
 }

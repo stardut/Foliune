@@ -11,6 +11,8 @@ pub struct Photo {
     pub thumbnail_path: String,
     pub original_available: bool,
     pub thumbnail_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub availability: Option<crate::work_directory::BoundAvailability>,
     pub width: u32,
     pub height: u32,
     pub tags: Vec<String>,
@@ -43,6 +45,8 @@ pub struct Group {
     pub description: String,
     pub capacity: Option<u32>,
     pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bound_folder: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -60,6 +64,8 @@ pub struct Snapshot {
     pub photos: Vec<Photo>,
     pub groups: Vec<Group>,
     pub memberships: Vec<Membership>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hidden_photo_ids: Vec<String>,
 }
 
 #[derive(Deserialize)]

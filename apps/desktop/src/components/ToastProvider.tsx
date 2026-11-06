@@ -16,7 +16,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   // The manual popover escapes dialog clipping; its host follows actual
   // showModal order so its controls remain in the active, non-inert subtree.
   useLayoutEffect(() => {
-    if (supportsPopover && toasts.length && viewport.current && !viewport.current.matches(':popover-open')) viewport.current.showPopover();
+    // A dialog can be removed in this commit before its passive cleanup
+    // updates the modal stack. Wait for that notification to move the portal
+    // to a connected host before entering the native top layer.
+    if (supportsPopover && toasts.length && viewport.current?.isConnected && !viewport.current.matches(':popover-open')) viewport.current.showPopover();
   }, [host, toasts]);
   return <ToastContext.Provider value={showToast}>
     {children}

@@ -11,17 +11,22 @@ export function ModelStyleTags({ value, options, onChange, disabled }: {
   const titleId = useId();
   const [managing, setManaging] = useState(false);
   const selected = [...new Set(value.map((tag) => tag.trim()).filter(Boolean))];
+  const lastOption = options.at(-1);
+  function renderOption(option: string) {
+    const pressed = selected.includes(option);
+    return <button type="button" className="model-style-tag" key={option} aria-pressed={pressed} disabled={disabled || (!pressed && selected.length >= 50)}
+      onClick={() => { if (!disabled) onChange(pressed ? selected.filter((item) => item !== option) : [...selected, option], options); }}>
+      <span>{option}</span>
+    </button>;
+  }
   return <div className="model-style-tags">
     <span id={titleId}>风格标签</span>
     <div className="model-style-options" role="group" aria-labelledby={titleId}>
-      {options.map((option) => {
-        const pressed = selected.includes(option);
-        return <button type="button" className="model-style-tag" key={option} aria-pressed={pressed} disabled={disabled || (!pressed && selected.length >= 50)}
-          onClick={() => { if (!disabled) onChange(pressed ? selected.filter((item) => item !== option) : [...selected, option], options); }}>
-          <span>{option}</span>
-        </button>;
-      })}
-      <IconButton label="管理风格标签" disabled={disabled} onClick={() => setManaging(true)}><Settings2 size={14} /></IconButton>
+      {options.slice(0, -1).map(renderOption)}
+      <span className="model-style-tail">
+        {lastOption !== undefined && renderOption(lastOption)}
+        <IconButton label="管理风格标签" disabled={disabled} onClick={() => setManaging(true)}><Settings2 size={14} /></IconButton>
+      </span>
     </div>
     {managing && createPortal(<TagManager options={options} selected={selected} disabled={disabled} onClose={() => setManaging(false)}
       onAdd={(tag) => {

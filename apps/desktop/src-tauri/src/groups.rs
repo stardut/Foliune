@@ -1,8 +1,9 @@
 use crate::{
+    content_refs,
     db::snapshot,
     models::{self, GroupInput, Snapshot},
 };
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -95,15 +96,20 @@ pub fn update(conn: &mut Connection, id: &str, patch: Value) -> Result<Snapshot,
     snapshot(conn)
 }
 
-pub fn delete(conn: &Connection, id: &str) -> Result<Snapshot, String> {
-    if conn
+pub fn delete(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, String> {
+    let candidates = content_refs::deletion_candidates(
+        tx,
+        "SELECT photo_id FROM memberships WHERE group_id=?1",
+        id,
+    )?;
+    if tx
         .execute("DELETE FROM groups WHERE id=?1", [id])
         .map_err(|e| e.to_string())?
         == 0
     {
         return Err("分组不存在".into());
     }
-    snapshot(conn)
+    content_refs::snapshot_after_deletion(tx, candidates)
 }
 
 pub fn add(
@@ -120,7 +126,11 @@ pub fn add(
             continue;
         }
         let photo_library: Option<String> = tx
-            .query_row("SELECT library FROM photos WHERE id=?1", [id], |r| r.get(0))
+            .query_row(
+                "SELECT library FROM photos WHERE id=?1 AND hidden_after_album_delete=0",
+                [id],
+                |r| r.get(0),
+            )
             .optional()
             .map_err(|e| e.to_string())?;
         if photo_library.as_deref() != Some(&library) {

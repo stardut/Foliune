@@ -7,6 +7,7 @@ use crate::{
 };
 use image::{Rgb, RgbImage};
 use serde_json::json;
+use std::{fs, path::Path};
 
 fn setup() -> (tempfile::TempDir, Store, CurationStore, String) {
     let root = tempfile::tempdir().unwrap();
@@ -33,6 +34,165 @@ fn fixture(root: &tempfile::TempDir, name: &str) -> String {
         .save(&path)
         .unwrap();
     path.to_str().unwrap().into()
+}
+
+#[test]
+fn album_deletion_rejects_stale_selection_and_leaves_unrelated_photos_visible() {
+    let (root, store, drafts, target) = setup();
+    let make_album = |name: &str| {
+        groups::create(
+            &store.connection.lock().unwrap(),
+            GroupInput {
+                library: "collection".into(),
+                name: name.into(),
+                description: String::new(),
+                capacity: None,
+            },
+        )
+        .unwrap()
+        .groups
+        .into_iter()
+        .find(|group| group.name == name)
+        .unwrap()
+        .id
+    };
+    let import = |name: &str, group: Option<&str>| {
+        photos::import(&store, vec![fixture(&root, name)], "collection", group)
+            .unwrap()
+            .imported_ids
+            .remove(0)
+    };
+    let old = make_album("旧相簿");
+    let old_orphan = import("old.png", Some(&old));
+    // Before this change, album deletion only removed memberships.
+    store
+        .connection
+        .lock()
+        .unwrap()
+        .execute("DELETE FROM groups WHERE id=?1", [&old])
+        .unwrap();
+    let standalone = import("standalone.png", None);
+    let source = make_album("待删除相簿");
+    let orphan = import("source.png", Some(&source));
+    let draft = curation::prepare_group(&store, &drafts, &target, json!({"photoIds":[orphan]}))
+        .unwrap();
+    {
+        let mut conn = store.connection.lock().unwrap();
+        let state = crate::work_directory::runtime::delete_album(&mut conn, &source).unwrap();
+        assert_eq!(state.hidden_photo_ids, [orphan.clone()]);
+        assert!(state.photos.iter().any(|p| p.id == standalone));
+        assert!(state.photos.iter().any(|p| p.id == old_orphan));
+        assert!(groups::add(&mut conn, &target, &[orphan.clone()]).is_err());
+    }
+    assert!(curation::commit(&store, &drafts, &draft.id, vec![orphan]).is_err());
+    assert!(snapshot(&store.connection.lock().unwrap())
+        .unwrap()
+        .memberships
+        .is_empty());
+}
+
+#[test]
+fn local_curation_keeps_only_selected_thumbnail_and_original_reference() {
+    let (root, store, drafts, group) = setup();
+    let source = fixture(&root, "selected.png");
+    let source_bytes = fs::read(&source).unwrap();
+    let skipped = fixture(&root, "skipped.png");
+    let draft = curation::prepare_import_files(
+        &store,
+        &drafts,
+        vec![source.clone(), skipped.clone()],
+        "collection",
+        Some(&group),
+    )
+    .unwrap();
+    let staging = store.root.join("staging").join(&draft.id);
+    assert_eq!(fs::read_dir(staging.join("originals")).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(staging.join("thumbnails")).unwrap().count(), 2);
+    assert_eq!(draft.pending_ids.len(), 2);
+    let id = &draft.pending_ids[0];
+    let candidate = draft
+        .candidates
+        .iter()
+        .find(|photo| &photo.id == id)
+        .unwrap();
+    let locator = crate::local_photo::locator(Path::new(&source)).unwrap();
+    assert_eq!(candidate.original_path, locator);
+    assert!(candidate.original_available && candidate.thumbnail_available);
+    assert!(Path::new(&candidate.thumbnail_path).starts_with(staging.join("thumbnails")));
+
+    // An unavailable candidate that is not selected must not block the others.
+    fs::remove_file(&skipped).unwrap();
+    let state = curation::commit(&store, &drafts, &draft.id, vec![id.clone()]).unwrap();
+    assert!(!staging.exists());
+    assert_eq!(
+        fs::read_dir(store.root.join("originals")).unwrap().count(),
+        0
+    );
+    assert_eq!(
+        fs::read_dir(store.root.join("thumbnails")).unwrap().count(),
+        1
+    );
+    assert_eq!(fs::read(&source).unwrap(), source_bytes);
+    assert_eq!(state.photos.len(), 1);
+    let photo = &state.photos[0];
+    assert_eq!(&photo.id, id);
+    assert_eq!(photo.original_path, locator);
+    assert!(photo.original_available && photo.thumbnail_available);
+    assert_eq!(state.memberships[0].photo_id, *id);
+    assert_eq!(state.memberships[0].group_id, group);
+
+    fs::rename(&source, root.path().join("moved.png")).unwrap();
+    let state = snapshot(&store.connection.lock().unwrap()).unwrap();
+    assert!(!state.photos[0].original_available);
+    assert!(state.photos[0].thumbnail_available);
+    assert_eq!(&state.photos[0].id, id);
+}
+
+#[test]
+fn local_curation_rejects_missing_or_changed_selected_original_atomically() {
+    for changed in [false, true] {
+        let (root, store, drafts, group) = setup();
+        let valid = fixture(&root, "valid.png");
+        let source = fixture(&root, "source.png");
+        let valid_bytes = fs::read(&valid).unwrap();
+        let draft = curation::prepare_import_files(
+            &store,
+            &drafts,
+            vec![source.clone(), valid.clone()],
+            "collection",
+            Some(&group),
+        )
+        .unwrap();
+        if changed {
+            RgbImage::from_pixel(25, 21, Rgb([56, 34, 12]))
+                .save(&source)
+                .unwrap();
+        } else {
+            fs::remove_file(&source).unwrap();
+        }
+        let source_bytes = fs::read(&source).ok();
+        let error = curation::commit(&store, &drafts, &draft.id, draft.pending_ids).unwrap_err();
+        assert!(
+            error.contains("source.png") && error.contains("重新导入"),
+            "{error}"
+        );
+        if changed {
+            assert!(error.contains("已变化"), "{error}");
+        }
+        let state = snapshot(&store.connection.lock().unwrap()).unwrap();
+        assert!(state.photos.is_empty() && state.memberships.is_empty());
+        assert_eq!(
+            fs::read_dir(store.root.join("originals")).unwrap().count(),
+            0
+        );
+        assert_eq!(
+            fs::read_dir(store.root.join("thumbnails")).unwrap().count(),
+            0
+        );
+        assert!(!store.root.join("staging").join(draft.id).exists());
+        assert_eq!(fs::read(&valid).unwrap(), valid_bytes);
+        assert_eq!(fs::read(&source).ok(), source_bytes);
+    }
 }
 
 #[test]
@@ -303,7 +463,7 @@ fn curation_sql_failure_rolls_back_records_members_capacity_and_files() {
          BEGIN SELECT RAISE(ABORT, 'g07 forced SQL write failure'); END;",
         )
         .unwrap();
-    // 提交先写新照片、管理副本并废弃旧成员，再在新增成员的 SQL 写入处失败。
+    // 提交先写新照片、缩略图并废弃旧成员，再在新增成员的 SQL 写入处失败。
     let failure = curation::commit(
         &store,
         &drafts,

@@ -1,5 +1,6 @@
 import { PLAN_PNG_MAX_BYTES, PLAN_PNG_MAX_EDGE, PLAN_PNG_MAX_PIXELS, type ShootPlanInput } from '../../lib/planning-types.ts';
 import type { Photo } from '../../lib/types';
+import { canReadOriginal, isLocalPhoto, originalReadUrl } from '../../lib/photo-availability.ts';
 import { planExportBlocks, type PlanExportBlock } from './plan-export-content.ts';
 import { wrapPlanText } from './plan-text.ts';
 
@@ -31,16 +32,21 @@ type RuleBlock = { kind: 'rule'; x: number; y: number; width: number };
 type Block = TextBlock | ImageBlock | RuleBlock;
 
 async function loadOriginal(photo: Photo): Promise<HTMLImageElement> {
-  if (!photo.originalAvailable || !photo.originalUrl) throw new Error(`参考图“${photo.title || photo.originalName}”原图缺失，请重新定位后导出。`);
+  const name = photo.title || photo.originalName;
+  if (!canReadOriginal(photo) || !photo.originalUrl) throw new Error(isLocalPhoto(photo)
+    ? `参考图“${name}”找不到源文件。`
+    : `参考图“${name}”原图缺失，请重新定位后导出。`);
   const image = new Image();
   // Tauri's asset protocol grants access for the window origin.
   image.crossOrigin = 'anonymous';
-  image.src = photo.originalUrl;
+  image.src = originalReadUrl(photo, crypto.randomUUID());
   try {
     await image.decode();
     if (!image.naturalWidth || !image.naturalHeight) throw new Error('图像尺寸无效');
     return image;
-  } catch { image.src = ''; throw new Error(`参考图“${photo.title || photo.originalName}”无法解码，未导出长图。`); }
+  } catch { image.src = ''; throw new Error(isLocalPhoto(photo)
+    ? `参考图“${name}”找不到源文件或无法读取。`
+    : `参考图“${name}”无法解码，未导出长图。`); }
 }
 function assertHeight(height: number) {
   if (height > PLAN_PNG_MAX_EDGE || height * WIDTH > PLAN_PNG_MAX_PIXELS) throw new Error('长图超出可导出尺寸（最高 32768 像素），请缩减文字或参考图后导出。');

@@ -1,0 +1,26 @@
+.work-directory-batch { display: grid; gap: 4px; max-height: min(320px, 45vh); overflow: auto; }
+.work-directory-batch:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; border-radius: 6px; }
+.work-directory-batch summary { padding: 8px 4px; cursor: pointer; overflow-wrap: anywhere; }
+.work-directory-batch summary::marker { color: var(--muted); font-size: 10px; }
+.work-directory-count { margin-inline-start: 12px; color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.work-directory-batch ul { margin: 0 0 8px; padding-inline-start: 28px; color: var(--muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+
+.album-item-syncing { position: relative; }
+.album-item-syncing .album-caption { align-items: flex-start; }
+.album-item-syncing .album-heading h2 { -webkit-line-clamp: 1; }
+.album-item-syncing .album-open:hover { transform: none; }
+.album-item-syncing .album-open-placeholder:hover { background: var(--album-caption); border-color: var(--edge-light); box-shadow: var(--cover-shadow); }
+.album-sync-caption { position: absolute; inset-inline: 19px; bottom: 5px; height: 25px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; pointer-events: none; }
+.album-sync-failure-label, .album-sync-failure.text-button { color: var(--danger); }
+.album-sync-caption .text-button { min-height: 26px; padding: 2px 7px; font-size: 12px; pointer-events: auto; }
+.album-sync-failure.text-button { margin-inline-start: -7px; gap: 3px; }
+.album-sync-retry.text-button { margin-inline-end: -7px; }
+.work-directory-sync-error { overflow-wrap: anywhere; }
+.album-sync-line { position: absolute; inset-inline: 0; bottom: 0; height: 2px; background: #0b0c0e77; pointer-events: none; overflow: hidden; }
+.album-sync-line > span { display: block; height: 100%; background: var(--accent); transform: scaleX(var(--sync-fraction)); transform-origin: left; transition: transform 160ms ease-out; }
+.album-sync-line[data-running="true"]::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 34%, #fff7 50%, transparent 66%); animation: album-sync-traverse 2s ease-in-out infinite; }
+@keyframes album-sync-traverse { from { transform: translateX(-67%); } to { transform: translateX(67%); } }
+@media (prefers-reduced-motion: reduce) {
+  .album-sync-line > span { transition: none; }
+  .album-sync-line[data-running="true"]::after { animation: none; display: none; }
+}

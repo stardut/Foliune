@@ -17,7 +17,6 @@ export interface CollageItem {
 
 export interface CollageInput {
   library: LibraryKind;
-  groupId: string;
   title: string;
   /** 默认保留来源有效像素；单边最多 32768，总像素最多 160,000,000。 */
   width: number;

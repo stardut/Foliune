@@ -1,5 +1,6 @@
-//! Shared validation for local editorial records and their ordered photo references.
-use rusqlite::{Connection, OptionalExtension};
+//! Shared validation and lifetime rules for persisted photo references.
+use crate::{books, db, models::Snapshot};
+use rusqlite::{Connection, OptionalExtension, Transaction};
 use std::collections::HashSet;
 
 pub fn text(value: &str, label: &str, max: usize) -> Result<(), String> {
@@ -25,7 +26,7 @@ pub fn deduplicate(values: &mut Vec<String>) {
 
 pub fn validate_photos(conn: &Connection, ids: &[String]) -> Result<(), String> {
     let mut statement = conn
-        .prepare("SELECT 1 FROM photos WHERE id=?1")
+        .prepare("SELECT 1 FROM photos WHERE id=?1 AND hidden_after_album_delete=0")
         .map_err(|e| e.to_string())?;
     let mut seen = HashSet::new();
     for id in ids {
@@ -42,6 +43,57 @@ pub fn validate_photos(conn: &Connection, ids: &[String]) -> Result<(), String> 
         }
     }
     Ok(())
+}
+
+pub(crate) fn deletion_candidates(
+    tx: &Transaction<'_>,
+    sql: &str,
+    id: &str,
+) -> Result<HashSet<String>, String> {
+    let mut statement = tx.prepare(sql).map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map([id], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+}
+
+// Only consider photos used by the deleted record. Its own references have
+// already been removed by cascade; discarded album members still count.
+pub(crate) fn snapshot_after_deletion(
+    tx: &Transaction<'_>,
+    mut candidates: HashSet<String>,
+) -> Result<Snapshot, String> {
+    if !candidates.is_empty() {
+        let mut statement = tx
+            .prepare(
+                "SELECT photo_id FROM memberships
+             UNION ALL SELECT photo_id FROM model_photos
+             UNION ALL SELECT cover_photo_id FROM model_profiles WHERE cover_photo_id IS NOT NULL
+             UNION ALL SELECT photo_id FROM shoot_plan_photos
+             UNION ALL SELECT photo_id FROM social_photos",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut rows = statement.query([]).map_err(|e| e.to_string())?;
+        while !candidates.is_empty() {
+            let Some(row) = rows.next().map_err(|e| e.to_string())? else {
+                break;
+            };
+            let id = row.get::<_, String>(0).map_err(|e| e.to_string())?;
+            candidates.remove(&id);
+        }
+    }
+    books::exclude_currently_referenced_photos(tx, &mut candidates)?;
+    if !candidates.is_empty() {
+        let mut hide = tx
+            .prepare("UPDATE photos SET hidden_after_album_delete=1 WHERE id=?1")
+            .map_err(|e| e.to_string())?;
+        for photo_id in candidates {
+            if hide.execute([photo_id]).map_err(|e| e.to_string())? != 1 {
+                return Err("照片引用不完整".into());
+            }
+        }
+    }
+    db::snapshot(tx)
 }
 
 // Callers supply only module-owned SQL; positions must be contiguous even for restored data.

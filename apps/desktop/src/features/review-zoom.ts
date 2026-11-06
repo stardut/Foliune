@@ -11,6 +11,7 @@ const fit = (): Pose => ({ scale: 1, x: 0, y: 0 });
 export class ReviewZoom {
   private viewport: HTMLElement | null = null;
   private observer: ResizeObserver | null = null;
+  private onEntryZoom: (() => void) | undefined;
   private layers = new Map<number, Layer>();
   private poses = new Map<string, Pose>();
   private active: number | null = null;
@@ -44,8 +45,9 @@ export class ReviewZoom {
     this.activeIdentity = next; this.active = next && current ? current.key : null;
     this.draw();
   }
-  attach(viewport: HTMLElement) {
+  attach(viewport: HTMLElement, onEntryZoom?: () => void) {
     this.viewport = viewport;
+    this.onEntryZoom = onEntryZoom;
     viewport.addEventListener('wheel', this.wheel, { passive: false });
     viewport.addEventListener('pointerdown', this.down);
     viewport.addEventListener('pointermove', this.move);
@@ -58,6 +60,7 @@ export class ReviewZoom {
   }
   detach() {
     this.stopWheel(); this.stopAnimation(); this.finishDrag(); this.observer?.disconnect(); this.observer = null;
+    this.onEntryZoom = undefined;
     const viewport = this.viewport; this.viewport = null;
     if (!viewport) return;
     viewport.removeEventListener('wheel', this.wheel);
@@ -94,6 +97,17 @@ export class ReviewZoom {
     const localX = x - rect.left - rect.width / 2, localY = y - rect.top - rect.height / 2;
     return Math.abs(localX - pose.x) <= width * pose.scale / 2 && Math.abs(localY - pose.y) <= height * pose.scale / 2
       ? { layer, geometry, pose, x: localX, y: localY } : null;
+  }
+  private zoomHit(x: number, y: number) {
+    const hit = this.hit(x, y);
+    const viewport = this.viewport;
+    if (!hit || !this.onEntryZoom || !viewport?.closest('[data-entering-from-wall]')) return hit;
+    // Hit test the moving photo before cancelling; the browser also accounts
+    // for the scroll clip transferred from a partially visible wall tile.
+    if (!viewport.contains(document.elementFromPoint(x, y))) return null;
+    this.onEntryZoom();
+    const geometry = this.geometry(hit.layer);
+    return { ...hit, geometry, x: hit.x / hit.geometry.width * geometry.width, y: hit.y / hit.geometry.height * geometry.height };
   }
   private draw(measured?: { layer: Layer; geometry: Geometry }) {
     if (!this.viewport) return;
@@ -169,8 +183,9 @@ export class ReviewZoom {
     });
   }
   private wheel = (event: WheelEvent) => {
-    const hit = this.hit(event.clientX, event.clientY);
-    if (!hit || !event.deltaY) return;
+    if (!event.deltaY) return;
+    const hit = this.zoomHit(event.clientX, event.clientY);
+    if (!hit) return;
     event.preventDefault();
     this.stopAnimation(); this.finishDrag();
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? this.viewport!.clientHeight : 1;
@@ -178,16 +193,18 @@ export class ReviewZoom {
     if (this.reduced) {
       this.poses.set(identity(hit.layer.frame), this.target(hit, hit.pose.scale * Math.exp(-delta * .006))); this.draw(hit); return;
     }
+    const { rect } = hit.geometry;
+    const x = rect.left + rect.width / 2 + hit.x, y = rect.top + rect.height / 2 + hit.y;
     const time = performance.now(), direction = Math.sign(-delta), previous = this.wheelMotion;
     const reverse = !!previous && previous.direction !== direction;
     const scale = Math.max(1, Math.min(8, (previous && !reverse ? previous.scale : hit.pose.scale) * Math.exp(-delta * .006)));
     if (previous) {
-      previous.scale = scale; previous.direction = direction; previous.x = event.clientX; previous.y = event.clientY; previous.deadline = time + 100;
+      previous.scale = scale; previous.direction = direction; previous.x = x; previous.y = y; previous.deadline = time + 100;
       // Reversal discards the old outstanding distance and responds this event.
       if (reverse) { previous.last = time - 8; this.advanceWheel(time, hit); }
     } else {
       this.wheelMotion = { handle: 0, key: identity(hit.layer.frame), scale, direction,
-        x: event.clientX, y: event.clientY, last: time - 8, deadline: time + 100 };
+        x, y, last: time - 8, deadline: time + 100 };
       this.advanceWheel(time, hit); this.scheduleWheel();
     }
   };
@@ -228,8 +245,9 @@ export class ReviewZoom {
   private up = (event: PointerEvent) => { if (event.pointerId === this.drag?.id) { this.finishDrag(); this.draw(); } };
   private cancel = (event: PointerEvent) => { if (event.pointerId === this.drag?.id) { this.finishDrag(); this.draw(); } };
   private doubleClick = (event: MouseEvent) => {
-    const hit = this.hit(event.clientX, event.clientY);
-    if (!hit || event.button !== 0) return;
+    if (event.button !== 0) return;
+    const hit = this.zoomHit(event.clientX, event.clientY);
+    if (!hit) return;
     event.preventDefault();
     if (Date.now() < this.suppressDoubleClickUntil) return;
     const pendingTarget = this.animation?.to.scale ?? (this.interruptedTarget && performance.now() < this.interruptedTarget.until ? this.interruptedTarget.scale : null);

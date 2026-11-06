@@ -1,4 +1,5 @@
 import type { Photo } from '../../lib/types';
+import { isLocalPhoto } from '../../lib/photo-availability.ts';
 
 export type CollageMode = 'adaptive' | 'grid' | 'long';
 export type CollageFrame = 'auto' | '1:1' | '4:3' | '3:4' | '3:2' | '2:3';
@@ -124,7 +125,9 @@ export function collageProblem(state: CollageState, photos: Photo[], layout: Col
   if (state.photoIds.length < 2) return '至少选择 2 张照片';
   if (state.photoIds.length > 100) return '拼图最多支持 100 张照片';
   if (layout.items.length !== state.photoIds.length) return '部分照片记录缺失，请重新选片';
-  if (state.photoIds.some((id) => !photos.find((photo) => photo.id === id)?.originalAvailable)) return '请先重新定位缺失的原图';
+  const missing = state.photoIds.map((id) => photos.find((photo) => photo.id === id)).filter((photo) => !photo?.originalAvailable);
+  if (missing.some(isLocalPhoto)) return '部分照片找不到源文件';
+  if (missing.length) return '请先重新定位缺失的原图';
   if (layout.items.some((item) => item.width < 1 || item.height < 1 || item.x + item.width > layout.width || item.y + item.height > layout.height)) return '照片比例差异过大，请调整布局或选片';
   return '';
 }

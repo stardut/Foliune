@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ExternalLink } from 'lucide-react';
 import type { Photo, PhotoPatch } from '../lib/types';
+import { displayOriginalPath } from '../lib/photo-availability';
 import { Modal } from '../components/ui';
 import { PhotoImage } from '../components/PhotoImage';
 import { RegionEditor } from './RegionEditor';
@@ -22,6 +23,7 @@ export function PhotoDetail({ photo, onClose, onSave, busy, onRelink, extension,
   const [regions, setRegions] = useState(photo.regions || []);
   const [regionEditing, setRegionEditing] = useState(false);
   const [error, setError] = useState('');
+  const originalPath = displayOriginalPath(photo);
   const dirty = title !== photo.title || tags !== photo.tags.join('，') || annotation !== photo.annotation || source !== photo.source || location !== photo.location || project !== photo.project || capturedAtDirty || JSON.stringify(regions) !== JSON.stringify(photo.regions || []);
   useEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
   async function save(event: FormEvent) {
@@ -40,7 +42,7 @@ export function PhotoDetail({ photo, onClose, onSave, busy, onRelink, extension,
         <label>来源<input value={source} placeholder="摄影师、网址或来源说明" onChange={(event) => setSource(event.target.value)} /></label>
         <label>标注<textarea value={annotation} rows={4} placeholder="留下你的观察" onChange={(event) => setAnnotation(event.target.value)} /></label>
         {extension}
-        <p className="file-path" title={photo.originalPath}><ExternalLink size={12} />{photo.originalPath}</p>
+        {originalPath && <p className="file-path" title={originalPath}><ExternalLink size={12} />{originalPath}</p>}
         {photo.capturedAt && <p className="muted">拍摄于 {new Date(photo.capturedAt).toLocaleString('zh-CN')}</p>}
         {error && <p role="alert" className="form-error">{error}</p>}
         <div className="form-actions"><button type="button" className="button" onClick={onClose}>取消</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button></div>

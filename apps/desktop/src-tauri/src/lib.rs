@@ -1,6 +1,7 @@
 mod ai;
 mod ai_settings;
 mod airdrop;
+mod album_cover;
 mod backup;
 mod book_export;
 mod book_layout;
@@ -16,6 +17,8 @@ mod local_photo;
 mod model_profiles;
 mod models;
 mod music;
+#[cfg(target_os = "macos")]
+mod photo_fullscreen;
 mod photo_metadata;
 mod photos;
 mod planning;
@@ -56,7 +59,13 @@ async fn create_group(app: AppHandle, input: GroupInput) -> Result<Snapshot, Str
 
 #[tauri::command]
 async fn update_group(app: AppHandle, id: String, patch: Value) -> Result<Snapshot, String> {
-    db::with_connection(app, move |conn| groups::update(conn, &id, patch)).await
+    let warm_group = patch.get("cover").map(|_| id.clone());
+    let snapshot =
+        db::with_connection(app.clone(), move |conn| groups::update(conn, &id, patch)).await?;
+    if let Some(group_id) = warm_group {
+        album_cover::prewarm(app, &snapshot, group_id);
+    }
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -106,6 +115,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .register_asynchronous_uri_scheme_protocol("work-photo", work_directory::serve)
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            photo_fullscreen::observe(app)?;
             let root = app.path().app_data_dir()?;
             let store = Store::open(root).map_err(std::io::Error::other)?;
             app.manage(store);
@@ -120,6 +131,7 @@ pub fn run() {
             import_photos,
             create_group,
             update_group,
+            album_cover::read_album_cover,
             delete_group,
             update_photo,
             photo_metadata::read_photo_metadata,

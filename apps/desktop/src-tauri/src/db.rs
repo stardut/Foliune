@@ -241,7 +241,7 @@ fn read_snapshot(conn: &Connection, include_hidden: bool) -> Result<Snapshot, St
         .map_err(|e| e.to_string())?;
     let mut statement = conn
         .prepare(
-            "SELECT group_id,photo_id,status,position FROM memberships ORDER BY group_id,position",
+            "SELECT group_id,photo_id,status,position FROM memberships ORDER BY group_id,position,photo_id",
         )
         .map_err(|e| e.to_string())?;
     let memberships = statement

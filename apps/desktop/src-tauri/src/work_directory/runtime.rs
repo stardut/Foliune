@@ -471,6 +471,7 @@ pub(crate) fn delete_album(conn: &mut Connection, id: &str) -> Result<Snapshot, 
     queue::remove_album(&tx, id)?;
     let snapshot = groups::delete(&tx, id)?;
     tx.commit().map_err(|e| e.to_string())?;
+    crate::album_cover::remove_cached(conn, id);
     Ok(snapshot)
 }
 

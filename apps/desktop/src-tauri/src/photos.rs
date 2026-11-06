@@ -30,6 +30,7 @@ pub struct ImportFailure {
     pub message: String,
 }
 
+#[cfg(test)]
 pub fn import(
     store: &Store,
     paths: Vec<String>,
@@ -100,23 +101,34 @@ pub(crate) struct PreparedImage {
 pub(crate) const THUMBNAIL_MAX_EDGE: u32 = 960;
 
 pub(crate) fn save_thumbnail(image: &image::DynamicImage, path: &Path) -> Result<(), String> {
-    let rgba = image
-        .resize(
-            image.width().min(THUMBNAIL_MAX_EDGE),
-            image.height().min(THUMBNAIL_MAX_EDGE),
-            FilterType::Triangle,
-        )
-        .to_rgba8();
-    let rgb =
-        image::RgbImage::from_fn(rgba.width(), rgba.height(), |x, y| {
-            let pixel = rgba.get_pixel(x, y);
-            let alpha = pixel[3] as u16;
-            image::Rgb([0, 1, 2].map(|index| {
-                ((pixel[index] as u16 * alpha + 255 * (255 - alpha) + 127) / 255) as u8
-            }))
-        });
-    rgb.save_with_format(path, ImageFormat::Jpeg)
+    thumbnail_image(image)
+        .save_with_format(path, ImageFormat::Jpeg)
         .map_err(|e| format!("生成缩略图失败：{e}"))
+}
+
+pub(crate) fn thumbnail_image(image: &image::DynamicImage) -> image::RgbImage {
+    let resized = image.resize(
+        image.width().min(THUMBNAIL_MAX_EDGE),
+        image.height().min(THUMBNAIL_MAX_EDGE),
+        FilterType::Triangle,
+    );
+    rgb_on_white(resized)
+}
+
+pub(crate) fn rgb_on_white(image: image::DynamicImage) -> image::RgbImage {
+    if let image::DynamicImage::ImageRgb8(rgb) = image {
+        return rgb;
+    }
+    let rgba = image.into_rgba8();
+    image::RgbImage::from_fn(rgba.width(), rgba.height(), |x, y| {
+        let pixel = rgba.get_pixel(x, y);
+        let alpha = pixel[3] as u16;
+        image::Rgb(
+            [0, 1, 2].map(|index| {
+                ((pixel[index] as u16 * alpha + 255 * (255 - alpha) + 127) / 255) as u8
+            }),
+        )
+    })
 }
 
 pub(crate) fn supported_extension(path: &Path) -> bool {
@@ -199,16 +211,7 @@ impl OpenImage {
             .reader
             .decode()
             .map_err(|e| format!("照片解码失败：{e}"))?;
-        Ok(match orientation {
-            2 => image.fliph(),
-            3 => image.rotate180(),
-            4 => image.flipv(),
-            5 => image.rotate90().fliph(),
-            6 => image.rotate90(),
-            7 => image.rotate270().fliph(),
-            8 => image.rotate270(),
-            _ => image,
-        })
+        Ok(apply_orientation(image, orientation))
     }
 
     pub fn metadata(&self) -> (Option<String>, String) {
@@ -235,6 +238,22 @@ impl OpenImage {
             });
         let location = self.exif.as_ref().and_then(gps_location).unwrap_or_default();
         (captured_at, location)
+    }
+}
+
+pub(crate) fn apply_orientation(
+    image: image::DynamicImage,
+    orientation: u32,
+) -> image::DynamicImage {
+    match orientation {
+        2 => image.fliph(),
+        3 => image.rotate180(),
+        4 => image.flipv(),
+        5 => image.rotate90().fliph(),
+        6 => image.rotate90(),
+        7 => image.rotate270().fliph(),
+        8 => image.rotate270(),
+        _ => image,
     }
 }
 

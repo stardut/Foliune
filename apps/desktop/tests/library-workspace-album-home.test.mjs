@@ -7,7 +7,7 @@ const require = createRequire(resolve('apps/desktop/package.json'));
 const { Window } = require('happy-dom');
 const window = new Window({ url: 'https://foliune.test' });
 test.beforeEach(() => window.localStorage.clear());
-for (const key of ['window', 'document', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'ResizeObserver', 'CompositionEvent', 'CSS']) {
+for (const key of ['window', 'document', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'ResizeObserver', 'IntersectionObserver', 'CompositionEvent', 'CSS']) {
   Object.defineProperty(globalThis, key, { configurable: true, value: key === 'window' ? window : key === 'document' ? window.document : window[key] });
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -67,9 +67,10 @@ const bundle = await build({
     build.onLoad({ filter: /.*/, namespace: 'workspace-boundary' }, ({ path }) => {
       const name = path.split('/').at(-1);
       if (name === 'PhotoCanvas') return { contents: `import { createElement as h, useLayoutEffect } from 'react';
-        export const PhotoCanvas = ({ photos, sections, selected, onLayoutReady, onPreview, onMenu, onSelect, onReveal }) => {
+        export const PhotoCanvas = ({ photos, sections, selected, onLayoutReady, onPreview, onMenu, onSelect, onReveal, restore }) => {
           useLayoutEffect(() => { onLayoutReady?.(); }, [onLayoutReady]);
           useLayoutEffect(() => { globalThis.captureAlbumTestWallReveal?.(onReveal); }, [onReveal]);
+          useLayoutEffect(() => { if (restore) globalThis.captureAlbumTestWallRestore?.(restore); }, [restore]);
           return h('div', { 'data-testid': 'photo-canvas', 'data-section-headings': sections?.map(([heading]) => heading).join(',') }, photos.map((photo, index) =>
             h('span', { key: photo.id, 'data-photo-id': photo.id, 'data-photo-index': index },
               h('button', { className: 'photo-interaction-target', 'aria-pressed': selected.length ? selected.includes(photo.id) : undefined,
@@ -81,13 +82,14 @@ const bundle = await build({
           'data-testid': 'selection-more', onClick: (event) => onMore({ x: 0, y: 0 }, event.currentTarget),
         }, '选片更多') : null;` };
       if (name === 'PhotoReview') return { contents: `import { createElement as h } from 'react';
-        export const PhotoReview = ({ photos, initialPhotoId, onClose }) => h('div', { 'data-testid': 'photo-review', 'data-review-ids': photos.map(photo => photo.id).join(), 'data-initial-id': initialPhotoId }, h('button', { onClick: (event) => onClose(event.currentTarget.parentElement.dataset.visibleId ?? initialPhotoId) }, '关闭'));` };
+        export const PhotoReview = ({ photos, initialPhotoId, onClose, fullscreen }) => h('div', { 'data-testid': 'photo-review', 'data-review-ids': photos.map(photo => photo.id).join(), 'data-initial-id': initialPhotoId, 'data-fullscreen-entry': fullscreen }, h('button', { onClick: (event) => onClose(event.currentTarget.parentElement.dataset.visibleId ?? initialPhotoId) }, '关闭'));` };
       if (name === 'ToastProvider') return { contents: 'export const useToast = () => () => {};' };
       if (name === 'use-context-menu') return { contents: 'export const isContextMenuTracking = () => false; export const useContextMenu = (scope) => (actions, at, trigger) => globalThis.captureAlbumTestMenu?.({ scope, actions, at, trigger });' };
       if (name === 'api') return { contents: [
         'export const isDesktop = () => !!globalThis.albumAirDropTest;',
         'export const shareAlbumAirDrop = (...args) => globalThis.albumAirDropTest(...args);',
         'export const updateGroup = (...args) => globalThis.albumCoverTest(...args);',
+        'export const readAlbumCover = () => { throw new Error("Unexpected album cover read"); };',
         ...['cancelCuration', 'prepareGroupCuration', 'setMembershipStatuses', 'updatePhoto', 'createGroup', 'commitCuration', 'deleteGroup'].map(name => `export const ${name} = () => { throw new Error('Unexpected native mutation: ${name}'); };`),
       ].join('\n') };
       if (name === 'book-api') return { contents: 'export const listBooks = async () => globalThis.searchFixture?.books?.() ?? [];' };
@@ -299,7 +301,10 @@ function pressKey(target, key) {
 test('相簿封面以右击照片取景，取消保留旧封面，保存后卡片与弹窗一致', async (t) => {
   const groupId = 'collection-album';
   const cover = { photoId: 'collection-loose', offsetX: .5, offsetY: 1, zoom: 2 };
-  const input = { ...mixed, memberships: [...mixed.memberships, { groupId, photoId: cover.photoId, status: 'active', position: 2 }] };
+  const input = { ...mixed,
+    photos: mixed.photos.map((photo) => photo.id === cover.photoId ? { ...photo, originalUrl: '/source.jpg', thumbnailUrl: '/preview.jpg' } : photo),
+    memberships: [...mixed.memberships, { groupId, photoId: cover.photoId, status: 'active', position: 2 }],
+  };
   const saved = { ...input, groups: input.groups.map((group) => group.id === groupId ? { ...group, cover } : group) };
   const discarded = { ...saved, memberships: input.memberships.map((member) => member.photoId === cover.photoId ? { ...member, status: 'discarded' } : member) };
   let actions, settleSave;
@@ -322,6 +327,7 @@ test('相簿封面以右击照片取景，取消保留旧封面，保存后卡�
         await context(photoButton('loose'));
         await run('cover');
         assert.equal(frame().querySelector('img').alt, cover.photoId);
+        assert.equal(frame().querySelector('img').getAttribute('src'), '/source.jpg');
         assert.equal(save().disabled, true);
         await act(async () => frame().querySelector('img').dispatchEvent(new Event('load')));
       };
@@ -373,6 +379,7 @@ test('相簿封面以右击照片取景，取消保留旧封面，保存后卡�
       await click(container.querySelector('[aria-label="返回收藏相簿"]'));
       const card = () => container.querySelector('.album-open .album-cover');
       assert.equal(card().querySelector('img').alt, cover.photoId);
+      assert.equal(card().querySelector('img').getAttribute('src'), '/preview.jpg');
       assert.equal(card().getAttribute('style'), previewStyle);
       await renderSnapshot(discarded);
       assert.equal(card().querySelector('img').alt, 'collection-active');
@@ -662,6 +669,72 @@ test('全图库搜索预览只挂前三张，大图及查看全部继续包含�
   });
 });
 
+test('搜索预览和完整结果全选各自范围，批量操作沿用结果顺序', async () => {
+  let actions;
+  globalThis.captureAlbumTestMenu = (menu) => { actions = menu.actions; };
+  try {
+    await scenario('search', mixed, async ({ container, plays }) => {
+      const photoButton = () => container.querySelector('[data-photo-id] button');
+      const selectionMore = () => container.querySelector('[data-testid="selection-more"]');
+      const action = (id) => actions.find((item) => item.id === id);
+      const run = (id) => act(async () => { assert.ok(action(id).allowed()); action(id).run(); });
+      const click = (target) => act(async () => target.click());
+      await act(async () => typeQuery(container, 'shared'));
+      await act(async () => photoButton().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+      assert.equal(action('select-all').text, '全选预览照片');
+      await run('select-all');
+      await click(selectionMore());
+      await run('play');
+      assert.deepEqual(plays[0], mixed.photos.slice(0, 3).map(({ id }) => id));
+      assert.equal(action('select-all').text, '取消全选');
+      await run('select-all');
+      assert.equal(selectionMore(), null);
+
+      await click(container.querySelector('[aria-label="查看全部照片"]'));
+      const select = () => [...container.querySelectorAll('.search-group-heading .text-button')].find((item) => item.textContent.endsWith('全选'));
+      assert.equal(select().textContent, '全选');
+      await click(select());
+      await click(selectionMore());
+      await run('play');
+      assert.deepEqual(plays[1], mixed.photos.map(({ id }) => id));
+      assert.equal(select().textContent, '取消全选');
+      await click(select());
+      assert.equal(selectionMore(), null);
+    });
+  } finally { delete globalThis.captureAlbumTestMenu; }
+});
+
+test('从搜索照片墙右击全屏，切图后仍按原位置恢复搜索照片墙', async () => {
+  let actions, restored;
+  globalThis.captureAlbumTestMenu = (menu) => { actions = menu.actions; };
+  globalThis.captureAlbumTestWallRestore = (restore) => { restored = restore; };
+  try {
+    await scenario('search', mixed, async ({ container }) => {
+      await act(async () => typeQuery(container, 'shared'));
+      const trigger = container.querySelector('[data-photo-index="1"] button');
+      container.scrollTop = 230;
+      await act(async () => trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+      const index = actions.findIndex(({ id }) => id === 'preview');
+      assert.deepEqual(actions.slice(index, index + 2).map(({ text }) => text), ['查看大图', '全屏查看']);
+      await act(async () => actions[index + 1].run());
+      const review = container.querySelector('[data-testid="photo-review"]');
+      assert.equal(review.dataset.fullscreenEntry, 'direct');
+      assert.equal(review.dataset.initialId, mixed.photos[1].id);
+      assert.deepEqual(review.dataset.reviewIds.split(','), mixed.photos.map(({ id }) => id));
+      review.dataset.visibleId = mixed.photos.at(-1).id;
+      container.scrollTop = 40;
+      await act(async () => review.querySelector('button').click());
+      assert.equal(container.querySelector('[data-testid="photo-review"]'), null);
+      assert.equal(restored.id, mixed.photos[1].id);
+      assert.equal(restored.scrollTop, 230);
+      assert.equal(restored.focus, trigger);
+    });
+  } finally {
+    delete globalThis.captureAlbumTestMenu;
+    delete globalThis.captureAlbumTestWallRestore;
+  }
+});
+
 test('宽窗混合结果预览六张，缩回窄窗保留可见选择并转移被隐藏照片的焦点', async () => {
   const originalViewport = { width: window.innerWidth, height: window.innerHeight };
   const viewport = (width) => window.happyDOM.setViewport({ width, height: 880 });
@@ -926,7 +999,7 @@ test('万张单张浏览只挂载窗口和焦点，手动滚动保留大图，�
   const menus = [];
   globalThis.captureAlbumTestMenu = (menu) => menus.push(menu);
   try {
-    await scenario('collection', input, async ({ container }) => {
+    await scenario('collection', input, async ({ container, plays }) => {
       await act(async () => container.querySelector('.album-open').click());
       await act(async () => container.querySelector('button[aria-label="单张"]').click());
       const strip = container.querySelector('.album-filmstrip');
@@ -978,6 +1051,22 @@ test('万张单张浏览只挂载窗口和焦点，手动滚动保留大图，�
       assert.equal(current(), thumbnail(9998));
       assert.equal(document.activeElement, current());
       assertWindow();
+
+      const selectionItem = (label) => [...menuFor(albumMore(container)).querySelectorAll('[role="menuitem"]')].find((item) => item.textContent === label);
+      await openAlbumMore(albumMore(container));
+      await act(async () => selectionItem('全选').click());
+      assertWindow();
+      assert.match(current().getAttribute('aria-label'), /已选择/);
+      const more = () => container.querySelector('[data-testid="selection-more"]');
+      await act(async () => more().click());
+      const play = menus.at(-1).actions.find((item) => item.id === 'play');
+      assert.equal(play.text, '欣赏 · 10000 张');
+      await act(async () => play.run());
+      assert.deepEqual(plays[0], photos.map(({ id }) => id));
+      await openAlbumMore(albumMore(container));
+      await act(async () => selectionItem('取消全选').click());
+      assert.doesNotMatch(current().getAttribute('aria-label'), /已选择/);
+      assert.equal(more(), null);
     });
   } finally { delete globalThis.captureAlbumTestMenu; }
 });

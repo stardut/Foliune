@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { cancelCuration, commitCuration, prepareImport } from '../lib/curation-api';
 import { cancelLinkImport, prepareLinkImport } from '../lib/photo-import-api';
 import type { CurationDraft } from '../lib/curation-types';
-import type { LibraryKind, LibrarySnapshot } from '../lib/types';
+import type { LibraryKind, LibrarySnapshot, Photo } from '../lib/types';
 
 function messageOf(cause: unknown) { return cause instanceof Error ? cause.message : String(cause); }
 
@@ -13,6 +13,7 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
 }) {
   const [draft, setDraft] = useState<CurationDraft | null>(null);
   const [preparing, setPreparing] = useState(false);
+  const [linkProgress, setLinkProgress] = useState<{ total: number | null; photos: Photo[] } | null>(null);
   const [committing, setCommitting] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const [error, setError] = useState('');
@@ -48,6 +49,7 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
     request.current = null;
     // Keep ownership until cancellation succeeds, so a failed cleanup can be retried.
     setPreparing(false);
+    setLinkProgress(null);
     setCleaning(true);
     setError('');
     try {
@@ -73,10 +75,14 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
     const requestId = source === 'link' ? crypto.randomUUID() : null;
     request.current = requestId;
     setPreparing(true);
+    if (requestId) setLinkProgress({ total: null, photos: [] });
     setError('');
     try {
-      const next = source === 'link'
-        ? await prepareLinkImport(input, library, groupId, requestId!)
+      const next = requestId
+        ? await prepareLinkImport(input, library, groupId, requestId, ({ total, photo }) => {
+          if (!mounted.current || generation.current !== ownGeneration || request.current !== requestId) return;
+          setLinkProgress((current) => current && { total, photos: photo ? [...current.photos, photo] : current.photos });
+        })
         : await prepareImport(library, groupId);
       if (!mounted.current || generation.current !== ownGeneration) {
         if (next) await cancelCuration(next.id);
@@ -90,7 +96,10 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
     } finally {
       if (generation.current === ownGeneration) {
         request.current = null;
-        if (mounted.current) setPreparing(false);
+        if (mounted.current) {
+          setPreparing(false);
+          setLinkProgress(null);
+        }
       }
     }
   }
@@ -117,5 +126,5 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
     }
   }
 
-  return { draft, preparing, committing, cleaning, busy, error, clear, prepare, commit, isMounted: () => mounted.current };
+  return { draft, preparing, linkProgress, committing, cleaning, busy, error, clear, prepare, commit, isMounted: () => mounted.current };
 }

@@ -2,27 +2,32 @@
 use crate::{
     curation::{self, CurationDraft, CurationStore},
     db::{self, Store},
+    models::Photo,
 };
+use serde::Serialize;
 use std::{
     collections::HashMap,
     fs,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
-use tauri::Manager;
+use tauri::{ipc::Channel, Manager};
 #[path = "link_import_download.rs"]
 mod download;
 #[path = "link_import_input.rs"]
 mod input;
+#[path = "link_import_source.rs"]
+mod source;
 #[path = "link_import_webview.rs"]
 mod webview;
 
 #[derive(Default)]
 struct Progress {
     cancelled: bool,
-    draft: Option<String>,
+    handed_off: bool,
 }
 pub(super) struct Session {
+    id: String,
     root: PathBuf,
     directory: PathBuf,
     label: String,
@@ -30,13 +35,16 @@ pub(super) struct Session {
 }
 impl Session {
     fn check(&self) -> Result<(), String> {
-        if self.progress.lock().map_err(|e| e.to_string())?.cancelled {
-            Err("链接导入已取消。".into())
-        } else {
-            Ok(())
-        }
+        self.active().map(|_| ())
     }
-    fn remove_downloads(&self) -> Result<(), String> {
+    fn active(&self) -> Result<MutexGuard<'_, Progress>, String> {
+        let progress = self.progress.lock().map_err(|e| e.to_string())?;
+        if progress.cancelled {
+            return Err("链接导入已取消。".into());
+        }
+        Ok(progress)
+    }
+    fn remove_staging(&self) -> Result<(), String> {
         match fs::remove_dir_all(&self.directory) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -46,7 +54,13 @@ impl Session {
 }
 impl Drop for Session {
     fn drop(&mut self) {
-        let _ = self.remove_downloads();
+        if self
+            .progress
+            .get_mut()
+            .is_ok_and(|progress| !progress.handed_off)
+        {
+            let _ = self.remove_staging();
+        }
     }
 }
 
@@ -60,8 +74,8 @@ impl LinkImportStore {
         if entries.contains_key(request) {
             return Err("链接请求已取消或已经使用，请重新开始。".into());
         }
-        let id = uuid::Uuid::new_v4();
-        let directory = root.join("staging").join(format!("link-{id}"));
+        let id = uuid::Uuid::new_v4().to_string();
+        let directory = root.join("staging").join(&id);
         fs::create_dir_all(&directory).map_err(|e| format!("无法创建链接暂存：{e}"))?;
         #[cfg(unix)]
         {
@@ -72,11 +86,16 @@ impl LinkImportStore {
             }
         }
         let session = Arc::new(Session {
+            label: format!("link-import-{id}"),
+            id,
             root,
             directory,
-            label: format!("link-import-{id}"),
             progress: Mutex::new(Progress::default()),
         });
+        for folder in ["originals", "thumbnails"] {
+            fs::create_dir(session.directory.join(folder))
+                .map_err(|e| format!("无法创建链接候选目录：{e}"))?;
+        }
         entries.insert(request.into(), Some(session.clone()));
         Ok(session)
     }
@@ -89,26 +108,46 @@ impl LinkImportStore {
         };
         let mut progress = session.progress.lock().map_err(|e| e.to_string())?;
         progress.cancelled = true;
-        session.remove_downloads()?;
-        Ok(progress.draft.take())
+        if progress.handed_off {
+            // Curation owns the files now and may already be committing them.
+            return Ok(Some(session.id.clone()));
+        }
+        session.remove_staging()?;
+        Ok(None)
     }
     #[cfg(test)]
     pub(crate) fn cancel_all(&self) -> Result<(), String> {
         for session in self.0.lock().map_err(|e| e.to_string())?.values().flatten() {
             let mut progress = session.progress.lock().map_err(|e| e.to_string())?;
             progress.cancelled = true;
-            session.remove_downloads()?;
+            if !progress.handed_off {
+                session.remove_staging()?;
+            }
         }
         Ok(())
     }
-    fn release(&self, request: &str, retain: bool) -> Result<(), String> {
-        if !retain {
-            self.0
-                .lock()
-                .map_err(|e| e.to_string())?
-                .insert(request.into(), None);
+    fn finish_preparation(
+        &self,
+        request: &str,
+        session: &Session,
+        result: Result<CurationDraft, String>,
+    ) -> Result<CurationDraft, String> {
+        let Err(message) = result else {
+            return result;
+        };
+        let cleanup = session
+            .progress
+            .lock()
+            .map_err(|e| e.to_string())
+            .and_then(|_progress| session.remove_staging());
+        self.0
+            .lock()
+            .map_err(|e| e.to_string())?
+            .insert(request.into(), None);
+        match cleanup {
+            Ok(()) => Err(message),
+            Err(cleanup) => Err(format!("{message}；{cleanup}")),
         }
-        Ok(())
     }
 }
 impl Drop for LinkImportStore {
@@ -117,51 +156,60 @@ impl Drop for LinkImportStore {
             for session in entries.values().flatten() {
                 if let Ok(mut progress) = session.progress.lock() {
                     progress.cancelled = true;
-                    let _ = session.remove_downloads();
+                    if !progress.handed_off {
+                        let _ = session.remove_staging();
+                    }
                 }
             }
         }
     }
 }
 
+#[derive(Serialize)]
+pub struct LinkImportProgress {
+    total: usize,
+    photo: Option<Photo>,
+}
+
+fn check_library(conn: &rusqlite::Connection, session: &Session) -> Result<(), String> {
+    if db::library_root(conn)? != session.root {
+        return Err("图库已切换，本次链接候选已取消。".into());
+    }
+    Ok(())
+}
+
 fn finish_candidates(
     store: &Store,
     drafts: &CurationStore,
     session: &Session,
-    paths: Vec<String>,
+    photos: Vec<Photo>,
     library: &str,
     group_id: Option<&str>,
-    source: &str,
 ) -> Result<CurationDraft, String> {
+    let conn = store.connection.lock().map_err(|e| e.to_string())?;
+    check_library(&conn, session)?;
     session.check()?;
-    let draft = curation::prepare_link_import_files(
-        store,
-        drafts,
-        paths,
-        library,
-        group_id,
-        &session.root,
-    )?;
-    let result = (|| {
-        // Same lock order as library switching: connection -> request -> curation.
-        let conn = store.connection.lock().map_err(|e| e.to_string())?;
-        let mut progress = session.progress.lock().map_err(|e| e.to_string())?;
-        if progress.cancelled || db::library_root(&conn)? != session.root {
-            return Err("链接导入已取消或图库已切换。".into());
-        }
-        if !draft.failures.is_empty() || draft.pending_ids.is_empty() {
-            return Err("部分帖子图片无法准备，已取消整篇导入。".into());
-        }
-        let view = curation::set_pending_source(drafts, &draft.id, &session.root, source)?;
-        // Remove downloads before handing off. Curation now owns its own managed copies.
-        session.remove_downloads()?;
-        progress.draft = Some(draft.id.clone());
-        Ok(view)
-    })();
-    if result.is_err() {
-        curation::cancel(store, drafts, &draft.id)?;
-    }
-    result
+    let prepared =
+        curation::prepare_link_import_draft(&conn, &session.id, library, group_id, photos)?;
+    let mut progress = session.active()?;
+    let draft = prepared.register(drafts)?;
+    progress.handed_off = true;
+    Ok(draft)
+}
+
+fn send_progress(
+    store: &Store,
+    session: &Session,
+    progress: &Channel<LinkImportProgress>,
+    total: usize,
+    photo: Option<Photo>,
+) -> Result<(), String> {
+    let conn = store.connection.lock().map_err(|e| e.to_string())?;
+    check_library(&conn, session)?;
+    let _active = session.active()?;
+    progress
+        .send(LinkImportProgress { total, photo })
+        .map_err(|e| format!("无法传递链接导入进度：{e}"))
 }
 
 #[tauri::command]
@@ -171,6 +219,7 @@ pub async fn prepare_link_import(
     library: String,
     group_id: Option<String>,
     request_id: String,
+    progress: Channel<LinkImportProgress>,
 ) -> Result<CurationDraft, String> {
     // Validate cheap input and category before creating files or visiting a website.
     input::input_url(&input)?;
@@ -187,7 +236,33 @@ pub async fn prepare_link_import(
         let canonical = target.canonical.clone();
         let platform = target.platform;
         let images = webview::extract(&app, target, &session).await?;
-        let paths = download::download(images, platform, &session).await?;
+        let mut download = download::Download::new(images, platform)?;
+        let total = download.count();
+        send_progress(&app.state::<Store>(), &session, &progress, total, None)?;
+        let mut photos = Vec::with_capacity(total);
+        while let Some(bytes) = download.next(&session).await? {
+            let index = photos.len();
+            let handle = app.clone();
+            let worker_session = session.clone();
+            let progress = progress.clone();
+            let library = library.clone();
+            let source = canonical.clone();
+            let photo = tauri::async_runtime::spawn_blocking(move || {
+                let photo =
+                    source::prepare_photo(&worker_session, bytes, index, &library, &source)?;
+                send_progress(
+                    &handle.state::<Store>(),
+                    &worker_session,
+                    &progress,
+                    total,
+                    Some(photo.clone()),
+                )?;
+                Ok::<_, String>(photo)
+            })
+            .await
+            .map_err(|_| "准备链接图片任务失败")??;
+            photos.push(photo);
+        }
         let handle = app.clone();
         let worker_session = session.clone();
         tauri::async_runtime::spawn_blocking(move || {
@@ -195,22 +270,17 @@ pub async fn prepare_link_import(
                 &handle.state::<Store>(),
                 &handle.state::<CurationStore>(),
                 &worker_session,
-                paths,
+                photos,
                 &library,
                 group_id.as_deref(),
-                &canonical,
             )
         })
         .await
         .map_err(|_| "准备链接候选任务失败".to_string())?
     }
     .await;
-    if result.is_err() {
-        session.remove_downloads()?;
-    }
     app.state::<LinkImportStore>()
-        .release(&request_id, result.is_ok())?;
-    result
+        .finish_preparation(&request_id, &session, result)
 }
 
 #[tauri::command]

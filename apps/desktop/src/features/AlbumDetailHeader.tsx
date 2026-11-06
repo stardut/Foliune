@@ -1,4 +1,4 @@
-import { ArrowLeft, Grid2X2, Image, ImagePlus, LayoutTemplate, MoreHorizontal, Play, Radio, Trash2, Undo2 } from 'lucide-react';
+import { ArrowLeft, CheckCheck, Grid2X2, Image, ImagePlus, LayoutTemplate, MoreHorizontal, Play, Radio, Trash2, Undo2, X } from 'lucide-react';
 import { DropdownMenu } from '../components/DropdownMenu';
 import { albumSortIcons, photoSortLabels } from './AlbumSortButton';
 import type { PhotoSort, WorkView } from './library-photo-order';
@@ -12,9 +12,10 @@ const layouts = [
 const photoSortOptions = Object.keys(photoSortLabels) as PhotoSort[];
 const workViewOptions = [{ id: 'none', label: '不分组' }, { id: 'location', label: '地点' }, { id: 'project', label: '项目' }] as const;
 
-export function AlbumDetailHeader({ name, homeTitle, discarded, activeLabel, canImport, canPlay, canSort, airDrop, layout, sort, onBack, onImport, onPlay, onStatus, onLayout, onSort, workView, onWorkView, onMenuOpenChange, onFocusWall }: {
+export function AlbumDetailHeader({ name, homeTitle, discarded, activeLabel, canImport, canPlay, canSort, selection, airDrop, layout, sort, onBack, onImport, onPlay, onStatus, onLayout, onSort, workView, onWorkView, onMenuOpenChange, onFocusWall }: {
   name: string; homeTitle: string; discarded: boolean; activeLabel: string;
   canImport: boolean; canPlay: boolean; canSort: boolean; layout: AlbumPhotoLayout;
+  selection?: { allSelected: boolean; disabled: boolean; run: () => void };
   airDrop?: { label: string; disabled: boolean; run: () => void };
   sort: PhotoSort; onSort: (sort: PhotoSort) => void;
   onBack: () => void; onImport: () => void; onPlay: () => void;
@@ -33,6 +34,7 @@ export function AlbumDetailHeader({ name, homeTitle, discarded, activeLabel, can
       onOpenChange={onMenuOpenChange} onTabForward={onFocusWall} groups={[
         { items: [
           { id: 'import', label: '导入照片', icon: <ImagePlus size={15} aria-hidden="true" />, disabled: !canImport, run: onImport },
+          ...(selection ? [{ id: 'select-all', label: selection.allSelected ? '取消全选' : '全选', icon: selection.allSelected ? <X size={15} aria-hidden="true" /> : <CheckCheck size={15} aria-hidden="true" />, disabled: selection.disabled, run: selection.run }] : []),
           { id: 'play', label: '欣赏', icon: <Play size={15} aria-hidden="true" />, disabled: !canPlay, run: onPlay },
           ...(airDrop ? [{ id: 'air-drop', label: airDrop.label, icon: <Radio size={15} aria-hidden="true" />, disabled: airDrop.disabled, run: airDrop.run }] : []),
           { id: 'status', label: discarded ? `返回${activeLabel}` : '查看已废弃', icon: discarded ? <Undo2 size={15} aria-hidden="true" /> : <Trash2 size={15} aria-hidden="true" />, run: () => onStatus(!discarded) },

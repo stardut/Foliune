@@ -30,6 +30,7 @@ type SearchTarget = { space: SearchDetail['space']; id: string };
 const spaces: { id: Space; label: string }[] = [{ id: 'collection', label: '收藏' }, { id: 'work', label: '作品' }, { id: 'books', label: '画册' }, { id: 'models', label: '模特' }, { id: 'planning', label: '策划' }, { id: 'search', label: '搜索' }, { id: 'settings', label: '设置' }];
 const navigationSpaces = spaces.filter((item) => item.id !== 'search' && item.id !== 'settings');
 const primaryNavigationDurationMs = 360;
+const reducedMotionQuery = '(prefers-reduced-motion: reduce)';
 const empty: LibrarySnapshot = { photos: [], groups: [], memberships: [] };
 const initialSearchSession: SearchSession = { query: '', category: 'all', scrollTop: 0 };
 
@@ -93,18 +94,23 @@ export default function App() {
     const main = mainRef.current;
     if (!main || loading) return;
 
-    const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const motionPreference = window.matchMedia(reducedMotionQuery);
     if (motionPreference.matches) return;
 
     const from = navigationSpaces.findIndex((item) => item.id === previous);
     const to = navigationSpaces.findIndex((item) => item.id === space);
     const isPrimaryTransition = from >= 0 && to >= 0;
+    // Primary workspaces have a single root. Move it within the stationary scrollport.
+    const surface = isPrimaryTransition ? (ready ? main.firstElementChild : null) : main;
+    if (!surface) return;
+
     const frames = isPrimaryTransition
-      ? [{ opacity: .65, transform: `translateX(${to > from ? 12 : -12}px)` }, { opacity: 1, transform: 'translateX(0)' }]
+      ? [{ transform: `translate3d(${to > from ? 24 : -24}%, 0, 0)` }, { transform: 'translate3d(0, 0, 0)' }]
       : [{ opacity: .65 }, { opacity: 1 }];
-    const animation = main.animate(frames, {
+    const animation = surface.animate(frames, {
       duration: isPrimaryTransition ? primaryNavigationDurationMs : 240,
       easing: isPrimaryTransition ? 'cubic-bezier(.25, .5, .3, 1)' : 'cubic-bezier(.2, .72, .2, 1)',
+      fill: 'backwards',
     });
     const onMotionPreferenceChange = (event: MediaQueryListEvent) => {
       if (event.matches) animation.cancel();
@@ -114,7 +120,7 @@ export default function App() {
       motionPreference.removeEventListener('change', onMotionPreferenceChange);
       animation.cancel();
     };
-  }, [space, loading]);
+  }, [space, loading, ready]);
   useEffect(() => {
     if (!api.isDesktop()) return;
     let disposed = false;

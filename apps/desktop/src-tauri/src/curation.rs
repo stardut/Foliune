@@ -14,13 +14,10 @@ use std::{
 };
 use tauri::{Manager, State};
 
-#[path = "link_import_source.rs"]
-mod link_source;
-pub(crate) use link_source::set_pending_source;
 #[path = "link_import_curation.rs"]
 mod import_files;
 pub use import_files::prepare_import_files;
-pub(crate) use import_files::prepare_link_import_files;
+pub(crate) use import_files::prepare_link_import_draft;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

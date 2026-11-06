@@ -48,6 +48,13 @@ fn original_error(error: io::Error) -> String {
 }
 
 impl Original {
+    pub(crate) fn indexed_hash(&self) -> Option<&str> {
+        match &self.storage {
+            Storage::Bound(source) => Some(&source.sha256),
+            _ => None,
+        }
+    }
+
     pub(crate) fn open(&self) -> Result<File, String> {
         match &self.storage {
             Storage::Managed { root, path } => {
@@ -62,13 +69,30 @@ impl Original {
                 Ok(file)
             }
             Storage::Bound(source) => {
-                let mut file = source.open()?;
-                self.verify_content_hash(&fingerprint(&mut file)?)?;
-                file.rewind().map_err(original_error)?;
-                Ok(file)
+                self.open_bound_with_signature(source).map(|(file, _)| file)
             }
             Storage::Local(locator) => local_photo::open(locator),
         }
+    }
+
+    pub(crate) fn open_with_signature(&self) -> Result<(File, String), String> {
+        if let Storage::Bound(source) = &self.storage {
+            return self.open_bound_with_signature(source);
+        }
+        let file = self.open()?;
+        let signature = stat_signature(&file).ok_or("无法确认照片原件状态")?;
+        Ok((file, signature))
+    }
+
+    fn open_bound_with_signature(&self, source: &BoundSource) -> Result<(File, String), String> {
+        let mut file = source.open()?;
+        let signature = stat_signature(&file).ok_or("无法确认作品原件状态")?;
+        self.verify_content_hash(&fingerprint(&mut file)?)?;
+        if stat_signature(&file).as_deref() != Some(signature.as_str()) {
+            return Err(format!("作品原件在读取期间发生变化：{}", source.file_name));
+        }
+        file.rewind().map_err(original_error)?;
+        Ok((file, signature))
     }
 
     pub(crate) fn verify_content_hash(&self, sha256: &str) -> Result<(), String> {

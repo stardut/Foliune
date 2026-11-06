@@ -16,7 +16,7 @@ use tauri::Manager;
 const MAX_EDGE: u32 = 32_768;
 const MAX_PIXELS: u64 = 160_000_000;
 const MAX_ITEMS: usize = 100;
-const MAX_SOURCE_PIXELS: u64 = MAX_PIXELS;
+pub(crate) const MAX_SOURCE_PIXELS: u64 = MAX_PIXELS;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -111,23 +111,37 @@ fn fitted_image(image: DynamicImage, item: &CollageItem) -> DynamicImage {
         }
         return image.resize(item.width, item.height, FilterType::Lanczos3);
     }
-    let scale = (f64::from(item.width) / f64::from(image.width()))
-        .max(f64::from(item.height) / f64::from(image.height()))
-        * item.zoom;
-    // 先在来源空间裁切，再缩放到单元格，避免高倍缩放分配巨型中间位图。
-    let width = (f64::from(item.width) / scale).round().max(1.0) as u32;
-    let height = (f64::from(item.height) / scale).round().max(1.0) as u32;
-    let x = (f64::from(image.width() - width) * item.offset_x).round() as u32;
-    let y = (f64::from(image.height() - height) * item.offset_y).round() as u32;
-    let cropped = if x == 0 && y == 0 && width == image.width() && height == image.height() {
-        image
-    } else {
-        image.crop_imm(x, y, width, height)
-    };
-    if width == item.width && height == item.height {
+    let cropped = crop_cover(
+        image,
+        (item.width, item.height),
+        (item.offset_x, item.offset_y),
+        item.zoom,
+    );
+    if cropped.dimensions() == (item.width, item.height) {
         cropped
     } else {
         cropped.resize_exact(item.width, item.height, FilterType::Lanczos3)
+    }
+}
+
+pub(crate) fn crop_cover(
+    image: DynamicImage,
+    (target_width, target_height): (u32, u32),
+    (offset_x, offset_y): (f64, f64),
+    zoom: f64,
+) -> DynamicImage {
+    let scale = (f64::from(target_width) / f64::from(image.width()))
+        .max(f64::from(target_height) / f64::from(image.height()))
+        * zoom;
+    // 先在来源空间裁切，再缩放到单元格，避免高倍缩放分配巨型中间位图。
+    let width = (f64::from(target_width) / scale).round().max(1.0) as u32;
+    let height = (f64::from(target_height) / scale).round().max(1.0) as u32;
+    let x = (f64::from(image.width() - width) * offset_x).round() as u32;
+    let y = (f64::from(image.height() - height) * offset_y).round() as u32;
+    if x == 0 && y == 0 && width == image.width() && height == image.height() {
+        image
+    } else {
+        image.crop_imm(x, y, width, height)
     }
 }
 

@@ -50,7 +50,7 @@ pub struct Group {
     pub bound_folder: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AlbumCover {
     pub photo_id: String,

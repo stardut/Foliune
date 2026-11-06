@@ -11,6 +11,7 @@ export interface CollageState {
 export interface CollageRect { photoId: string; x: number; y: number; width: number; height: number }
 export interface CollageLayout { width: number; height: number; items: CollageRect[] }
 const BASE = 2400;
+export const COLLAGE_MAX_PHOTOS = 100;
 export const COLLAGE_MAX_EDGE = 32768;
 export const COLLAGE_MAX_PIXELS = 160000000;
 export const centeredCrop: PhotoCrop = { fit: 'cover', offsetX: .5, offsetY: .5, zoom: 1 };
@@ -123,7 +124,7 @@ export function collageOutputProblem(layout: CollageLayout): string {
 
 export function collageProblem(state: CollageState, photos: Photo[], layout: CollageLayout): string {
   if (state.photoIds.length < 2) return '至少选择 2 张照片';
-  if (state.photoIds.length > 100) return '拼图最多支持 100 张照片';
+  if (state.photoIds.length > COLLAGE_MAX_PHOTOS) return `拼图最多支持 ${COLLAGE_MAX_PHOTOS} 张照片`;
   if (layout.items.length !== state.photoIds.length) return '部分照片记录缺失，请重新选片';
   const missing = state.photoIds.map((id) => photos.find((photo) => photo.id === id)).filter((photo) => !photo?.originalAvailable);
   if (missing.some(isLocalPhoto)) return '部分照片找不到源文件';

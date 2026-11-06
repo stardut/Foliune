@@ -1,11 +1,11 @@
 import { useId, useState, type CSSProperties } from 'react';
 import { ChevronRight, Images } from 'lucide-react';
-import { PhotoImage } from '../components/PhotoImage';
 import { Modal } from '../components/ui';
 import type { Group, Photo } from '../lib/types';
 import type { WorkDirectoryJob } from '../lib/work-directory-api';
 import type { LibraryAlbum } from './library-albums';
-import { albumCoverStyle } from './album-cover';
+import { albumCoverRevision, albumCoverStyle } from './album-cover';
+import { AlbumCoverImage } from './AlbumCoverImage';
 import { WorkDirectorySourceIcon } from './WorkDirectorySourceIcon';
 
 export function AlbumOverview({ albums, busy, jobs = [], retrying, onRetry, onOpen, onMenu }: {
@@ -46,12 +46,14 @@ function AlbumCard({ group, photos, job, busy, retrying, onRetry, onOpen, onMenu
   const isReady = isRunning && job.processed === job.fileCount;
   const status = retrying ? '正在重试' : isFailed ? '同步失败' : isReady ? '写入相簿' : isRunning ? '同步中' : '等待同步';
   const fraction = job ? job.processed / job.fileCount : 0;
-  const cover = group?.cover;
-  const coverPhoto = cover && photos.find((photo) => photo.id === cover.photoId);
+  const savedCover = group?.cover;
+  const coverPhoto = savedCover && photos.find((photo) => photo.id === savedCover.photoId);
+  const cover = coverPhoto && savedCover ? savedCover : null;
   const photo = coverPhoto || photos[0];
   const content = <>
-    <div className={`album-cover ${photo ? '' : 'album-cover-empty'}`} style={coverPhoto && cover ? albumCoverStyle(cover) : undefined}>
-      {photo ? <PhotoImage key={photo.id} photo={photo} lazy /> : <div className="album-empty" aria-hidden="true"><Images size={28} strokeWidth={1.1} /></div>}
+    <div className={`album-cover ${photo ? '' : 'album-cover-empty'}`} style={cover ? albumCoverStyle(cover) : undefined}>
+      {group && photo ? <AlbumCoverImage key={albumCoverRevision(photo, cover)}
+        groupId={group.id} photo={photo} cover={cover} /> : <div className="album-empty" aria-hidden="true"><Images size={28} strokeWidth={1.1} /></div>}
       {job && <div className="album-sync-line" data-running={isRunning} style={{ '--sync-fraction': fraction } as CSSProperties} aria-hidden="true"><span /></div>}
     </div>
     <div className="album-caption">

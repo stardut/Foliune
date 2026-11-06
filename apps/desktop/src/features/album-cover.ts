@@ -1,6 +1,11 @@
 import type { CSSProperties } from 'react';
 import type { AlbumCover, Photo } from '../lib/types';
 
+export function albumCoverRevision(photo: Photo, cover?: AlbumCover | null) {
+  return JSON.stringify([photo.id, photo.originalPath, photo.thumbnailPath, photo.originalAvailable, photo.thumbnailAvailable,
+    photo.availability, cover?.offsetX, cover?.offsetY, cover?.zoom]);
+}
+
 export function albumCoverStyle(cover: AlbumCover): CSSProperties {
   const { offsetX, offsetY, zoom } = cover;
   // Position the enlarged image box and the pixels inside it with the same

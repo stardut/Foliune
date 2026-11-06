@@ -16,17 +16,18 @@ const { createElement: h, act } = require('react');
 const { createRoot } = require('react-dom/client');
 const { build } = createRequire(require.resolve('vite/package.json'))('esbuild');
 const bundle = await build({
-  entryPoints: [resolve('apps/desktop/src/components/PhotoSourceDialog.tsx')],
+  stdin: { resolveDir: resolve('apps/desktop/src/components'), contents: "export { PhotoSourceDialog } from './PhotoSourceDialog'; export { PhotoPicker } from './PhotoPicker';" },
   bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external', write: false, logLevel: 'silent', loader: { '.css': 'empty' },
   plugins: [{ name: 'import-ipc-boundary', setup(build) {
     build.onResolve({ filter: /\/(curation-api|photo-import-api)$/ }, ({ path }) => ({ path, namespace: 'mock-import' }));
     build.onLoad({ filter: /.*/, namespace: 'mock-import' }, () => ({ contents: 'export const { prepareImport, cancelCuration, commitCuration, prepareLinkImport, cancelLinkImport } = globalThis.photoImportMock;' }));
   } }],
 });
-const photo = id => ({ id, library: 'collection', title: id, originalName: `${id}.jpg`, originalPath: '/test.jpg', thumbnailPath: '/test.jpg', originalUrl: '/test.jpg', thumbnailUrl: '/test.jpg', originalAvailable: true, thumbnailAvailable: true, width: 100, height: 150, tags: [], regions: [], annotation: '', source: '', capturedAt: null, location: '', project: '', importedAt: '' });
+const thumbnailUrl = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+const photo = id => ({ id, library: 'collection', title: id, originalName: `${id}.jpg`, originalPath: '/test.jpg', thumbnailPath: '/test.jpg', originalUrl: '/test.jpg', thumbnailUrl, originalAvailable: true, thumbnailAvailable: true, width: 100, height: 150, tags: [], regions: [], annotation: '', source: '', capturedAt: null, location: '', project: '', importedAt: '' });
 const draft = (ids = ['new1', 'new2']) => ({ id: 'draft-1', groupId: null, groupName: '相簿', capacity: null, candidates: ids.map(photo), activeIds: [], pendingIds: ids, failures: [] });
 const snapshot = { photos: [], groups: [], memberships: [] };
-const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+const deferred = () => { let resolve, reject; const promise = new Promise((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; };
 
 async function scenario(options, run) {
   const calls = { prepare: [], cancel: [], cancelRequest: [], commit: [], confirm: [], busy: [] };
@@ -39,12 +40,17 @@ async function scenario(options, run) {
   };
   const module = { exports: {} };
   new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(require, module, module.exports);
-  const { PhotoSourceDialog } = module.exports;
+  const { PhotoSourceDialog, PhotoPicker } = module.exports;
   const container = document.createElement('div'); document.body.append(container);
   const root = createRoot(container);
+  const getButton = text => {
+    const found = [...container.querySelectorAll('button')].find(button => button.textContent === text);
+    assert(found, `button ${text} exists`);
+    return found;
+  };
   const click = async text => {
-    const button = [...container.querySelectorAll('button')].find(button => button.textContent === text);
-    assert(button, `button ${text} exists`); assert.equal(button.disabled, false, `${text} enabled`);
+    const button = getButton(text);
+    assert.equal(button.disabled, false, `${text} enabled`);
     await act(async () => button.click());
   };
   const select = async id => {
@@ -52,33 +58,59 @@ async function scenario(options, run) {
     assert(button, `photo ${id} exists`); assert.equal(button.disabled, false);
     await act(async () => button.click());
   };
-  const link = async () => {
-    await click('链接');
-    const input = container.querySelector('input[aria-label="小红书或 Instagram 链接"]');
+  const enterText = async (label, value) => {
+    const input = container.querySelector(`input[aria-label="${label}"]`);
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-      setter.call(input, 'https://www.instagram.com/p/test/');
+      setter.call(input, value);
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     return input;
   };
+  const link = async () => {
+    await click('链接');
+    return enterText('小红书或 Instagram 链接', 'https://www.instagram.com/p/test/');
+  };
   let unmounted = false;
   const unmount = async () => { if (!unmounted) { await act(async () => root.unmount()); unmounted = true; } };
   try {
-    const content = h(PhotoSourceDialog, { photos: [photo('existing')], library: 'collection', ...options.props,
+    const content = h(options.libraryOnly ? PhotoPicker : PhotoSourceDialog, { photos: [photo('existing')], library: 'collection', ...options.props,
       onConfirm: result => calls.confirm.push(result), onClose() {}, onBusyChange: value => calls.busy.push(value) });
     await act(async () => root.render(options.outerForm ? h('form', { onSubmit: event => { event.preventDefault(); options.outerForm(); } }, content) : content));
-    await run({ calls, click, select, link, container, unmount });
+    await run({ calls, click, getButton, select, enterText, link, container, unmount });
   } finally { await unmount(); container.remove(); }
 }
 
-test('候选默认不选，合计上限包含已有照片，仅提交用户顺序选择的新图', async () => {
-  await scenario({ props: { selectedIds: ['existing'], maxSelection: 3 }, prepare: () => ({ ...draft(['new1', 'new2', 'new3']), candidates: ['new3', 'new2', 'new1'].map(photo) }) }, async ({ calls, click, select, container }) => {
+for (const libraryOnly of [false, true]) {
+  test(`${libraryOnly ? '图库选片' : '多来源选片'}跨页全选当前筛选结果，保留先前顺序并可取消全部选择`, async () => {
+    const matching = Array.from({ length: 62 }, (_, index) => photo(`series-${index + 1}`));
+    const photos = [{ ...photo('series-work'), library: 'work' }, photo('unmatched'), ...matching];
+    const selectedIds = ['series-62', 'series-work'];
+    await scenario({ libraryOnly, props: { photos, selectedIds } }, async ({ calls, click, getButton, enterText, container }) => {
+      await click('收藏');
+      await enterText('搜索图库照片', 'series-');
+      await click('下一页');
+      assert.equal(container.querySelectorAll('.photo-picker-item').length, 2);
+      await click('全选');
+      assert.equal(getButton('全选').disabled, true);
+      const expected = [...selectedIds, ...matching.slice(0, -1).map(({ id }) => id)];
+      await click('确认选择');
+      assert.deepEqual(calls.confirm, libraryOnly ? [expected] : [{ photoIds: expected }]);
+      await click('取消全选');
+      assert.equal(container.querySelector('.photo-picker-selection [role="status"]').textContent, '已选 0 张');
+      assert.equal(getButton('取消全选').disabled, true);
+    });
+  });
+}
+
+test('候选默认不选，选满上限包含已有照片并依次追加候选', async () => {
+  await scenario({ props: { selectedIds: ['existing'], maxSelection: 3 }, prepare: () => ({ ...draft(['new1', 'new2', 'new3']), candidates: ['new3', 'new2', 'new1'].map(photo) }) }, async ({ calls, click, getButton, select, container }) => {
     await click('本地'); await click('选择本地照片');
     assert.equal(container.querySelectorAll('.photo-picker-item.is-selected').length, 0);
     assert.equal([...container.querySelectorAll('button')].find(b => b.textContent === '确认导入').disabled, true);
     assert.deepEqual([...container.querySelectorAll('.photo-picker-item')].map(b => b.getAttribute('aria-label')), ['选择 new1', '选择 new2', '选择 new3']);
-    await select('new2'); await select('new1');
+    await select('new2'); await click('选满 3 张');
+    assert.equal(getButton('选满 3 张').disabled, true);
     assert.equal(container.querySelector('button[aria-label="选择 new3"]').disabled, true);
     await click('确认导入');
     assert.deepEqual(calls.commit, [['draft-1', ['new2', 'new1']]]);
@@ -86,13 +118,70 @@ test('候选默认不选，合计上限包含已有照片，仅提交用户顺�
   });
 });
 
-test('链接准备中切换来源与卸载后迟到的本地draft均取消，不提交', async () => {
+test('链接逐张预览并更新进度，拿到候选会话后原地启用选片', async () => {
+  const pending = deferred();
+  await scenario({ props: { selectedIds: ['existing'] }, prepare: () => pending.promise }, async ({ calls, click, getButton, link, select, container }) => {
+    await link(); await click('获取图片');
+    const bar = container.querySelector('[role="progressbar"]');
+    const confirm = [...container.querySelectorAll('button')].find(b => b.textContent === '确认导入');
+    assert.match(bar.textContent, /正在读取帖子/);
+    assert.equal(bar.hasAttribute('aria-valuenow'), false);
+    assert.equal(getButton('全选').disabled, true);
+    assert.equal(getButton('取消全选').disabled, true);
+    const grid = container.querySelector('.photo-picker-grid');
+    const placeholder = grid.querySelector('.photo-picker-placeholder[aria-hidden="true"]');
+    assert(placeholder);
+    assert.equal(placeholder.children.length, 3);
+    assert.equal(grid.children.length, 1);
+    const report = calls.prepare[0][4];
+    await act(async () => report({ total: 2 }));
+    assert.equal(bar.getAttribute('aria-valuenow'), '0');
+    assert.equal(bar.getAttribute('aria-valuemax'), '2');
+    await act(async () => report({ total: 2, photo: photo('new1') }));
+    const first = container.querySelector('button[aria-label="预览 new1"]');
+    assert(first);
+    const firstImage = first.querySelector('img');
+    assert(firstImage);
+    assert.equal(first.disabled, true);
+    assert.equal(first.querySelector('.photo-picker-check'), null);
+    assert.equal(confirm.disabled, true);
+    assert.equal(bar.getAttribute('aria-valuenow'), '1');
+    assert.deepEqual([...grid.children], [first, placeholder]);
+    await act(async () => report({ total: 2, photo: photo('new2') }));
+    assert.equal(bar.getAttribute('aria-valuenow'), '2');
+    assert.equal(container.querySelectorAll('button[aria-label^="预览 "]').length, 2);
+    assert.equal(grid.querySelector('.photo-picker-placeholder'), null);
+    assert.equal(getButton('全选').disabled, true);
+    await act(async () => pending.resolve(draft()));
+    assert.equal(container.querySelector('button[aria-label="选择 new1"]'), first);
+    assert.equal(first.querySelector('img'), firstImage);
+    assert.equal(first.disabled, false);
+    assert.equal(confirm.disabled, true);
+    assert.equal(bar.getAttribute('aria-valuenow'), '2');
+    await click('全选');
+    assert.equal(grid.querySelectorAll('.is-selected').length, 2);
+    assert.equal(confirm.disabled, false);
+    await click('取消全选');
+    assert.equal(container.querySelector('.photo-picker-selection [role="status"]').textContent, '已选 0 张');
+    await select('new2'); await click('确认导入');
+    assert.deepEqual(calls.commit, [['draft-1', ['new2']]]);
+  });
+});
+
+test('链接准备中切换来源忽略迟到进度，卸载后迟到的候选会话取消', async () => {
   const pending = deferred();
   await scenario({ prepare: () => pending.promise }, async ({ calls, click, link, container, unmount }) => {
-    await link(); await click('获取图片'); await click('本地');
+    await link(); await click('获取图片');
+    const report = calls.prepare[0][4];
+    await act(async () => report({ total: 2, photo: photo('new1') }));
+    assert.equal(container.querySelectorAll('.photo-picker-item').length, 1);
+    await click('本地');
     assert.equal(calls.cancelRequest.length, 1);
+    await act(async () => report({ total: 2, photo: photo('new2') }));
     await act(async () => pending.resolve(draft()));
     assert.deepEqual(calls.cancel, ['draft-1']);
+    assert.equal(container.querySelector('[role="progressbar"]'), null);
+    assert.equal(container.querySelector('.photo-picker-placeholder'), null);
     assert.equal(container.querySelectorAll('.photo-picker-item').length, 0);
     assert.equal(calls.commit.length, 0);
     await unmount(); assert.equal(calls.busy.at(-1), false);
@@ -102,6 +191,50 @@ test('链接准备中切换来源与卸载后迟到的本地draft均取消，不
     await click('选择本地照片'); await unmount();
     await act(async () => local.resolve(draft()));
     assert.deepEqual(calls.cancel, ['draft-1']); assert.equal(calls.confirm.length, 0);
+  });
+});
+
+test('获取失败撤下已显示的进度和照片，保留错误和重新获取入口', async () => {
+  const pending = deferred();
+  await scenario({ prepare: () => pending.promise }, async ({ calls, click, link, container }) => {
+    await link(); await click('获取图片');
+    const report = calls.prepare[0][4];
+    await act(async () => report({ total: 2, photo: photo('new1') }));
+    assert.equal(container.querySelectorAll('.photo-picker-item').length, 1);
+    await act(async () => pending.reject(new Error('第二张图片下载失败')));
+    assert.equal(container.querySelector('[role="progressbar"]'), null);
+    assert.equal(container.querySelector('.photo-picker-placeholder'), null);
+    assert.equal(container.querySelectorAll('.photo-picker-item').length, 0);
+    assert.match(container.querySelector('[role="alert"]').textContent, /第二张图片下载失败/);
+    assert.equal([...container.querySelectorAll('button')].find(b => b.textContent === '获取图片').disabled, false);
+  });
+});
+
+test('停止获取保留弹窗；重新获取期间的旧进度和旧候选不会混入', async () => {
+  const old = deferred();
+  const next = deferred();
+  const attempts = [old, next];
+  await scenario({ prepare: () => attempts.shift().promise }, async ({ calls, click, link, container }) => {
+    const input = await link(); await click('获取图片');
+    const reportOld = calls.prepare[0][4];
+    await act(async () => reportOld({ total: 2, photo: photo('old1') }));
+    await click('停止获取');
+    assert.equal(container.querySelector('[role="progressbar"]'), null);
+    assert.equal(container.querySelector('.photo-picker-placeholder'), null);
+    assert.equal(container.querySelectorAll('.photo-picker-item').length, 0);
+    assert.equal(input.value, 'https://www.instagram.com/p/test/');
+    assert.deepEqual(calls.cancelRequest, [calls.prepare[0][3]]);
+    await click('获取图片');
+    await act(async () => {
+      reportOld({ total: 2, photo: photo('old2') });
+      old.resolve({ ...draft(['old1', 'old2']), id: 'old-draft' });
+    });
+    assert.deepEqual(calls.cancel, ['old-draft']);
+    const bar = container.querySelector('[role="progressbar"]');
+    assert.equal(bar.hasAttribute('aria-valuenow'), false);
+    assert.equal(container.querySelectorAll('.photo-picker-item').length, 0);
+    await act(async () => next.resolve(draft()));
+    assert.equal(container.querySelectorAll('button[aria-label^="选择 new"]').length, 2);
   });
 });
 

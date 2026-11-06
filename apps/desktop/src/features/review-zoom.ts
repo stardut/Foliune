@@ -27,6 +27,11 @@ export class ReviewZoom {
     else this.layers.delete(frame.key);
   }
   imageLoaded(key: number) { if (this.layers.has(key)) this.draw(); }
+  reset() {
+    this.stopWheel(); this.stopAnimation(); this.finishDrag();
+    if (this.activeIdentity) this.poses.set(this.activeIdentity, fit());
+    this.draw();
+  }
   update(frames: ReviewFrame[], current: ReviewFrame | null, reduced = false) {
     const keys = new Set(frames.map((frame) => frame.key));
     const identities = new Set(frames.filter((frame) => frame.kind !== 'error').map(identity));

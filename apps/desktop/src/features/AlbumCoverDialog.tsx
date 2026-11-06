@@ -1,8 +1,8 @@
-import { useId, useRef, useState } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 import { PhotoImage } from '../components/PhotoImage';
 import { Modal } from '../components/ui';
 import type { AlbumCover, Photo } from '../lib/types';
-import { albumCoverStyle, shiftAlbumCover } from './album-cover';
+import { albumCoverRevision, albumCoverStyle, shiftAlbumCover } from './album-cover';
 
 export function AlbumCoverDialog({ photo, initialCover, busy, onClose, onSave }: {
   photo: Photo;
@@ -13,12 +13,14 @@ export function AlbumCoverDialog({ photo, initialCover, busy, onClose, onSave }:
 }) {
   const [cover, setCover] = useState(() => initialCover?.photoId === photo.id
     ? initialCover : { photoId: photo.id, offsetX: .5, offsetY: .5, zoom: 1 });
-  const [ready, setReady] = useState(false);
+  const revision = albumCoverRevision(photo);
+  const [readyRevision, setReadyRevision] = useState<string>();
+  const onImageReady = useCallback((ready: boolean) => setReadyRevision(ready ? revision : undefined), [revision]);
   const [error, setError] = useState('');
   const [dragging, setDragging] = useState(false);
   const pointer = useRef<{ id: number; x: number; y: number } | null>(null);
   const instructionsId = useId();
-  const editable = ready && !busy;
+  const editable = readyRevision === revision && !busy;
   function shift(frame: HTMLElement, dx: number, dy: number) {
     const bounds = frame.getBoundingClientRect();
     setCover((previous) => shiftAlbumCover(previous, photo, bounds, dx, dy));
@@ -65,7 +67,7 @@ export function AlbumCoverDialog({ photo, initialCover, busy, onClose, onSave }:
           event.preventDefault();
           shift(event.currentTarget, dx, dy);
         }}>
-        <PhotoImage photo={photo} onReadyChange={setReady} />
+        <PhotoImage key={revision} photo={photo} original onReadyChange={onImageReady} />
       </div>
       <label className="album-cover-zoom">
         缩放

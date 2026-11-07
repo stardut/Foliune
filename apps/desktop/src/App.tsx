@@ -43,7 +43,7 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const toast = useToast();
-  const [space, setSpace] = useState<Space>('collection');
+  const [space, setSpace] = useState<Space>('work');
   const [workspaceVisibility, setWorkspaceVisibility] = useState(readWorkspaceVisibility);
   const navigationSpaces = useMemo(() => primarySpaces.filter(({ id }) => isWorkspaceVisible(id, workspaceVisibility)), [workspaceVisibility]);
   const previousSpace = useRef(space);

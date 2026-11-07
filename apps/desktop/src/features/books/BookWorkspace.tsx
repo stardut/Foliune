@@ -3,7 +3,7 @@ import { Busy, EmptyState, Modal, WorkspaceHeader } from '../../components/ui';
 import * as api from '../../lib/book-api';
 import type { BookDetail, BookSummary, CreateBookInput } from '../../lib/book-types';
 import type { LibrarySnapshot, Photo } from '../../lib/types';
-import { useContextMenu } from '../use-context-menu';
+import { useContextMenu, type ContextMenuPosition } from '../use-context-menu';
 import { BookCover } from './BookCover';
 import { BookCreator } from './BookCreator';
 import { BookEditor } from './BookEditor';
@@ -77,7 +77,7 @@ export function BookWorkspace({ photos, onSnapshot, onPlay, onDirtyChange, onRel
       setDeleting(null);
     });
   }
-  function showMenu(book: BookSummary, at: { x: number; y: number }, trigger: HTMLElement) {
+  function showMenu(book: BookSummary, at: ContextMenuPosition, trigger: HTMLElement) {
     const context = menuContext;
     const target = () => menuState.current.books.find((item) => item.id === book.id);
     const allowed = () => menuState.current.context === context && !menuState.current.blocked && !!target();
@@ -108,13 +108,13 @@ export function BookWorkspace({ photos, onSnapshot, onPlay, onDirtyChange, onRel
       onContextMenu={(event) => {
         event.preventDefault(); event.stopPropagation();
         const trigger = event.currentTarget.querySelector<HTMLButtonElement>('.book-cover');
-        if (trigger) showMenu(book, { x: event.clientX, y: event.clientY }, trigger);
+        if (trigger) showMenu(book, { x: event.clientX, y: event.clientY, source: 'mouse' }, trigger);
       }}
       onKeyDown={(event) => {
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
         event.preventDefault(); event.stopPropagation();
         const trigger = event.currentTarget.querySelector<HTMLButtonElement>('.book-cover');
-        if (trigger) { const rect = trigger.getBoundingClientRect(); showMenu(book, { x: rect.left + 24, y: rect.top + 32 }, trigger); }
+        if (trigger) { const rect = trigger.getBoundingClientRect(); showMenu(book, { x: rect.left + 24, y: rect.top + 32, source: 'position' }, trigger); }
       }}>
       <BookCover key={`${cover?.id}:${cover?.thumbnailUrl}:${cover?.availability}`} title={book.title} photo={cover} hasPhotos={book.photoCount > 0} busy={busy} />
     </article>;

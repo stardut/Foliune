@@ -8,6 +8,7 @@ mod book_layout;
 mod books;
 mod collage;
 mod content_refs;
+mod context_menu;
 mod credentials;
 mod curation;
 mod db;
@@ -116,6 +117,8 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("work-photo", work_directory::serve)
         .setup(|app| {
             #[cfg(target_os = "macos")]
+            context_menu::observe(app)?;
+            #[cfg(target_os = "macos")]
             photo_fullscreen::observe(app)?;
             let root = app.path().app_data_dir()?;
             let store = Store::open(root).map_err(std::io::Error::other)?;
@@ -127,6 +130,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            context_menu::popup_context_menu,
             load_snapshot,
             import_photos,
             create_group,

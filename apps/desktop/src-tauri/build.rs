@@ -21,6 +21,12 @@ fn main() {
             .file(fullscreen)
             .flag("-fobjc-arc")
             .compile("foliune_photo_fullscreen_macos");
+        let context_menu = "src/context_menu_macos.m";
+        println!("cargo:rerun-if-changed={context_menu}");
+        cc::Build::new()
+            .file(context_menu)
+            .flag("-fobjc-arc")
+            .compile("foliune_context_menu_macos");
         for framework in [
             "AppKit",
             "CFNetwork",

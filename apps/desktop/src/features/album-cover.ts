@@ -30,3 +30,39 @@ export function shiftAlbumCover(cover: AlbumCover, photo: Pick<Photo, 'width' | 
     offsetY: shiftOffset(cover.offsetY, dy, photo.height * scale - frame.height),
   };
 }
+
+/** Render the complete source around the crop; ordinary cards still use albumCoverStyle. */
+export function albumCoverStageStyle(cover: AlbumCover, photo: Pick<Photo, 'width' | 'height'>): CSSProperties {
+  const ratio = photo.width / photo.height;
+  const width = Math.max(1, ratio / 1.5) * cover.zoom;
+  const height = Math.max(1, 1.5 / ratio) * cover.zoom;
+  return {
+    ...albumCoverStyle(cover),
+    '--album-stage-width': `${width * 100}%`,
+    '--album-stage-height': `${height * 100}%`,
+    '--album-stage-left': `${(1 - width) * cover.offsetX * 100}%`,
+    '--album-stage-top': `${(1 - height) * cover.offsetY * 100}%`,
+  } as CSSProperties;
+}
+
+export function resetAlbumCover(photoId: string): AlbumCover {
+  return { photoId, offsetX: .5, offsetY: .5, zoom: 1 };
+}
+
+/** Keep the same source point at the crop center, until an image edge constrains it. */
+export function zoomAlbumCover(cover: AlbumCover, photo: Pick<Photo, 'width' | 'height'>, zoom: number): AlbumCover {
+  const nextZoom = Math.max(1, Math.min(3, zoom));
+  if (nextZoom === cover.zoom) return cover;
+  const ratio = photo.width / photo.height;
+  const offset = (value: number, baseSize: number) => {
+    const before = baseSize * cover.zoom;
+    const after = baseSize * nextZoom;
+    if (after <= 1) return .5;
+    const sourceCenter = (.5 + (before - 1) * value) / before;
+    return Math.max(0, Math.min(1, (sourceCenter * after - .5) / (after - 1)));
+  };
+  return { ...cover, zoom: nextZoom,
+    offsetX: offset(cover.offsetX, Math.max(1, ratio / 1.5)),
+    offsetY: offset(cover.offsetY, Math.max(1, 1.5 / ratio)),
+  };
+}

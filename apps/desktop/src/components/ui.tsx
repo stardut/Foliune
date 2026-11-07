@@ -32,7 +32,7 @@ export function Modal({ title, children, onClose, closeDisabled = false, wide = 
     const dismissModal = presentModal(dialog!);
     return () => { dismissModal(); previous?.focus(); };
   }, []);
-  return <dialog ref={ref} aria-labelledby={titleId} className={`modal ${wide ? 'modal-wide' : ''}`} onCancel={(event) => { event.preventDefault(); if (!closeDisabled) onClose?.(); }} onClick={(event) => { if (!closeDisabled && event.target === event.currentTarget) onClose?.(); }}>
+  return <dialog ref={ref} aria-labelledby={titleId} className={`modal ${wide ? 'modal-wide' : ''}`} onCancel={(event) => event.preventDefault()}>
     <div className="modal-header"><h2 id={titleId}>{title}</h2>{onClose && <IconButton label="关闭" onClick={onClose} disabled={closeDisabled}><X size={18} /></IconButton>}</div>{children}
   </dialog>;
 }

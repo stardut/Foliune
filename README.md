@@ -4,6 +4,7 @@
   <p><strong>For photographs worth returning to.</strong></p>
   <p>献给值得反复回看的照片。</p>
   <p>中文 · <a href="README.en.md">English</a></p>
+  <p><a href="https://stardut.github.io/Foliune/">访问官网</a></p>
 </div>
 
 <br />

@@ -131,7 +131,7 @@ export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }:
     onPointerMove={reveal} onPointerDown={reveal} onFocusCapture={reveal} onBlurCapture={reveal}
     onCancel={(event) => {
       event.preventDefault();
-      if (settings) closeSettings(); else onClose();
+      if (settings) closeSettings();
     }} onKeyDown={(event) => {
       if (event.defaultPrevented || event.nativeEvent.isComposing) return;
       if (event.key === 'Escape' && (settings || event.repeat)) {

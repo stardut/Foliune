@@ -1,3 +1,4 @@
+import type { ContextMenuPosition } from './use-context-menu';
 import { presentModal } from '../lib/modal-stack';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -24,7 +25,7 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
   photos: Photo[]; initialPhotoId: string; context: string; busy: boolean;
   onClose: (visiblePhotoId: string | undefined) => void; onRelink: (photo: Photo) => Promise<void>; entrySource?: ReviewEntrySource; returnLabel?: string;
   fullscreen?: 'direct' | 'available';
-  onPhotoMenu?: (photo: Photo, at: { x: number; y: number }, trigger: HTMLElement, review: ReviewPhotoMenu) => void;
+  onPhotoMenu?: (photo: Photo, at: ContextMenuPosition, trigger: HTMLElement, review: ReviewPhotoMenu) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -193,7 +194,7 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
     }
     screen.toggle();
   }
-  function openPhotoMenu(at: { x: number; y: number }, trigger: HTMLElement) {
+  function openPhotoMenu(at: ContextMenuPosition, trigger: HTMLElement) {
     if (!onPhotoMenu || !menuPhoto || images.outgoing || screen.transitioning || isPhotoMenuTracking()) return;
     const openedFor = request.current;
     const valid = () => !!dismissReview.current && request.current === openedFor
@@ -224,7 +225,7 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
       event.preventDefault();
       if (onPhotoMenu && isPhotoMenuTracking()) return;
       if (visibleInfoKey.current) { closeInfo(); infoTrigger.current?.focus({ preventScroll: true }); }
-      else if (!screen.exit()) closeReview();
+      else screen.exit(() => true);
     }}
     onKeyDown={(event) => {
       if (onPhotoMenu && isPhotoMenuTracking()) { event.preventDefault(); event.stopPropagation(); return; }
@@ -233,7 +234,7 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
       }
       if (event.key === 'Escape') {
         event.preventDefault(); event.stopPropagation();
-        if (!event.repeat && !screen.exit()) closeReview();
+        if (!event.repeat) screen.exit(() => true);
         return;
       }
       const browsing = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
@@ -283,11 +284,11 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
         </div>
       </header>
     </div>}
-    <div ref={stage} className="photo-review-stage" role={onPhotoMenu ? 'group' : undefined} tabIndex={onPhotoMenu ? 0 : -1} aria-label={`${context}，照片预览，左右键切换，${screen.fullscreen ? 'F 或 Esc 退出全屏' : 'Esc 返回'}`} aria-busy={images.waiting}
+    <div ref={stage} className="photo-review-stage" role={onPhotoMenu ? 'group' : undefined} tabIndex={onPhotoMenu ? 0 : -1} aria-label={`${context}，照片预览，左右键切换，${screen.fullscreen ? 'F 或 Esc 退出全屏' : '使用返回按钮返回'}`} aria-busy={images.waiting}
       aria-keyshortcuts={onPhotoMenu ? 'ContextMenu Shift+F10' : undefined}
       onContextMenu={onPhotoMenu ? (event) => {
         event.preventDefault(); event.stopPropagation();
-        openPhotoMenu({ x: event.clientX, y: event.clientY }, event.currentTarget);
+        openPhotoMenu({ x: event.clientX, y: event.clientY, source: 'mouse' }, event.currentTarget);
       } : undefined}
       onKeyDown={onPhotoMenu ? (event) => {
         if (event.target !== event.currentTarget || event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey
@@ -295,7 +296,7 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
         event.preventDefault(); event.stopPropagation();
         if (event.repeat) return;
         const rect = event.currentTarget.getBoundingClientRect();
-        openPhotoMenu({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, event.currentTarget);
+        openPhotoMenu({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, source: 'position' }, event.currentTarget);
       } : undefined}>
       {current ? <PhotoReviewImage state={images} controller={controller} onRelink={onRelink} busy={busy} onEntryZoom={entrySource ? stopEntry : undefined} fullscreen={screen.fullscreen} /> : !screen.fullscreen && <p role="status">当前结果中没有这张照片，请返回照片墙。</p>}
     </div>

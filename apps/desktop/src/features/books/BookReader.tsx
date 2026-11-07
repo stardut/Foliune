@@ -45,8 +45,7 @@ export function BookReader({ version, photos, title, initialPageIndex, onClose, 
   }, []);
 
   return <dialog ref={dialog} className="book-reader" aria-labelledby={titleId}
-    onCancel={(event) => { event.preventDefault(); onClose(); }}
-    onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    onCancel={(event) => event.preventDefault()}
     onKeyDown={(event) => {
       const target = event.target;
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || !total || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement

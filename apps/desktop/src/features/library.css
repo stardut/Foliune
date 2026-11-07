@@ -96,15 +96,34 @@
 .album-cover .image-unavailable { height: auto; align-items: center; }
 .album-cover .missing-photo { max-height: 100%; overflow: auto; padding: 16px; font-size: 12px; }
 .album-cover .missing-photo p { margin-bottom: 0; }
-.modal:has(> .album-cover-editor) { width: min(620px, calc(100vw - 48px), max(340px, calc(150dvh - 350px))); }
-.album-cover-editor-frame { border-radius: 10px; user-select: none; }
+.modal:has(> .album-cover-editor) { width: min(1040px, calc(100vw - 48px)); }
+.album-cover-editor-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; align-items: center; }
+.album-cover-editor-main { min-width: 0; }
+.album-cover-editor-stage { position: relative; aspect-ratio: 3 / 2; overflow: hidden; border-radius: 10px; background: #141517; isolation: isolate; }
+.album-cover-editor-frame { position: absolute; inset: 10%; width: 80%; height: 80%; overflow: visible; background: transparent; user-select: none; }
 .album-cover-editor-frame[data-editable] { cursor: grab; touch-action: none; }
 .album-cover-editor-frame[data-editable][data-dragging] { cursor: grabbing; }
-.album-cover-editor-frame img { pointer-events: none; }
-.album-cover-editor-frame .image-asset:not([data-image-pending]) > img { background-color: #fff; }
-.album-cover-zoom { flex-direction: row; align-items: center; gap: 12px; margin-top: 14px; }
-.album-cover-zoom input { width: min(170px, 55%); }
-.album-cover-zoom span { font-variant-numeric: tabular-nums; }
+.album-cover-editor-frame:focus-visible { outline: none; }
+.album-cover-editor-frame:focus-visible .album-cover-crop-outline { outline: 1px solid var(--focus); outline-offset: 3px; }
+.album-cover-editor-frame .image-asset > img { pointer-events: none; width: var(--album-stage-width); height: var(--album-stage-height); left: var(--album-stage-left); top: var(--album-stage-top); object-fit: fill; }
+.album-cover-crop-outline { position: absolute; inset: 0; pointer-events: none; border: 1px solid #ffffffa8; box-shadow: 0 0 0 1000px #08090b9c; }
+.album-cover-thirds { position: absolute; inset: 0; background: linear-gradient(to right, transparent calc(100% / 3 - .5px), #ffffff63 calc(100% / 3 - .5px), #ffffff63 calc(100% / 3 + .5px), transparent calc(100% / 3 + .5px), transparent calc(200% / 3 - .5px), #ffffff63 calc(200% / 3 - .5px), #ffffff63 calc(200% / 3 + .5px), transparent calc(200% / 3 + .5px)), linear-gradient(to bottom, transparent calc(100% / 3 - .5px), #ffffff63 calc(100% / 3 - .5px), #ffffff63 calc(100% / 3 + .5px), transparent calc(100% / 3 + .5px), transparent calc(200% / 3 - .5px), #ffffff63 calc(200% / 3 - .5px), #ffffff63 calc(200% / 3 + .5px), transparent calc(200% / 3 + .5px)); }
+.album-cover-editor-tools { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
+.album-cover-zoom { flex: 1; flex-direction: row; align-items: center; gap: 12px; margin: 0; }
+.album-cover-zoom input { flex: 1; width: 0; min-width: 32px; }
+.album-cover-zoom span { width: 4ch; font-variant-numeric: tabular-nums; }
+.album-cover-editor-tools .album-cover-preview-toggle { display: none; }
+.album-cover-card-preview { min-width: 0; }
+.album-cover-card-preview .album-open { transition: none; }
+.album-cover-card-preview .album-open:hover { transform: none; background: var(--album-caption); border-color: var(--edge-light); box-shadow: var(--cover-shadow); }
+@media (max-width: 1100px) {
+  /* Reserve vertical room for the modal header, controls and save actions. */
+  .modal:has(> .album-cover-editor) { width: min(620px, calc(100vw - 32px), max(340px, calc(150dvh - 420px))); }
+  .album-cover-editor-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .album-cover-editor-tools .album-cover-preview-toggle { display: inline-flex; }
+  .album-cover-card-preview { display: none; width: min(260px, 100%); justify-self: center; }
+  .album-cover-card-preview[data-expanded] { display: block; }
+}
 .album-cover-editor > .form-error { margin-top: 12px; }
 .album-cover-editor > .form-actions { margin-top: 12px; padding-top: 8px; }
 .album-cover-save { min-inline-size: 10em; white-space: nowrap; }

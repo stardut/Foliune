@@ -28,49 +28,73 @@ export function AlbumCoverImage({ groupId, photo, cover }: { groupId: string; ph
   useEffect(() => {
     const preview = previewRef.current;
     const image = highResolutionRef.current;
+    setReady(false);
     if (!isDesktop() || !preview || !image) return;
     const expectedCover = offsetX !== undefined && offsetY !== undefined && zoom !== undefined ? { photoId, offsetX, offsetY, zoom } : null;
-    let cancelLoad: (() => void) | undefined;
     let disposed = false;
-    const observer = new IntersectionObserver((entries) => {
-      if (disposed) return;
+    let status: 'idle' | 'queued' | 'loading' | 'ready' | 'failed' = 'idle';
+    let url: string | undefined;
+    const releaseImage = () => {
+      if (!url) return;
+      image.removeAttribute('src');
+      URL.revokeObjectURL(url);
+      url = undefined;
+    };
+    const load = async () => {
+      status = 'loading';
+      try {
+        const bytes = await readAlbumCover(groupId, photoId, originalPath, thumbnailPath, expectedCover);
+        if (disposed) return;
+        url = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
+        image.src = url;
+        await image.decode();
+        if (!disposed) { status = 'ready'; setReady(true); }
+      } catch {
+        if (!disposed) { status = 'failed'; releaseImage(); }
+      }
+    };
+    const onIntersection = (entries: IntersectionObserverEntry[]) => {
       if (!entries[entries.length - 1].isIntersecting) {
-        cancelLoad?.();
-        cancelLoad = undefined;
-        setReady(false);
+        // Drop only work that has not started. A read/decode and its successful
+        // result belong to this mounted cover, even while it is offscreen.
+        if (status === 'queued') { pendingCovers.delete(load); status = 'idle'; }
+        if (status === 'failed') status = 'idle';
         return;
       }
-      if (cancelLoad) return;
-      let active = true;
-      let url: string | undefined;
-      const releaseImage = () => {
-        if (!url) return;
-        image.removeAttribute('src');
-        URL.revokeObjectURL(url);
-        url = undefined;
-      };
-      const load = async () => {
-        try {
-          const bytes = await readAlbumCover(groupId, photoId, originalPath, thumbnailPath, expectedCover);
-          if (!active) return;
-          url = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
-          image.src = url;
-          await image.decode();
-          if (active) setReady(true);
-        } catch {
-          if (active) releaseImage();
-        }
-      };
-      cancelLoad = () => {
-        active = false;
-        pendingCovers.delete(load);
-        releaseImage();
-      };
+      if (status !== 'idle') return;
+      status = 'queued';
       pendingCovers.add(load);
       loadPendingCovers();
-    }, { root: preview.closest('main'), rootMargin: '160px 0px' });
-    observer.observe(preview);
-    return () => { disposed = true; observer.disconnect(); cancelLoad?.(); };
+    };
+    const main = preview.closest('main');
+    let observer: IntersectionObserver | undefined;
+    let viewportHeight = -1;
+    const measure = () => {
+      if (disposed) return;
+      const nextHeight = main ? main.clientHeight : window.innerHeight;
+      if (nextHeight === viewportHeight) return;
+      viewportHeight = nextHeight;
+      observer?.disconnect();
+      // IntersectionObserver percentages use root width, so express one screen
+      // above and below the scrolling main in measured pixels.
+      const current = new IntersectionObserver((entries) => {
+        if (!disposed && observer === current) onIntersection(entries);
+      }, { root: main, rootMargin: `${viewportHeight}px 0px` });
+      observer = current;
+      current.observe(preview);
+    };
+    const resize = new ResizeObserver(measure);
+    if (main) resize.observe(main);
+    window.addEventListener('resize', measure);
+    measure();
+    return () => {
+      disposed = true;
+      observer?.disconnect();
+      resize.disconnect();
+      window.removeEventListener('resize', measure);
+      pendingCovers.delete(load);
+      releaseImage();
+    };
   }, [groupId, photoId, originalPath, thumbnailPath, offsetX, offsetY, zoom]);
 
   return <div ref={previewRef} className="album-cover-preview">

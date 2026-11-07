@@ -24,7 +24,7 @@ import { wallReviewSource, type ReviewEntrySource } from './review-entry';
 import { SinglePhotoView, type SinglePhotoCursor } from './SinglePhotoView';
 import { sortAlbumPhotos, sortLibraryAlbums, workPhotoSections, type AlbumSort, type PhotoSort, type WorkView } from './library-photo-order';
 import { isPhotoMenuTracking, usePhotoMenu, type PhotoMenuAction } from './use-photo-menu';
-import { useContextMenu } from './use-context-menu';
+import { useContextMenu, type ContextMenuPosition } from './use-context-menu';
 import { SocialWorkspace } from './social/SocialWorkspace';
 import { CollageWorkspace } from './collage/CollageWorkspace';
 import { COLLAGE_MAX_PHOTOS } from './collage/collage-layout';
@@ -397,7 +397,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
   function toggleAllSelection() {
     if (!busy && !importDisabled) setSelected(allSelected ? [] : [...photoIds]);
   }
-  function showAlbumMenu(group: Group, at: { x: number; y: number }, trigger: HTMLElement) {
+  function showAlbumMenu(group: Group, at: ContextMenuPosition, trigger: HTMLElement) {
     const context = menuContext;
     const target = () => albumMenuState.current.albumIndex?.byGroupId.get(group.id);
     const allowed = () => albumMenuState.current.context === context && !albumMenuState.current.busy && !!target();
@@ -454,7 +454,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     } catch { /* Error is already visible. */ }
   }
   const importButton = currentGroup ? <button type="button" className="button button-primary" onClick={() => void importFiles()} disabled={busy || importDisabled}><ImagePlus size={15} />{busy ? '处理中…' : '导入照片'}</button> : undefined;
-  function showPhotoMenu(photo: Photo | null, at: { x: number; y: number }, trigger: HTMLElement, review?: ReviewPhotoMenu) {
+  function showPhotoMenu(photo: Photo | null, at: ContextMenuPosition, trigger: HTMLElement, review?: ReviewPhotoMenu) {
     const ids = photo && (review || !selectedIds.has(photo.id)) ? [photo.id] : selectedInPhotoOrder();
     if (!ids.length) return;
     const single = photo || (ids.length === 1 ? photos.find((item) => item.id === ids[0]) : undefined);
@@ -533,7 +533,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
       </>} /> : !photos.length && status === 'discarded' ? <EmptyState title="没有已废弃的照片" description="从当前相簿废弃的照片会保留在这里。" /> : !photos.length && currentGroup ? <EmptyState title="相簿为空" description={discardedCount ? '可在“已废弃”中恢复照片。' : undefined} action={importButton} /> : canvas()}
     <SelectionBar count={albumHome ? 0 : currentSelection.length} busy={busy || importDisabled} onClear={clearSelectionFromBar} onBook={() => setAddingToBook(selectedInPhotoOrder())} onMore={(at, trigger) => showPhotoMenu(null, at, trigger)} onCollage={currentGroup && space !== 'search' && currentSelection.length >= 2 ? () => openCollage(selectedInPhotoOrder()) : undefined} onSocial={currentGroup && space !== 'search' ? () => openSocial(selectedInPhotoOrder()) : undefined} />
     {preview && <PhotoReview photos={photos} initialPhotoId={preview.id} entrySource={preview.entrySource} fullscreen={preview.directFullscreen ? 'direct' : 'available'} context={space === 'search' ? '搜索结果' : currentGroup?.name || albumHomeTitle} busy={busy || importDisabled} onClose={closePreview} onRelink={onRelink} onPhotoMenu={showPhotoMenu} returnLabel={singleAlbum ? '返回相簿' : undefined} />}
-    {currentGroup && coverPhoto && <AlbumCoverDialog photo={coverPhoto} initialCover={currentGroup.cover} busy={busy || importDisabled}
+    {currentGroup && coverPhoto && <AlbumCoverDialog photo={coverPhoto} albumName={currentGroup.name} photoCount={currentAlbum?.photos.length ?? 0} initialCover={currentGroup.cover} busy={busy || importDisabled}
       onClose={() => setCoverTarget(null)} onSave={(cover) => saveCover(currentGroup.id, cover)} />}
     {detail && <PhotoDetail key={detail.id} photo={detail} busy={busy} onClose={() => setDetailId(null)} onRelink={onRelink} onDirtyChange={onDirtyChange} extension={detailExtension?.(detail)} onSave={async (patch) => { onSnapshot(await run(() => api.updatePhoto(detail.id, patch))); setDetailId(null); onFeedback('已保存照片信息'); }} />}
     {groupForm && <GroupForm group={groupForm === 'new' ? undefined : groupForm}

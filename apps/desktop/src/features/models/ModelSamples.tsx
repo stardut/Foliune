@@ -4,7 +4,7 @@ import { ImageOff } from 'lucide-react';
 import type { Photo } from '../../lib/types';
 import { PhotoImage } from '../../components/PhotoImage';
 import { PhotoReview } from '../PhotoReview';
-import { useContextMenu, type ContextMenuAction } from '../use-context-menu';
+import { useContextMenu, type ContextMenuAction, type ContextMenuPosition } from '../use-context-menu';
 
 export function ModelSamples({ ids, coverId, photos, disabled, onChange, onCover, onRelink }: {
   ids: string[]; coverId: string | null; photos: Photo[]; disabled: boolean;
@@ -17,7 +17,7 @@ export function ModelSamples({ ids, coverId, photos, disabled, onChange, onCover
   const context = JSON.stringify([ids, coverId, disabled]);
   const current = useRef({ context, disabled }); current.current = { context, disabled };
   const menu = useContextMenu('photo', context, setError);
-  function open(id: string, at: { x: number; y: number }, trigger: HTMLElement) {
+  function open(id: string, at: ContextMenuPosition, trigger: HTMLElement) {
     if (disabled) return;
     const index = ids.indexOf(id);
     const allowed = () => current.current.context === context && !current.current.disabled;
@@ -43,14 +43,14 @@ export function ModelSamples({ ids, coverId, photos, disabled, onChange, onCover
         onContextMenu(event: MouseEvent<HTMLElement>) {
           event.preventDefault();
           event.stopPropagation();
-          open(id, { x: event.clientX, y: event.clientY }, event.currentTarget);
+          open(id, { x: event.clientX, y: event.clientY, source: 'mouse' }, event.currentTarget);
         },
         onKeyDown(event: KeyboardEvent<HTMLElement>) {
           if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
           event.preventDefault();
           event.stopPropagation();
           const bounds = event.currentTarget.getBoundingClientRect();
-          open(id, { x: bounds.left + 16, y: bounds.top + 16 }, event.currentTarget);
+          open(id, { x: bounds.left + 16, y: bounds.top + 16, source: 'position' }, event.currentTarget);
         },
       };
       return <article className="model-sample" key={id}>

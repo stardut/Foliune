@@ -16,12 +16,12 @@ const { createElement: h, act } = require('react');
 const { createRoot } = require('react-dom/client');
 const { build } = createRequire(require.resolve('vite/package.json'))('esbuild');
 const bundle = await build({
-  entryPoints: [resolve('apps/desktop/src/features/AlbumOverview.tsx')],
+  stdin: { contents: "export { AlbumOverview } from './AlbumOverview'; export { AlbumCoverImage } from './AlbumCoverImage';", resolveDir: resolve('apps/desktop/src/features') },
   bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external', write: false, logLevel: 'silent',
 });
 const module = { exports: {} };
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(require, module, module.exports);
-const { AlbumOverview } = module.exports;
+const { AlbumOverview, AlbumCoverImage } = module.exports;
 const photo = id => ({ id, library: 'collection', title: id, originalName: `${id}.jpg`, originalPath: `/original/${id}.jpg`, thumbnailPath: `/thumb/${id}.jpg`, originalUrl: `/original/${id}.jpg`, thumbnailUrl: `/thumb/${id}.jpg`, originalAvailable: true, thumbnailAvailable: true, width: 100, height: 150, tags: [], regions: [], annotation: '', source: '', capturedAt: null, location: '', project: '', importedAt: '' });
 const groups = ['first', 'second', 'empty'].map(id => ({ id, library: 'collection', name: id, description: '', capacity: null, createdAt: '' }));
 const albums = groups.map((group, index) => ({ group, photos: index < 2 ? [photo(group.id)] : [] }));
@@ -38,9 +38,10 @@ async function scenario(busy, run, initial = {}) {
   };
   const render = (state = initial) => act(async () => root.render(h(AlbumOverview, { albums, busy,
     onOpen: id => calls.open.push(id), onMenu: (...args) => calls.menu.push(args), onRetry: job => calls.retry.push(job.id), ...state })));
+  const renderImage = props => act(async () => root.render(h(AlbumCoverImage, props)));
   try {
     await render();
-    await run({ calls, container, dispatch, render });
+    await run({ calls, container, dispatch, render, renderImage });
   } finally { await act(async () => root.unmount()); container.remove(); }
 }
 
@@ -49,7 +50,7 @@ test('普通相簿封面、标题及空封面右键管理目标正确，且不�
     const cards = [...container.querySelectorAll('button.album-open')];
     for (const [target, card, group] of [[cards[1].querySelector('img'), cards[1], groups[1]], [cards[0].querySelector('h2'), cards[0], groups[0]], [cards[2].querySelector('.album-empty'), cards[2], groups[2]]]) {
       assert.equal((await dispatch(target, 'contextmenu')).defaultPrevented, true);
-      assert.deepEqual(calls.menu.at(-1), [group, { x: 81, y: 99 }, card]);
+      assert.deepEqual(calls.menu.at(-1), [group, { x: 81, y: 99, source: 'mouse' }, card]);
     }
     assert.deepEqual(calls.open, []);
     await act(async () => cards[1].click());
@@ -64,7 +65,7 @@ test('相簿键盘菜单沿用焦点卡片位置与目标，普通按键不触�
     regular.getBoundingClientRect = () => ({ left: 50, top: 60 });
     for (const options of [{ key: 'ContextMenu' }, { key: 'F10', shiftKey: true }]) {
       assert.equal((await dispatch(regular, 'keydown', options)).defaultPrevented, true);
-      assert.deepEqual(calls.menu.at(-1), [groups[1], { x: 74, y: 92 }, regular]);
+      assert.deepEqual(calls.menu.at(-1), [groups[1], { x: 74, y: 92, source: 'position' }, regular]);
     }
     assert.equal(calls.menu.length, 2);
     assert.equal((await dispatch(regular, 'keydown', { key: 'F10' })).defaultPrevented, false);
@@ -115,6 +116,7 @@ test('新相簿占位原地成为可打开的卡片，失败只重试自己的�
 
 function mockCoverRead(t) {
   const observers = new Map();
+  const resizeObservers = [];
   const requests = [];
   const decoded = new Map();
   const blobs = new Map();
@@ -136,7 +138,12 @@ function mockCoverRead(t) {
     observe(target) { this.target = target; observers.set(target, this); }
     disconnect() { observers.delete(this.target); }
   };
-  t.after(() => { delete globalThis.isTauri; delete globalThis.IntersectionObserver; delete window.__TAURI_INTERNALS__; });
+  globalThis.ResizeObserver = class {
+    constructor(callback) { this.callback = callback; resizeObservers.push(this); }
+    observe(target) { this.target = target; }
+    disconnect() { this.disconnected = true; }
+  };
+  t.after(() => { delete globalThis.isTauri; delete globalThis.IntersectionObserver; delete globalThis.ResizeObserver; delete window.__TAURI_INTERNALS__; });
   t.mock.method(URL, 'createObjectURL', (blob) => {
     const url = `blob:cover-${blobs.size}`;
     blobs.set(url, blob);
@@ -156,10 +163,45 @@ function mockCoverRead(t) {
     return (...states) => act(async () => observer.callback(states.map(isIntersecting => ({ target, isIntersecting }))));
   };
   const near = (image, isIntersecting = true) => visibility(image)(isIntersecting);
-  return { near, visibility, requests, decoded, blobs, released };
+  return { near, visibility, requests, decoded, blobs, released, observers, resizeObservers };
 }
 
-test('高清封面仅在接近视口时读取，限制并发并丢弃离屏请求', async (t) => {
+test('高清封面预加载上下各一屏，以滚动容器高度更新且不重建已加载图片', async (t) => {
+  const { near, requests, decoded, blobs, released, observers, resizeObservers } = mockCoverRead(t);
+  let height = 720;
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => height });
+  t.after(() => Object.defineProperty(HTMLElement.prototype, 'clientHeight', descriptor));
+  await scenario(false, async ({ container }) => {
+    const image = container.querySelector('.album-cover-hd');
+    const preview = image.parentElement;
+    const first = observers.get(preview);
+    assert.equal(first.options.root, container);
+    assert.equal(first.options.rootMargin, '720px 0px');
+    assert.ok(resizeObservers.some(observer => observer.target === container));
+    await near(image);
+    await act(async () => requests[0].resolve(new ArrayBuffer(3)));
+    await act(async () => decoded.get('blob:cover-0').resolve());
+    height = 480;
+    await act(async () => resizeObservers.forEach(observer => observer.callback([])));
+    assert.equal(observers.get(preview).options.rootMargin, '480px 0px');
+    await act(async () => first.callback([{ target: preview, isIntersecting: false }]));
+    await near(image);
+    assert.equal(image.hidden, false);
+    assert.equal(image.getAttribute('src'), 'blob:cover-0');
+    height = 640;
+    await act(async () => window.dispatchEvent(new Event('resize')));
+    assert.equal(observers.get(preview).options.rootMargin, '640px 0px');
+    await near(image);
+    assert.equal(requests.length, 1);
+    assert.equal(blobs.size, 1);
+    assert.deepEqual(released, []);
+  }, { albums: [albums[0]] });
+  assert.ok(resizeObservers.every(observer => observer.disconnected));
+  assert.deepEqual(released, ['blob:cover-0']);
+});
+
+test('高清封面仅在接近视口时读取，限制并发并只丢弃离屏排队请求', async (t) => {
   const { near, visibility, requests, decoded, released } = mockCoverRead(t);
   const cards = ['first', 'second', 'third', 'fourth'].map(id => ({ group: { ...groups[0], id }, photos: [photo(id)] }));
   await scenario(false, async ({ container }) => {
@@ -185,15 +227,19 @@ test('高清封面仅在接近视口时读取，限制并发并丢弃离屏请�
     await act(async () => requests[1].resolve(new ArrayBuffer(3)));
     await near(images[1], false);
     await act(async () => decoded.get('blob:cover-1').resolve());
-    assert.equal(images[1].hidden, true);
-    assert.equal(images[1].getAttribute('src'), null);
-    assert.equal(images[1].previousElementSibling.querySelector('img').alt, 'second');
-    assert.deepEqual(released, ['blob:cover-1']);
+    assert.equal(images[1].hidden, false, '正在解码的封面离屏后仍完成高清交接');
+    assert.equal(images[1].getAttribute('src'), 'blob:cover-1');
+    assert.equal(images[1].previousElementSibling, null);
+    await near(images[1]);
+    await near(images[0], false);
+    await near(images[0]);
+    assert.equal(requests.length, 3, '离屏回滚复用已解码封面');
+    assert.deepEqual(released, []);
     await act(async () => requests[2].resolve(new ArrayBuffer(3)));
     await act(async () => decoded.get('blob:cover-2').reject(new Error('无法解码 JPEG')));
     assert.equal(images[3].previousElementSibling.querySelector('img').alt, 'fourth');
   }, { albums: cards });
-  assert.deepEqual(released, ['blob:cover-1', 'blob:cover-2', 'blob:cover-0']);
+  assert.deepEqual(released, ['blob:cover-2', 'blob:cover-0', 'blob:cover-1']);
 });
 
 test('离线缩略图与高清缓存均可展示，修订与废弃封面淘汰旧请求', async (t) => {
@@ -243,4 +289,76 @@ test('离线缩略图与高清缓存均可展示，修订与废弃封面淘汰�
     assert.equal(thumb(), null);
     assert.match(container.querySelector('.missing-photo').textContent, /原图文件缺失/);
   }, { albums: [{ group, photos: [first, selected] }] });
+});
+
+test('同一封面组件依赖变化立即回到缩略图，过期读取和解码不污染新封面', async (t) => {
+  const { near, requests, decoded, blobs, released } = mockCoverRead(t);
+  await scenario(false, async ({ container, renderImage }) => {
+    const first = photo('first');
+    const props = { groupId: 'album', photo: first, cover: null };
+    await renderImage(props);
+    const image = container.querySelector('.album-cover-hd');
+    const thumb = () => container.querySelector('.image-asset > img');
+    await near(image);
+    await act(async () => requests[0].resolve(new ArrayBuffer(3)));
+    await act(async () => decoded.get('blob:cover-0').resolve());
+    assert.equal(image.hidden, false);
+    const cover = { photoId: first.id, offsetX: .4, offsetY: .7, zoom: 2 };
+    await renderImage({ ...props, cover });
+    assert.equal(container.querySelector('.album-cover-hd'), image, '原展示节点复用时也必须重置ready');
+    assert.equal(image.hidden, true);
+    assert.equal(image.getAttribute('src'), null);
+    assert.equal(thumb().getAttribute('src'), first.thumbnailUrl);
+    assert.deepEqual(released, ['blob:cover-0']);
+    await near(image);
+    assert.deepEqual(requests[1].args.expectedCover, cover);
+    await act(async () => requests[1].resolve(new ArrayBuffer(3)));
+    const updated = { ...first, originalPath: '/changed-original.jpg', thumbnailPath: '/changed-thumb.jpg', thumbnailUrl: '/changed-thumb.jpg' };
+    await renderImage({ ...props, photo: updated });
+    await near(image);
+    await act(async () => decoded.get('blob:cover-1').resolve());
+    assert.equal(image.hidden, true, '旧版本解码迟到不得显示新版本');
+    assert.equal(thumb().getAttribute('src'), updated.thumbnailUrl);
+    const next = { ...props, groupId: 'new-album', photo: photo('next') };
+    await renderImage(next);
+    await near(image);
+    await act(async () => requests[2].resolve(new ArrayBuffer(3)));
+    assert.equal(blobs.size, 2, '依赖变化后的旧读取不再分配URL');
+    assert.equal(requests[3].args.groupId, next.groupId);
+    assert.equal(requests[3].args.photoId, next.photo.id);
+    assert.equal(requests[3].args.expectedCover, null);
+    await act(async () => requests[3].resolve(new ArrayBuffer(3)));
+    await act(async () => decoded.get('blob:cover-2').resolve());
+    assert.equal(image.hidden, false);
+    assert.equal(image.getAttribute('src'), 'blob:cover-2');
+  }, { albums: [] });
+  assert.deepEqual(released, ['blob:cover-0', 'blob:cover-1', 'blob:cover-2']);
+});
+
+test('首页卸载清除排队项，旧工作区的读解码完成前仍共用两个并发名额', async (t) => {
+  const { near, visibility, requests, decoded, blobs, released } = mockCoverRead(t);
+  const cards = ['one', 'two', 'three', 'four'].map(id => ({ group: { ...groups[0], id }, photos: [photo(id)] }));
+  await scenario(false, async ({ container, render }) => {
+    const images = [...container.querySelectorAll('.album-cover-hd')];
+    for (const image of images) await near(image);
+    assert.deepEqual(requests.map(({ args }) => args.groupId), ['one', 'two']);
+    const staleVisibility = visibility(images[2]);
+    await render({ albums: [{ group: { ...groups[0], id: 'next' }, photos: [photo('next')] }] });
+    const next = container.querySelector('.album-cover-hd');
+    await near(next);
+    await staleVisibility(true);
+    assert.equal(requests.length, 2, '旧工作区读取未结束前新工作区继续排队');
+    await act(async () => requests[0].resolve(new ArrayBuffer(3)));
+    assert.deepEqual(requests.map(({ args }) => args.groupId), ['one', 'two', 'next'], '旧排队项均已清除');
+    assert.equal(blobs.size, 0, '已卸载旧请求不创建URL');
+    await act(async () => requests[2].resolve(new ArrayBuffer(3)));
+    await act(async () => requests[1].resolve(new ArrayBuffer(3)));
+    assert.equal(blobs.size, 1);
+    assert.equal(next.hidden, true);
+    await render({ albums: [] });
+    assert.deepEqual(released, ['blob:cover-0']);
+    await act(async () => decoded.get('blob:cover-0').resolve());
+    assert.equal(container.querySelector('.album-cover-hd'), null, '卸载后解码完成不重新挂载封面');
+    assert.deepEqual(released, ['blob:cover-0'], '迟到解码不重复释放');
+  }, { albums: cards });
 });

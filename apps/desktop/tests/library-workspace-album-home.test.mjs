@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
 
 const require = createRequire(resolve('apps/desktop/package.json'));
 const { Window } = require('happy-dom');
@@ -350,6 +351,9 @@ test('相簿封面以右击照片取景，取消保留旧封面，保存后卡�
       assert.equal(action('cover'), undefined);
 
       await openCrop();
+      assert.equal(container.querySelector('.album-cover-card-preview h2').textContent, 'collection-album');
+      assert.equal(container.querySelector('.album-cover-card-preview .album-count').textContent, '2张');
+      assert.equal(container.querySelector('.album-cover-card-preview img').getAttribute('src'), '/source.jpg');
       await pressKey(frame(), 'ArrowDown');
       assert.equal(frame().style.getPropertyValue('--album-cover-position'), '50% 53.2%');
       await click(cancel());
@@ -371,6 +375,12 @@ test('相簿封面以右击照片取景，取消保留旧封面，保存后卡�
         zoom().dispatchEvent(new Event('input', { bubbles: true }));
       });
       assert.equal(zoom().value, '2');
+      assert.equal(frame().style.getPropertyValue('--album-cover-position'), '50% 85.71428571428571%', '缩放保持取景中心，不沿用旧偏移比例');
+      await pointer('pointerdown', 120);
+      assert.ok(frame().querySelector('.album-cover-thirds'));
+      await pointer('pointermove', -400);
+      await pointer('pointerup', -400);
+      assert.equal(frame().querySelector('.album-cover-thirds'), null);
       assert.equal(frame().style.getPropertyValue('--album-cover-position'), '50% 100%');
       await click(save());
       assert.deepEqual(update.mock.calls[0].arguments, [groupId, { cover }]);
@@ -396,7 +406,7 @@ test('相簿封面以右击照片取景，取消保留旧封面，保存后卡�
       await renderSnapshot(saved);
       await openCrop();
       assert.equal(zoom().value, '2');
-      const previewStyle = frame().getAttribute('style');
+      const previewStyle = container.querySelector('.album-cover-card-preview .album-cover').getAttribute('style');
       await click(cancel());
 
       await click(container.querySelector('[aria-label="返回收藏相簿"]'));
@@ -418,6 +428,134 @@ test('相簿封面以右击照片取景，取消保留旧封面，保存后卡�
   } finally {
     delete globalThis.captureAlbumTestMenu;
     delete globalThis.albumCoverTest;
+  }
+});
+
+test('封面缩放手势、重置及读取失败保持可达的关闭路径', async (t) => {
+  t.mock.method(window.Element.prototype, 'getBoundingClientRect', () => new window.DOMRect(0, 0, 300, 200));
+  let actions;
+  globalThis.captureAlbumTestMenu = (menu) => { actions = menu.actions; };
+  try {
+    await scenario('collection', mixed, async ({ container }) => {
+      await act(async () => container.querySelector('.album-open').click());
+      const frame = () => container.querySelector('.album-cover-editor-frame');
+      const zoom = () => container.querySelector('.album-cover-zoom input');
+      const reset = () => [...container.querySelectorAll('dialog button')].find((button) => button.textContent === '重置');
+      const save = () => container.querySelector('dialog .button-primary');
+      const open = async () => {
+        const trigger = container.querySelector('[data-photo-id="collection-active"] button');
+        await act(async () => { trigger.focus(); trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })); });
+        await act(async () => actions.find((item) => item.id === 'cover').run());
+      };
+      const wheel = async (ctrlKey, deltaY) => {
+        const event = Object.assign(new window.WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true }), { ctrlKey });
+        await act(async () => frame().dispatchEvent(event));
+        return event;
+      };
+      const gesture = async (type, scale = 1) => {
+        const event = Object.assign(new Event(type, { bubbles: true, cancelable: true }), { scale });
+        await act(async () => frame().dispatchEvent(event));
+        assert.equal(event.defaultPrevented, true);
+      };
+      await open();
+      assert.equal(zoom().disabled, true);
+      assert.equal(reset().disabled, true);
+      await wheel(true, -100);
+      assert.equal(zoom().value, '1', '读取期间不接受缩放');
+      await act(async () => frame().querySelector('img').dispatchEvent(new Event('load')));
+      assert.equal((await wheel(false, -100)).defaultPrevented, false, '普通滚动不改构图或劫持页面');
+      assert.equal(zoom().value, '1');
+      assert.equal((await wheel(true, -100)).defaultPrevented, true);
+      assert.ok(Math.abs(Number(zoom().value) - Math.exp(.5)) < 1e-10);
+      await act(async () => reset().click());
+      assert.equal(zoom().value, '1');
+      await gesture('gesturestart');
+      await gesture('gesturechange', 1.5);
+      assert.equal(zoom().value, '1.5');
+      await wheel(true, -100);
+      assert.equal(zoom().value, '1.5', '同一次原生捏合不叠加浏览器wheel事件');
+      await gesture('gesturechange', 2);
+      assert.equal(zoom().value, '2', 'WebKit scale相对于本次手势起点');
+      await gesture('gesturechange', 10);
+      assert.equal(zoom().value, '3');
+      await gesture('gestureend');
+      await wheel(true, 100);
+      assert.ok(Number(zoom().value) < 3);
+      await pressKey(frame(), 'ArrowDown');
+      assert.notEqual(frame().style.getPropertyValue('--album-cover-position'), '50% 50%');
+      await act(async () => reset().click());
+      assert.equal(frame().style.getPropertyValue('--album-cover-position'), '50% 50%');
+      assert.equal(zoom().value, '1');
+      const preview = container.querySelector('.album-cover-preview-toggle');
+      await act(async () => preview.click());
+      assert.equal(preview.getAttribute('aria-expanded'), 'true');
+      assert.equal(container.querySelector('.album-cover-card-preview').dataset.expanded, 'true');
+      await act(async () => preview.click());
+      assert.equal(preview.getAttribute('aria-expanded'), 'false');
+      const coverDialog = container.querySelector('dialog');
+      const cancelEvent = new Event('cancel', { cancelable: true });
+      await act(async () => { coverDialog.click(); coverDialog.dispatchEvent(cancelEvent); });
+      assert.equal(cancelEvent.defaultPrevented, true);
+      assert.equal(container.querySelector('dialog'), coverDialog);
+      await act(async () => coverDialog.querySelector('[aria-label="关闭"]').click());
+      assert.equal(container.querySelector('dialog'), null);
+      assert.equal(document.activeElement, container.querySelector('[data-photo-id="collection-active"] button'));
+      await open();
+      await act(async () => frame().querySelector('img').dispatchEvent(new Event('error')));
+      assert.match(frame().textContent, /图片无法读取/);
+      assert.equal(save().disabled, true);
+      assert.equal(reset().disabled, true);
+      await gesture('gesturestart');
+      await gesture('gesturechange', 2);
+      await gesture('gestureend');
+      assert.equal(zoom().value, '1');
+      await act(async () => container.querySelector('dialog button[aria-label="关闭"]').click());
+      assert.equal(container.querySelector('dialog'), null);
+    });
+  } finally { delete globalThis.captureAlbumTestMenu; }
+});
+
+test('封面在930×620窄窗默认收起预览，展开可滚动，宽窗常驻预览', async () => {
+  const viewport = { width: window.innerWidth, height: window.innerHeight };
+  const style = document.createElement('style');
+  const baseStyles = await readFile('apps/desktop/src/index.css', 'utf8');
+  // index.css imports library.css before its own base control rules.
+  style.textContent = await readFile('apps/desktop/src/features/library.css', 'utf8') + '\n' + baseStyles.replace(/^@import .*$/gm, '');
+  document.head.append(style);
+  window.happyDOM.setWindowSize({ width: 930, height: 620 });
+  let actions;
+  globalThis.captureAlbumTestMenu = (menu) => { actions = menu.actions; };
+  try {
+    await scenario('collection', mixed, async ({ container }) => {
+      await act(async () => container.querySelector('.album-open').click());
+      await act(async () => container.querySelector('[data-photo-id="collection-active"] button').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+      await act(async () => actions.find((item) => item.id === 'cover').run());
+      const dialog = container.querySelector('dialog');
+      const preview = container.querySelector('.album-cover-card-preview');
+      const toggle = container.querySelector('.album-cover-preview-toggle');
+      const display = (element) => window.getComputedStyle(element).display;
+      assert.equal(display(toggle), 'inline-flex', '原生最小宽度附近可到达预览入口');
+      assert.equal(display(preview), 'none', '窄窗首次打开只呈现取景与操作');
+      assert.equal(window.getComputedStyle(dialog).overflowY, 'auto', '展开或错误增加高度时允许滚动到保存按钮');
+      await act(async () => container.querySelector('.album-cover-editor-frame img').dispatchEvent(new Event('load')));
+      await act(async () => toggle.click());
+      assert.equal(display(preview), 'block');
+      assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+      await act(async () => toggle.click());
+      assert.equal(display(preview), 'none');
+    });
+    window.happyDOM.setWindowSize({ width: 1200, height: 800 });
+    await scenario('collection', mixed, async ({ container }) => {
+      await act(async () => container.querySelector('.album-open').click());
+      await act(async () => container.querySelector('[data-photo-id="collection-active"] button').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+      await act(async () => actions.find((item) => item.id === 'cover').run());
+      assert.equal(window.getComputedStyle(container.querySelector('.album-cover-preview-toggle')).display, 'none');
+      assert.equal(window.getComputedStyle(container.querySelector('.album-cover-card-preview')).display, 'block', '宽窗默认呈现卡片');
+    });
+  } finally {
+    delete globalThis.captureAlbumTestMenu;
+    style.remove();
+    window.happyDOM.setWindowSize(viewport);
   }
 });
 

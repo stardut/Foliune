@@ -215,3 +215,28 @@ test('预读失败只在目标进入时暂停并可重新定位，返回后迟�
     assert.equal(container.querySelector('dialog'), null);
   });
 });
+
+test('播放器点击空白与 Escape/cancel 均不退出，设置可收起且返回仍可用', async (t) => {
+  await scenario(t, async ({ container, stage, click }) => {
+    const dialog = container.querySelector('dialog');
+    const implicitClose = async () => {
+      const cancel = new Event('cancel', { cancelable: true });
+      await act(async () => {
+        dialog.click();
+        stage().click();
+        stage().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        dialog.dispatchEvent(cancel);
+      });
+      assert.equal(cancel.defaultPrevented, true);
+      assert.equal(dialog.open, true);
+      assert.equal(dialog.isConnected, true);
+    };
+    await implicitClose();
+    await click('播放与音乐设置');
+    assert(container.querySelector('.player-settings'));
+    await implicitClose();
+    assert.equal(container.querySelector('.player-settings'), null);
+    await act(async () => container.querySelector('.player-top .text-button').click());
+    assert.equal(container.querySelector('dialog'), null);
+  });
+});

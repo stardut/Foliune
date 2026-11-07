@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Search, Settings2 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import * as api from './lib/api';
@@ -9,6 +9,7 @@ import type { ModelProfile } from './lib/model-types';
 import { listPlans } from './lib/planning-api';
 import type { ShootPlan } from './lib/planning-types';
 import type { LibraryKind, LibrarySnapshot, Photo } from './lib/types';
+import { isWorkspaceVisible, readWorkspaceVisibility, saveWorkspaceVisibility, type OptionalWorkspace } from './lib/workspace-visibility';
 import { Busy, EmptyState, Modal, WorkspaceHeader } from './components/ui';
 import { useToast } from './components/ToastProvider';
 import { PrimaryNavigation } from './components/PrimaryNavigation';
@@ -27,8 +28,8 @@ import type { WorkDirectoryCommit } from './lib/work-directory-api';
 type Space = LibraryKind | 'books' | 'models' | 'planning' | 'search' | 'settings';
 type SearchDetail = { space: 'books'; book: BookDetail } | { space: 'models'; model: ModelProfile } | { space: 'planning'; plan: ShootPlan };
 type SearchTarget = { space: SearchDetail['space']; id: string };
-const spaces: { id: Space; label: string }[] = [{ id: 'collection', label: '收藏' }, { id: 'work', label: '作品' }, { id: 'books', label: '画册' }, { id: 'models', label: '模特' }, { id: 'planning', label: '策划' }, { id: 'search', label: '搜索' }, { id: 'settings', label: '设置' }];
-const navigationSpaces = spaces.filter((item) => item.id !== 'search' && item.id !== 'settings');
+const spaces: { id: Space; label: string }[] = [{ id: 'work', label: '作品' }, { id: 'collection', label: '收藏' }, { id: 'books', label: '画册' }, { id: 'models', label: '模特' }, { id: 'planning', label: '策划' }, { id: 'search', label: '搜索' }, { id: 'settings', label: '设置' }];
+const primarySpaces = spaces.filter((item) => item.id !== 'search' && item.id !== 'settings');
 const primaryNavigationDurationMs = 360;
 const reducedMotionQuery = '(prefers-reduced-motion: reduce)';
 const empty: LibrarySnapshot = { photos: [], groups: [], memberships: [] };
@@ -43,6 +44,8 @@ export default function App() {
   const [error, setError] = useState('');
   const toast = useToast();
   const [space, setSpace] = useState<Space>('collection');
+  const [workspaceVisibility, setWorkspaceVisibility] = useState(readWorkspaceVisibility);
+  const navigationSpaces = useMemo(() => primarySpaces.filter(({ id }) => isWorkspaceVisible(id, workspaceVisibility)), [workspaceVisibility]);
   const previousSpace = useRef(space);
   const searchSession = useRef<SearchSession>({ ...initialSearchSession });
   const [searchTarget, setSearchTarget] = useState<SearchTarget | null>(null);
@@ -120,7 +123,7 @@ export default function App() {
       motionPreference.removeEventListener('change', onMotionPreferenceChange);
       animation.cancel();
     };
-  }, [space, loading, ready]);
+  }, [space, loading, ready, navigationSpaces]);
   useEffect(() => {
     if (!api.isDesktop()) return;
     let disposed = false;
@@ -162,12 +165,27 @@ export default function App() {
     changeSpace(next, target);
   }
   function changeSpace(next: Space, target?: SearchTarget) {
+    if (!isWorkspaceVisible(next, workspaceVisibility)) return;
     setSpace(next); setSearchTarget(target ?? null);
     if (mainRef.current) mainRef.current.scrollTop = 0;
     if (next === 'collection' || next === 'work') setNavigationRevision((revision) => revision + 1);
     setError(''); setPendingSpace(null);
   }
   function feedback(text: string, failure = false) { toast({ title: text, status: failure ? 'error' : 'success' }); }
+  function changeWorkspaceVisibility(workspace: OptionalWorkspace, visible: boolean) {
+    setWorkspaceVisibility((current) => ({ ...current, [workspace]: visible }));
+    if (!visible) {
+      const session = searchSession.current;
+      const categoryHidden = session.category === workspace;
+      if (categoryHidden) session.category = 'all';
+      if (categoryHidden || session.focusResult?.startsWith(`${workspace}:`)) {
+        session.focusResult = undefined;
+        session.scrollTop = 0;
+      }
+    }
+    try { saveWorkspaceVisibility(workspace, visible); }
+    catch { feedback('无法记住工作区显示设置', true); }
+  }
   async function relinkPhoto(photo: Photo) {
     setRelinkBusy(true); setError('');
     try {
@@ -185,7 +203,7 @@ export default function App() {
   }
   function renderWorkspace(result?: SearchDetail) {
     const libraryProps = { snapshot, onSnapshot: setSnapshot, onFeedback: feedback, importDisabled: relinkBusy, onRelink: relinkPhoto, onPlay: openPlayer, onDirtyChange: setPhotoDirty, onBusyChange: setPhotoBusy };
-    if (space === 'search') return <SearchWorkspace {...libraryProps} session={searchSession.current}
+    if (space === 'search') return <SearchWorkspace {...libraryProps} session={searchSession.current} workspaceVisibility={workspaceVisibility}
       onOpenBook={(id) => navigate('books', { space: 'books', id })}
       onOpenModel={(model) => navigate('models', { space: 'models', id: model.id })}
       onOpenPlan={(plan) => navigate('planning', { space: 'planning', id: plan.id })} />;
@@ -199,7 +217,8 @@ export default function App() {
       initialModel={result?.space === 'models' ? result.model : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
     if (space === 'planning') return <PlanningWorkspace photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setPlanningDirty} onBusyChange={setPlanningBusy}
       initialPlan={result?.space === 'planning' ? result.plan : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
-    return <SettingsWorkspace snapshot={snapshot} directory={workDirectory} onRestored={setSnapshot} onBusyChange={setSettingsBusy} />;
+    return <SettingsWorkspace snapshot={snapshot} directory={workDirectory} onRestored={setSnapshot} onBusyChange={setSettingsBusy}
+      workspaceVisibility={workspaceVisibility} onWorkspaceVisibilityChange={changeWorkspaceVisibility} />;
   }
   return <div className={`app-shell ${space === 'collection' || space === 'work' || space === 'search' ? 'gallery-shell' : ''}`} aria-busy={loading || workspaceBusy}>
     <header className="app-header" data-tauri-drag-region>

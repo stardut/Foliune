@@ -71,7 +71,7 @@ const bundle = await build({
           useLayoutEffect(() => { onLayoutReady?.(); }, [onLayoutReady]);
           useLayoutEffect(() => { globalThis.captureAlbumTestWallReveal?.(onReveal); }, [onReveal]);
           useLayoutEffect(() => { if (restore) globalThis.captureAlbumTestWallRestore?.(restore); }, [restore]);
-          return h('div', { 'data-testid': 'photo-canvas', 'data-section-headings': sections?.map(([heading]) => heading).join(',') }, photos.map((photo, index) =>
+          return h('div', { className: 'virtual-photo-wall', 'data-testid': 'photo-canvas', 'data-section-headings': sections?.map(([heading]) => heading).join(',') }, photos.map((photo, index) =>
             h('span', { key: photo.id, 'data-photo-id': photo.id, 'data-photo-index': index },
               h('button', { className: 'photo-interaction-target', 'aria-pressed': selected.length ? selected.includes(photo.id) : undefined,
                 onContextMenu: (event) => onMenu(photo, { x: 0, y: 0 }, event.currentTarget),
@@ -138,6 +138,17 @@ async function scenario(space, input, run, options = {}) {
 }
 
 for (const library of ['collection', 'work']) {
+  test(`${library} 从相簿返回首页时恢复原滚动位置`, async () => {
+    await scenario(library, mixed, async ({ container }) => {
+      container.scrollTop = 240;
+      await act(async () => container.querySelector('.album-open').click());
+      assert.equal(container.scrollTop, 0, '从相簿顶部开始浏览');
+      container.scrollTop = 90;
+      await act(async () => container.querySelector('button[aria-label^="返回"][aria-label$="相簿"]').click());
+      assert.equal(container.scrollTop, 240, '回到进入前的相簿列表位置');
+    }, { withMain: true });
+  });
+
   test(`${library} 首页有已归属、废弃和无归属照片时，只呈现对应真实相簿并保持单击与返回`, async () => {
     await scenario(library, mixed, async ({ container }) => {
       const cards = [...container.querySelectorAll('button.album-open')];
@@ -364,8 +375,20 @@ test('相簿封面以右击照片取景，取消保留旧封面，保存后卡�
       await click(save());
       assert.deepEqual(update.mock.calls[0].arguments, [groupId, { cover }]);
       assert.equal(cancel().disabled, true);
+      const dialog = container.querySelector('dialog');
+      assert.equal(dialog.open, true);
+      assert.match(dialog.querySelector('[role="status"]')?.textContent ?? '', /保存/);
+      assert.ok(save().querySelector('.spin'));
+      assert.equal(save().disabled, true);
+      assert.equal(zoom().disabled, true);
+      await act(async () => dialog.dispatchEvent(new Event('cancel', { cancelable: true })));
+      assert.equal(container.querySelector('dialog'), dialog);
+      await click(save());
+      assert.equal(update.mock.callCount(), 1);
       await act(async () => settleSave.reject(new Error('封面写入失败')));
       assert.equal(container.querySelector('dialog [role="alert"]').textContent, '封面写入失败');
+      assert.equal(save().disabled, false);
+      assert.equal(save().querySelector('.spin'), null);
       assert.equal(frame().style.getPropertyValue('--album-cover-top'), '-100%');
       await click(save());
       await act(async () => settleSave.resolve(saved));
@@ -925,6 +948,52 @@ test('中文输入法预编辑不改已提交查询、分类与滚动，组词�
   });
 });
 
+test('相簿冷开等待首屏或短上限，旧就绪信号不能启动下一次过渡', async (t) => {
+  const animations = trackAnimations(t);
+  let wallReady;
+  let alreadyReady = false;
+  globalThis.captureAlbumTestWallReveal = (callback) => {
+    wallReady = callback;
+    if (alreadyReady) callback?.([]);
+  };
+  try {
+    await scenario('collection', mixed, async ({ container }) => {
+      const open = () => act(async () => container.querySelector('.album-open').click());
+      const back = () => act(async () => container.querySelector('button[aria-label="返回收藏相簿"]').click());
+      await open();
+      const held = animations.slice(-2);
+      assert.equal(container.querySelector('.album-detail-header h1').textContent, 'collection-album');
+      assert.ok(held.every(({ paused, handle }) => paused && handle.currentTime === 0));
+      const stale = wallReady;
+      await back();
+      assert.ok(held.every(({ canceled }) => canceled));
+
+      await open();
+      const next = animations.slice(-2);
+      stale([]);
+      assert.ok(next.every(({ paused, plays }) => paused && plays === 0));
+      wallReady([container.querySelector('[data-photo-index]')]);
+      wallReady([]);
+      assert.ok(next.every(({ plays }) => plays === 1));
+
+      await back();
+      await open();
+      const timed = animations.slice(-2);
+      assert.ok(timed.every(({ paused }) => paused));
+      await new Promise((resolve) => window.setTimeout(resolve, 220));
+      assert.ok(timed.every(({ plays }) => plays === 1));
+      wallReady([]);
+      assert.ok(timed.every(({ plays }) => plays === 1));
+
+      await back();
+      alreadyReady = true;
+      await open();
+      const immediate = animations.slice(-2);
+      assert.ok(immediate.every(({ paused }) => !paused), '子组件提交中已经报告排版就绪时立即播放');
+    }, { withMain: true });
+  } finally { delete globalThis.captureAlbumTestWallReveal; }
+});
+
 test('相簿单张按既有顺序浏览，菜单和弹窗隔离方向键，搜索保留墙面模式', async () => {
   const input = {
     ...mixed,
@@ -1166,27 +1235,73 @@ test('单张保留已显示照片至解码就绪，快速反向、舞台菜单�
   }
 });
 
-test('相簿交接只播放一次，重复视图不播放，后续动作取消旧动画', async (t) => {
-  let wallReveal;
+function trackAnimations(t) {
   const animations = [];
-  const measure = window.Element.prototype.getBoundingClientRect;
-  t.mock.method(window.Element.prototype, 'getBoundingClientRect', function () {
-    if (!this.matches('.album-item')) return measure.call(this);
-    return new window.DOMRect(0, this.previousElementSibling ? 800 : 80, 100, 100);
-  });
   t.mock.method(window.Element.prototype, 'animate', function (frames, options) {
-    const animation = { element: this, frames, options, canceled: false };
-    animations.push(animation);
-    return { finished: Promise.resolve(), cancel: () => { animation.canceled = true; } };
+    const animation = { element: this, frames, options, scrollTop: this.closest('main')?.scrollTop, canceled: false, paused: false, plays: 0 };
+    let finish;
+    const finished = new Promise((resolve) => { finish = resolve; });
+    const handle = {
+      finished,
+      pause: () => { animation.paused = true; },
+      play: () => { animation.plays++; },
+      cancel: () => { animation.canceled = true; finish(); },
+    };
+    animations.push(Object.assign(animation, { handle }));
+    return handle;
   });
+  return animations;
+}
+
+test('相簿进出时标题与内容同向滑入，恢复滚动后再开始，快速往返取消旧动画', async (t) => {
+  const animations = trackAnimations(t);
+  await scenario('collection', mixed, async ({ container, renderSnapshot }) => {
+    const open = (id) => act(async () => container.querySelector(`.album-open[aria-label^="打开相簿 ${id}，"]`).click());
+    const back = () => act(async () => container.querySelector('button[aria-label="返回收藏相簿"]').click());
+    const assertSlide = (offset, scrollTop, selectors) => {
+      const batch = animations.slice(-2);
+      assert.deepEqual(batch.map(({ element }) => element), selectors.map((selector) => container.querySelector(selector)));
+      for (const animation of batch) {
+        assert.deepEqual(animation.frames, [{ transform: `translateX(${offset}px)` }, { transform: 'translateX(0)' }]);
+        assert.equal(animation.options.duration, 240);
+        assert.equal(animation.scrollTop, scrollTop);
+      }
+      return batch;
+    };
+
+    assert.deepEqual(animations, []);
+    container.scrollTop = 240;
+    await open('collection-album');
+    const entering = assertSlide(20, 0, ['.album-detail-header', '.virtual-photo-wall, .album-single-view']);
+    assert.equal(container.querySelector('.album-overview'), null);
+    await renderSnapshot();
+    assert.equal(animations.length, 2);
+
+    await back();
+    assert.ok(entering.every(({ canceled }) => canceled));
+    assert.equal(container.querySelector('.album-detail-header'), null);
+    const returning = assertSlide(-20, 240, ['.workspace-home-intro', '.album-overview']);
+
+    await open('collection-empty');
+    assert.ok(returning.every(({ canceled }) => canceled));
+    assertSlide(20, 0, ['.album-detail-header', '.empty-state']);
+    assert.match(container.querySelector('.empty-state').textContent, /相簿为空/);
+    assert.equal(animations.length, 6);
+  }, { withMain: true });
+});
+
+test('相簿内切换视图仍只淡入，重复点击当前视图不播放，返回取消淡入', async (t) => {
+  let wallReveal;
+  const animations = trackAnimations(t);
   globalThis.captureAlbumTestWallReveal = (callback) => { wallReveal = callback; };
   try {
     await scenario('collection', mixed, async ({ container, renderSnapshot }) => {
-      Object.defineProperty(container, 'clientHeight', { value: 600 });
       const button = (label) => container.querySelector(`button[aria-label="${label}"]`);
-      assert.deepEqual(animations, []);
       await act(async () => container.querySelector('.album-open').click());
-      if (!wallReveal) await act(async () => button('展览').click());
+      const entering = animations.slice();
+      const target = button('展览').getAttribute('aria-pressed') === 'true' ? button('总览') : button('展览');
+      await act(async () => target.click());
+      assert.ok(entering.every(({ canceled }) => canceled));
       const first = wallReveal;
       const tile = container.querySelector('[data-photo-index]');
       const beforeWall = animations.length;
@@ -1208,10 +1323,54 @@ test('相簿交接只播放一次，重复视图不播放，后续动作取消�
       assert.equal(single.canceled, false);
       await act(async () => button('返回收藏相簿').click());
       assert.equal(single.canceled, true);
-      assert.equal(animations.at(-1).element, container.querySelector('.album-item'));
-      assert.equal(animations.filter(({ element }) => element.matches('.album-item')).length, 1);
+      assert.equal(animations.at(-1).element, container.querySelector('.album-overview'));
     }, { withMain: true });
   } finally { delete globalThis.captureAlbumTestWallReveal; }
+});
+
+test('减少动态效果会停止相簿滑入，并跳过之后的过渡', async (t) => {
+  const animations = trackAnimations(t);
+  const preference = new window.EventTarget();
+  preference.matches = false;
+  const matchMedia = window.matchMedia;
+  t.mock.method(window, 'matchMedia', (query) => query === '(prefers-reduced-motion: reduce)' ? preference : matchMedia.call(window, query));
+  await scenario('work', mixed, async ({ container }) => {
+    await act(async () => container.querySelector('.album-open').click());
+    assert.equal(animations.length, 2);
+    preference.matches = true;
+    preference.dispatchEvent(Object.assign(new Event('change'), { matches: true }));
+    assert.ok(animations.every(({ canceled }) => canceled));
+
+    await act(async () => container.querySelector('button[aria-label="返回作品相簿"]').click());
+    assert.equal(animations.length, 2);
+    assert.ok(container.querySelector('.album-overview'));
+    assert.equal(container.querySelector('.album-detail-header'), null);
+  }, { withMain: true });
+});
+
+test('相簿更多与列表排序在菜单定位前结束位移', async (t) => {
+  const animations = trackAnimations(t);
+  const measured = [];
+  const measure = window.Element.prototype.getBoundingClientRect;
+  t.mock.method(window.Element.prototype, 'getBoundingClientRect', function () {
+    if (this.matches('button[aria-label="相簿更多操作"], button[aria-label^="相簿排序 ·"]')) {
+      const animation = animations.findLast(({ element }) => element === this.closest('header'));
+      measured.push(animation?.canceled);
+    }
+    return measure.call(this);
+  });
+  await scenario('collection', mixed, async ({ container }) => {
+    await act(async () => container.querySelector('.album-open').click());
+    await act(async () => container.querySelector('button[aria-label="相簿更多操作"]').click());
+    assert.ok(document.querySelector('[role="menu"][aria-label="相簿操作"]'));
+    await act(async () => container.querySelector('button[aria-label="返回收藏相簿"]').click());
+    await act(async () => container.querySelector('button[aria-label^="相簿排序 ·"]').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+    ));
+    assert.ok(document.querySelector('[role="menu"][aria-label="相簿排序"]'));
+    assert.ok(measured.length >= 2);
+    assert.ok(measured.every(Boolean));
+  }, { withMain: true });
 });
 
 test('搜索改词取消未就绪的视图过渡，改回原词也不补播', async (t) => {

@@ -4,7 +4,9 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 type Mode = 'windowed' | 'entering' | 'fullscreen' | 'exiting';
-type Operation = { target: boolean; issued: boolean; deadlineReached: boolean };
+// A completed handoff closes the review itself instead of returning to it.
+type AfterExit = () => boolean;
+type Operation = { target: boolean; issued: boolean; deadlineReached: boolean; afterExit?: AfterExit };
 
 // The window command can resolve before the system Space finishes resizing.
 // Reconcile after its resize settles, with a bounded check if none was emitted.
@@ -17,7 +19,7 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
   const [mode, setMode] = useState<Mode>(() => available && entry === 'direct' ? 'entering' : 'windowed');
   const [error, setError] = useState('');
   const finishExit = useRef(onExit);
-  const controls = useRef<{ toggle: () => void; exit: () => boolean } | null>(null);
+  const controls = useRef<{ toggle: () => void; exit: (afterExit?: AfterExit) => boolean } | null>(null);
   useLayoutEffect(() => { finishExit.current = onExit; }, [onExit]);
   useLayoutEffect(() => {
     if (!available) return;
@@ -39,20 +41,21 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
     function settle(fullscreen: boolean) {
       clearTimeout(transitionTimer);
       const requestedExit = operation?.target === false;
+      const afterExit = operation?.afterExit;
       operation = null;
       const wasFullscreen = nativeFullscreen;
       nativeFullscreen = fullscreen;
       if (!fullscreen) ownsFullscreen = false;
       if (wasFullscreen && !fullscreen) {
         restoringFocus = true;
-        void restoreAfterExit(requestedExit);
+        void restoreAfterExit(requestedExit, afterExit);
         return;
       }
       setMode(fullscreen ? 'fullscreen' : 'windowed');
       if (fullscreen && exitAfterEntry) change(false);
       exitAfterEntry = false;
     }
-    async function restoreAfterExit(requestedExit: boolean) {
+    async function restoreAfterExit(requestedExit: boolean, afterExit?: AfterExit) {
       // AppKit can make the window itself first responder after leaving a Space.
       try {
         if ((requestedExit || await host.isFocused()) && !disposed) await getCurrentWebview().setFocus();
@@ -62,12 +65,13 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
       if (disposed) return;
       restoringFocus = false;
       setMode('windowed');
-      finishExit.current(direct);
+      if (!afterExit?.()) finishExit.current(direct);
     }
     function fail(target: boolean) {
       if (disposed) return;
       if (target) direct = false;
       exitAfterEntry = false;
+      operation = null;
       setError(target ? '无法进入全屏。' : '无法退出全屏。');
       settle(nativeFullscreen);
     }
@@ -103,9 +107,9 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
       if (!disposed && !operation) settle(nativeFullscreen);
     })();
 
-    function change(target: boolean) {
+    function change(target: boolean, afterExit?: AfterExit) {
       if (disposed || restoringFocus || operation) return;
-      const next = { target, issued: false, deadlineReached: false };
+      const next: Operation = { target, issued: false, deadlineReached: false, afterExit };
       operation = next;
       setError('');
       setMode(target ? 'entering' : 'exiting');
@@ -120,14 +124,14 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
         transitionTimer = waitsForAppKit
           ? setTimeout(() => fail(target), macTransitionLimitMs)
           : setTimeout(() => { next.deadlineReached = true; void reconcile(); }, transitionLimitMs);
-      }).catch(() => fail(target));
+      }).catch(() => { if (operation === next) fail(target); });
     }
     controls.current = {
       toggle: () => { if (!operation) change(!nativeFullscreen); },
-      exit: () => {
+      exit: (afterExit) => {
         if (restoringFocus) return true;
         if (operation?.target === true) exitAfterEntry = true;
-        else if (nativeFullscreen && !operation) change(false);
+        else if (nativeFullscreen && !operation) change(false, afterExit);
         else if (!operation) return false;
         return true;
       },
@@ -151,6 +155,6 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
   return {
     available, fullscreen: mode !== 'windowed', transitioning: mode === 'entering' || mode === 'exiting', error,
     toggle: () => controls.current?.toggle(),
-    exit: () => controls.current?.exit() ?? false,
+    exit: (afterExit?: AfterExit) => controls.current?.exit(afterExit) ?? false,
   };
 }

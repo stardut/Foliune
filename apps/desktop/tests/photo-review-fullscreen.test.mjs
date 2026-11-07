@@ -42,7 +42,7 @@ const { PhotoReview, ActualReviewImage } = module.exports;
 
 const photos = ['first', 'middle', 'last'].map(id => ({ id, title: id, originalPath: `/test/${id}.jpg`, originalAvailable: true }));
 
-async function scenario(t, entry, run, { mac = false } = {}) {
+async function scenario(t, entry, run, { mac = false, onPhotoMenu } = {}) {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
   t.mock.getter(window.navigator, 'userAgent', () => mac ? 'Macintosh' : 'Windows');
   const container = document.body.appendChild(document.createElement('div'));
@@ -85,7 +85,7 @@ async function scenario(t, entry, run, { mac = false } = {}) {
   }
   try {
     await act(async () => root.render(h(StrictMode, null, h(PhotoReview, {
-      photos, initialPhotoId: 'middle', context: '相簿', busy: false, onRelink() {}, fullscreen: entry,
+      photos, initialPhotoId: 'middle', context: '相簿', busy: false, onRelink() {}, fullscreen: entry, onPhotoMenu,
       onClose: id => { focusEvents.push('close'); closed.push([id, dialog().open]); },
     }))));
     await run({ dialog, stage, key, tick, nativeResize, nativeDidChange, requests, closed, focusEvents });
@@ -220,4 +220,57 @@ test('macOS 等 AppKit 完成退全屏才恢复键盘焦点', async (t) => {
     await key('Escape');
     assert.deepEqual(closed, [['last', false]]);
   }, { mac: true });
+});
+
+test('大图右键和全屏键盘菜单定位当前照片，操作等原生全屏退场后交接', async (t) => {
+  const menus = [];
+  await scenario(t, 'available', async ({ dialog, stage, key, nativeDidChange, requests, closed, focusEvents }) => {
+    const rightClick = async () => {
+      const click = new window.MouseEvent('contextmenu', { button: 2, clientX: 80, clientY: 120, bubbles: true, cancelable: true });
+      await act(async () => stage().dispatchEvent(click));
+      assert.equal(click.defaultPrevented, true);
+    };
+    await rightClick();
+    assert.equal(menus[0].photo.id, 'middle');
+    assert.deepEqual(menus[0].at, { x: 80, y: 120 });
+    assert.equal(menus[0].trigger, stage());
+    assert.equal(menus[0].review.fullscreen, false);
+    await act(async () => menus[0].review.toggleFullscreen());
+    await nativeDidChange(true);
+    await rightClick();
+    assert.equal(menus[1].photo.id, 'middle');
+    assert.equal(menus[1].review.fullscreen, true);
+    await key('ArrowRight');
+    assert.equal((await key('F10', { shiftKey: true })).defaultPrevented, true);
+    assert.equal(menus[2].photo.id, 'last');
+    assert.equal(menus[2].review.fullscreen, true);
+    assert.equal(dialog().querySelector('header, footer, button'), null);
+    await act(async () => menus[1].review.leaveReview(() => assert.fail('已切换照片，旧菜单不应执行')));
+    assert.deepEqual(requests, [true]);
+    await act(async () => menus[2].review.leaveReview(() => focusEvents.push('action')));
+    assert.deepEqual(requests, [true, false]);
+    assert.deepEqual(focusEvents, []);
+    assert.deepEqual(closed, []);
+    await nativeDidChange(false);
+    assert.deepEqual(closed, [['last', false]]);
+    assert.deepEqual(focusEvents, ['webview', 'close', 'action']);
+  }, { mac: true, onPhotoMenu: (photo, at, trigger, review) => menus.push({ photo, at, trigger, review }) });
+});
+
+test('菜单请求退出全屏失败后，普通退出不会执行旧操作', async (t) => {
+  let menu;
+  await scenario(t, 'direct', async ({ dialog, key, nativeDidChange, requests, closed }) => {
+    await nativeDidChange(true);
+    await key('ContextMenu');
+    const setFullscreen = globalThis.reviewWindow.setFullscreen;
+    globalThis.reviewWindow.setFullscreen = async () => { throw new Error('窗口退出失败'); };
+    await act(async () => menu.leaveReview(() => assert.fail('不应执行旧菜单操作')));
+    assert.equal(dialog().dataset.fullscreen, 'true');
+    assert.deepEqual(closed, []);
+    globalThis.reviewWindow.setFullscreen = setFullscreen;
+    await key('Escape');
+    assert.deepEqual(requests, [true, false]);
+    await nativeDidChange(false);
+    assert.deepEqual(closed, [['middle', false]]);
+  }, { mac: true, onPhotoMenu: (_photo, _at, _trigger, review) => { menu = review; } });
 });

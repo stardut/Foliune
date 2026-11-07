@@ -21,14 +21,47 @@
 
 `robots.txt` 必须位于来源站点根路径，即 `https://stardut.github.io/robots.txt`。本项目只部署 `/Foliune/`，在 `site/` 放置 `robots.txt` 会发布到 `/Foliune/robots.txt`，不能作为域名根规则，因此本项目不添加该文件。若以后需要 robots 规则或 sitemap 声明，应在控制 `stardut.github.io` 根站点的仓库中维护，并检查是否影响同域其他项目；当前通过搜索平台直接提交 sitemap。参见 [Google robots.txt 位置要求](https://developers.google.com/search/docs/crawling-indexing/robots/intro)。
 
-## 首次上线
+## 发布与首次启用
 
-1. 将官网变更合入 `main`，并将 `stardut/Foliune` 仓库设为公开。
-2. 在 GitHub 仓库的 **Settings → Pages → Build and deployment** 中，将 **Source** 设为 **GitHub Actions**。
-3. 在 **Actions → Deploy Foliune website → Run workflow** 中选择 `main` 并运行。工作流只接受公开仓库的 `main`，只上传 `site/`。
-4. 部署成功后，在未登录 GitHub 的浏览器里打开 <https://stardut.github.io/Foliune/>，检查固定中文首页、直接切换英文、两页的图片和导航，以及 macOS 安装包下载；同时检查 canonical、分享元数据和 sitemap 的线上地址。
+[官网工作流](../.github/workflows/pages.yml) 有两个入口：
 
-后续官网更新合入 `main` 后，用同一个工作流手动部署；本轮不修改 workflow，也不自动发布官网。软件安装包继续由现有的 macOS Release 工作流发布，每次发版无需修改或重新部署官网。
+- **版本 tag 推送**：推送稳定版本 tag（`0.5.1` 或 `v0.5.1`）后，发布该次 tag 事件对应提交中的 `site/`，不改用 `main` 的网页内容。版本校验复用软件发布脚本；预发布后缀、构建元数据、前导零及其他非法版本不发布。
+- **手动 main**：在 **Actions → Deploy Foliune website → Run workflow** 选择 `main`。只接受公开仓库的 `main` 手动运行，不接受其他分支或手动选择 tag。
+
+启用前需完成以下仓库设置：
+
+1. 将工作流、校验脚本、测试及官网内容合入 `main`；新版本 tag 必须指向包含这些文件的提交。已有旧 tag 不会自动获得新工作流，重复运行其历史工作流也不会获得本轮的保护。
+2. 将 `stardut/Foliune` 仓库设为公开，并在 **Settings → Pages → Build and deployment** 将 **Source** 设为 **GitHub Actions**。
+3. 在 **Settings → Environments → github-pages → Deployment branches and tags** 中，保留 **Branch `main`**，并增加 **Tag `*.*.*`**（两者类型不同）。该 tag 匹配规则兼容有无 `v` 前缀；真正的稳定版本格式由工作流严格校验。保留已有审批人与其他保护规则，不改成允许所有分支。只允许 `main` 分支时，tag 运行会在环境保护处被拦截，YAML 本身不能解除这个限制。
+4. 设置就绪后，手动运行 `main` 或推送下一个稳定版本 tag。工作流只上传 `site/`，不会打 tag、改版本文件、修改 GitHub 设置或发布安装包。
+5. 部署成功后，在未登录 GitHub 的浏览器里打开 <https://stardut.github.io/Foliune/>，检查固定中文首页、直接切换英文、两页的图片和导航，以及 macOS 安装包下载；同时检查 canonical、分享元数据和 sitemap 的线上地址。
+
+2026-11-07 经授权已配置并回读确认 `github-pages` 环境保留 **Branch `main`**、新增 **Tag `*.*.*`**；Pages 的 Source 为 GitHub Actions，其他环境保护保持不变。tag 自动部署仍需将这些代码合入 `main`，并由包含新工作流的后续 tag 真实运行验证。之前的 GitHub Pages 部署失败不能仅凭本地测试判定已修复。
+
+### 防止旧内容覆盖
+
+所有 tag 和手动发布共用 `github-pages` 并发组，`cancel-in-progress: false` 保留正在进行的发布。GitHub 不保证等待队列的顺序，也可能替换等待中的运行，因此不靠队列顺序判断新旧。在环境审批完成、实际部署之前，校验脚本重新读取远端状态：
+
+- tag 必须仍存在、仍指向本次事件的提交，并且没有更高的稳定版本 tag。按数字版本排序（例如 `0.10.0` 高于 `0.9.9`），不按字符串、tag 创建时间或 Release 发布时间排序；非稳定 tag 不参与比较。
+- 同一最新版本同时存在有/无 `v` 前缀且指向不同提交时，阻止发布并要求先解决歧义。
+- 手动运行必须仍是当前 `main` 提交，并包含最新稳定 tag 的提交。手动运行等待期间 `main` 已更新时，应发起新的 `main` 运行。
+- 新提交必须包含 `github-pages` 环境最后一次成功部署的提交，防止旧 tag 重跑覆盖后续手动发布，以及内容回退或分叉。另从全部成功部署历史保留最高稳定版本水位；即使后续手动发布过 `main`、又删除了较新 tag，也不能用较低版本覆盖已成功部署的较高版本。
+- 因过时而阻挡时，运行摘要说明原因，不调用部署动作，并将该部署 job 标为失败。GitHub 会把成功的 environment job 记录为成功部署，因此不能用“跳过部署步骤但 job 成功”伪造线上基线。API 权限不足、限流、网络故障、提交历史缺失等无法确认安全的情形会失败，不忽略保护继续发布。
+
+这是有意的单向发布策略，不提供自动回滚。若确需退回旧页面，应在当前 `main` 上提交有意的内容恢复，再正常发布；不要强移历史 tag 或绕开保护。保护覆盖采用本工作流的后续运行，不能阻止旧工作流、另一个并发组或手工外部部署覆盖网站。
+
+工作流将权限分开：打包阶段只有 `contents: read`、`pages: read`；部署阶段增加读取源码与部署历史所需的 `contents: read`、`deployments: read`，以及 GitHub Pages 必需的 `pages: write`、`id-token: write`。校验脚本只读 GitHub API，不申请 `contents: write`，不修改环境规则。
+
+官网发布和 macOS 安装包 Release 是独立工作流。tag 推送不等待 DMG 构建完成，官网部署失败也不影响安装包发布；官网上线不代表安装包构建通过。下载区继续读取最新已公开的正式版及有效安装包，因此新 tag 的安装包尚未就绪时仍可显示之前可用的版本。
+
+### 本地验证
+
+```sh
+pnpm test:pages
+pnpm test:release
+```
+
+官网防回退测试已接入 PR/main CI，也在官网打包前执行。测试使用内存 API 响应及独立临时 Git 仓库，覆盖稳定版本、乱序/重跑、tag 移动或删除、main 更新、版本别名冲突、部署历史分页、失败关闭以及真实提交祖先关系；不连接 GitHub，不修改项目 Git 历史，也不部署。它们不能替代 GitHub Actions、环境保护和 Pages 服务的真实运行验证。
 
 下载区在访问时读取 GitHub 最新正式版接口。找到与发布标签对应、已上传且非空的 `Foliune_<版本号>_aarch64.dmg` 后，页面显示该版本号、安装包直链和版本说明。接口请求失败、受限或缺少符合条件的安装包时，主按钮仍会打开 GitHub 最新正式版，可在发布页查看安装包和说明。[接口说明](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) · [GitHub 最新正式版](https://github.com/stardut/Foliune/releases/latest)
 

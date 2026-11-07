@@ -9,6 +9,7 @@
     "build": "pnpm --filter @foliune/desktop build",
     "typecheck": "pnpm --filter @foliune/desktop typecheck",
     "desktop:build": "pnpm --filter @foliune/desktop tauri build --no-bundle",
-    "test:release": "node --test scripts/prepare-release.test.mjs"
+    "test:release": "node --test scripts/prepare-release.test.mjs",
+    "test:pages": "node --test scripts/check-pages-deployment.test.mjs"
   }
 }

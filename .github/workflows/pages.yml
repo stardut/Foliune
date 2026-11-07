@@ -1,26 +1,50 @@
 name: Deploy Foliune website
 
 on:
+  push:
+    tags:
+      - "*.*.*"
   workflow_dispatch:
 
 permissions: {}
 
+# Share one queue for every tag and the manual main entry. Queue ordering is not
+# guaranteed, so the deploy job also rejects stale versions immediately before deployment.
 concurrency:
   group: github-pages
   cancel-in-progress: false
 
 jobs:
   package:
-    if: github.ref == 'refs/heads/main' && github.event.repository.visibility == 'public'
+    if: >-
+      github.event.repository.visibility == 'public' &&
+      ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       pages: read
     steps:
-      - name: Check out website source
+      - name: Check out exact website source
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.3.0"
+
+      - name: Validate version tag
+        if: github.event_name == 'push'
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: node --input-type=module -e 'import { releaseVersion } from "./scripts/prepare-release.mjs"; releaseVersion(process.env.TAG_NAME);'
+
+      - name: Test website deployment guard
+        run: node --test scripts/check-pages-deployment.test.mjs
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
@@ -33,13 +57,37 @@ jobs:
   deploy:
     needs: package
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
+      contents: read
+      deployments: read
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Check out deployment guard and history
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.3.0"
+
+      # Runs after environment approval, inside the shared queue. No write API is
+      # used by the guard; unreadable tags/history/statuses fail closed.
+      - name: Reject stale website deployments
+        id: guard
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-pages-deployment.mjs
+
       - name: Deploy website
+        if: steps.guard.outputs.deploy == 'true'
         id: deployment
         uses: actions/deploy-pages@v4

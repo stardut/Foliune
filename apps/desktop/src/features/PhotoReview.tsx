@@ -9,13 +9,22 @@ import { PhotoReviewInfo } from './PhotoReviewInfo';
 import { startReviewEntry, type ReviewEntrySource } from './review-entry';
 import { IconButton } from '../components/ui';
 import { useDismiss } from '../components/beui/hooks/use-dismiss';
+import { isPhotoMenuTracking } from './use-photo-menu';
 import { useReviewFullscreen } from './use-review-fullscreen';
 import './photo-review.css';
 
-export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, onRelink, entrySource, fullscreen, returnLabel = '返回照片墙' }: {
+export interface ReviewPhotoMenu {
+  fullscreen: boolean;
+  canToggleFullscreen: boolean;
+  toggleFullscreen: () => void;
+  leaveReview: (action: () => void, allowed?: () => boolean) => void;
+}
+
+export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, onRelink, entrySource, fullscreen, onPhotoMenu, returnLabel = '返回照片墙' }: {
   photos: Photo[]; initialPhotoId: string; context: string; busy: boolean;
   onClose: (visiblePhotoId: string | undefined) => void; onRelink: (photo: Photo) => Promise<void>; entrySource?: ReviewEntrySource; returnLabel?: string;
   fullscreen?: 'direct' | 'available';
+  onPhotoMenu?: (photo: Photo, at: { x: number; y: number }, trigger: HTMLElement, review: ReviewPhotoMenu) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -57,6 +66,12 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
   const infoPhoto = current && snapshotPhoto?.originalPath === current.originalPath
     && snapshotPhoto.originalAvailable === current.originalAvailable ? snapshotPhoto : undefined;
   const infoKey = infoPhoto ? JSON.stringify([infoPhoto.id, infoPhoto.originalPath, infoPhoto.originalAvailable]) : null;
+  const frame = images.current;
+  const menuPhoto = onPhotoMenu && frame && infoPhoto && !(screen.fullscreen && frame.kind === 'error')
+    && infoPhoto.originalUrl === frame.photo.originalUrl && infoPhoto.availability === frame.photo.availability ? infoPhoto : undefined;
+  const menuPhotoKey = menuPhoto ? JSON.stringify([menuPhoto.id, menuPhoto.originalPath, menuPhoto.originalUrl, menuPhoto.originalAvailable, menuPhoto.availability]) : null;
+  const menuState = useRef({ menuPhotoKey, busy, screen });
+  useLayoutEffect(() => { menuState.current = { menuPhotoKey, busy, screen }; });
   const infoOpen = !screen.fullscreen && openInfoKey !== null && openInfoKey === infoKey;
   const closeInfo = useCallback(() => { visibleInfoKey.current = null; setOpenInfoKey(null); reveal(); }, []);
   const dismissOutside = useCallback(() => {
@@ -178,15 +193,41 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
     }
     screen.toggle();
   }
+  function openPhotoMenu(at: { x: number; y: number }, trigger: HTMLElement) {
+    if (!onPhotoMenu || !menuPhoto || images.outgoing || screen.transitioning || isPhotoMenuTracking()) return;
+    const openedFor = request.current;
+    const valid = () => !!dismissReview.current && request.current === openedFor
+      && menuState.current.menuPhotoKey === menuPhotoKey && !menuState.current.busy;
+    const canAct = () => valid() && !menuState.current.screen.transitioning && menuState.current.screen.fullscreen === screen.fullscreen;
+    stopEntry();
+    if (visibleInfoKey.current) closeInfo();
+    onPhotoMenu(menuPhoto, at, trigger, {
+      fullscreen: screen.fullscreen,
+      canToggleFullscreen: screen.available,
+      toggleFullscreen: () => { if (canAct()) toggleFullscreen(); },
+      leaveReview: (action, allowed) => {
+        if (!canAct()) return;
+        const complete = () => {
+          if (!valid() || (allowed && !allowed())) return false;
+          closeReview();
+          action();
+          return true;
+        };
+        if (!screen.exit(complete)) complete();
+      },
+    });
+  }
   return <dialog ref={dialog} className="photo-review" aria-labelledby={titleId} data-controls-hidden={!awake} data-fullscreen={screen.fullscreen || undefined}
     onPointerMove={screen.fullscreen ? undefined : reveal} onPointerDown={screen.fullscreen ? undefined : reveal}
     onFocusCapture={screen.fullscreen ? undefined : reveal} onBlurCapture={screen.fullscreen ? undefined : reveal}
     onCancel={(event) => {
       event.preventDefault();
+      if (onPhotoMenu && isPhotoMenuTracking()) return;
       if (visibleInfoKey.current) { closeInfo(); infoTrigger.current?.focus({ preventScroll: true }); }
       else if (!screen.exit()) closeReview();
     }}
     onKeyDown={(event) => {
+      if (onPhotoMenu && isPhotoMenuTracking()) { event.preventDefault(); event.stopPropagation(); return; }
       if (visibleInfoKey.current && event.key === 'Escape') {
         event.preventDefault(); event.stopPropagation(); closeInfo(); infoTrigger.current?.focus({ preventScroll: true }); return;
       }
@@ -242,7 +283,20 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
         </div>
       </header>
     </div>}
-    <div ref={stage} className="photo-review-stage" tabIndex={-1} aria-label={`${context}，照片预览，左右键切换，${screen.fullscreen ? 'F 或 Esc 退出全屏' : 'Esc 返回'}`} aria-busy={images.waiting}>
+    <div ref={stage} className="photo-review-stage" role={onPhotoMenu ? 'group' : undefined} tabIndex={onPhotoMenu ? 0 : -1} aria-label={`${context}，照片预览，左右键切换，${screen.fullscreen ? 'F 或 Esc 退出全屏' : 'Esc 返回'}`} aria-busy={images.waiting}
+      aria-keyshortcuts={onPhotoMenu ? 'ContextMenu Shift+F10' : undefined}
+      onContextMenu={onPhotoMenu ? (event) => {
+        event.preventDefault(); event.stopPropagation();
+        openPhotoMenu({ x: event.clientX, y: event.clientY }, event.currentTarget);
+      } : undefined}
+      onKeyDown={onPhotoMenu ? (event) => {
+        if (event.target !== event.currentTarget || event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey
+          || (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))) return;
+        event.preventDefault(); event.stopPropagation();
+        if (event.repeat) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        openPhotoMenu({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, event.currentTarget);
+      } : undefined}>
       {current ? <PhotoReviewImage state={images} controller={controller} onRelink={onRelink} busy={busy} onEntryZoom={entrySource ? stopEntry : undefined} fullscreen={screen.fullscreen} /> : !screen.fullscreen && <p role="status">当前结果中没有这张照片，请返回照片墙。</p>}
     </div>
     {!screen.fullscreen && <footer className="photo-review-footer" inert={!awake} aria-hidden={!awake} {...toolbarEvents} data-tauri-drag-region="false">

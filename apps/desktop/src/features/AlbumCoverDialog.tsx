@@ -1,4 +1,5 @@
 import { useCallback, useId, useRef, useState } from 'react';
+import { LoaderCircle } from 'lucide-react';
 import { PhotoImage } from '../components/PhotoImage';
 import { Modal } from '../components/ui';
 import type { AlbumCover, Photo } from '../lib/types';
@@ -17,10 +18,12 @@ export function AlbumCoverDialog({ photo, initialCover, busy, onClose, onSave }:
   const [readyRevision, setReadyRevision] = useState<string>();
   const onImageReady = useCallback((ready: boolean) => setReadyRevision(ready ? revision : undefined), [revision]);
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
   const pointer = useRef<{ id: number; x: number; y: number } | null>(null);
   const instructionsId = useId();
-  const editable = readyRevision === revision && !busy;
+  const blocked = busy || saving;
+  const editable = readyRevision === revision && !blocked;
   function shift(frame: HTMLElement, dx: number, dy: number) {
     const bounds = frame.getBoundingClientRect();
     setCover((previous) => shiftAlbumCover(previous, photo, bounds, dx, dy));
@@ -33,10 +36,12 @@ export function AlbumCoverDialog({ photo, initialCover, busy, onClose, onSave }:
   async function save() {
     if (!editable) return;
     setError('');
+    setSaving(true);
     try { await onSave(cover); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setSaving(false); }
   }
-  return <Modal title="设置相簿封面" onClose={onClose} closeDisabled={busy}>
+  return <Modal title="设置相簿封面" onClose={onClose} closeDisabled={blocked}>
     <div className="album-cover-editor">
       <p id={instructionsId} className="sr-only">拖动照片或使用方向键调整取景。</p>
       <div className="album-cover album-cover-editor-frame" role="group" aria-label="封面取景" aria-describedby={instructionsId}
@@ -77,9 +82,13 @@ export function AlbumCoverDialog({ photo, initialCover, busy, onClose, onSave }:
         <span aria-hidden="true">{Math.round(cover.zoom * 100)}%</span>
       </label>
       {error && <p role="alert" className="form-error">{error}</p>}
+      <span className="sr-only" role="status">{saving ? '正在保存封面' : ''}</span>
       <div className="form-actions">
-        <button type="button" className="button" onClick={onClose} disabled={busy}>取消</button>
-        <button type="button" className="button button-primary" onClick={() => void save()} disabled={!editable}>{busy ? '正在保存…' : '保存封面'}</button>
+        <button type="button" className="button" onClick={onClose} disabled={blocked}>取消</button>
+        <button type="button" className="button button-primary album-cover-save" onClick={() => void save()} disabled={!editable} aria-busy={saving}>
+          {saving && <LoaderCircle size={14} className="spin" aria-hidden="true" />}
+          {saving ? '正在保存…' : '保存封面'}
+        </button>
       </div>
     </div>
   </Modal>;

@@ -17,13 +17,14 @@ interface MenuGroup {
   items: MenuItem[];
 }
 
-export function DropdownMenu({ label, triggerLabel, title, icon, groups, disabled = false, onOpenChange, onTabForward }: {
+export function DropdownMenu({ label, triggerLabel, title, icon, groups, disabled = false, onBeforeOpen, onOpenChange, onTabForward }: {
   label: string;
   triggerLabel?: string;
   title?: string;
   icon: ReactNode;
   groups: MenuGroup[];
   disabled?: boolean;
+  onBeforeOpen?: () => void;
   onOpenChange?: (open: boolean) => void;
   onTabForward?: () => boolean;
 }) {
@@ -39,6 +40,7 @@ export function DropdownMenu({ label, triggerLabel, title, icon, groups, disable
   }, [open, panel]);
 
   function show(direction: 1 | -1 = 1) {
+    onBeforeOpen?.();
     const checked = groups.length === 1 ? items.findIndex((item) => item.checked && !item.disabled) : -1;
     initial.current = checked >= 0 ? checked : stepDropdownIndex(items, direction === 1 ? -1 : items.length, direction);
     trigger.current?.focus({ preventScroll: true });

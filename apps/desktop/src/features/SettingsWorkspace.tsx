@@ -5,17 +5,20 @@ import { useToast } from '../components/ToastProvider';
 import { Modal, WorkspaceHeader } from '../components/ui';
 import * as backup from '../lib/backup-api';
 import type { LibrarySnapshot } from '../lib/types';
+import type { OptionalWorkspace, WorkspaceVisibility } from '../lib/workspace-visibility';
 import { WorkDirectorySettings } from './WorkDirectory';
 import type { useWorkDirectory } from './use-work-directory';
 import './settings.css';
 
 type BackupOperation = 'export' | 'choose' | 'restore';
 
-export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChange }: {
+export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChange, workspaceVisibility, onWorkspaceVisibilityChange }: {
   snapshot: LibrarySnapshot;
   directory: ReturnType<typeof useWorkDirectory>;
   onRestored: (snapshot: LibrarySnapshot) => void;
   onBusyChange: (busy: boolean) => void;
+  workspaceVisibility: WorkspaceVisibility;
+  onWorkspaceVisibilityChange: (workspace: OptionalWorkspace, visible: boolean) => void;
 }) {
   const [operation, setOperation] = useState<BackupOperation | null>(null);
   const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
@@ -95,6 +98,13 @@ export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChang
   return <section>
     <WorkspaceHeader title="设置" count={`${snapshot.photos.length} 张照片 · ${snapshot.groups.length} 个相簿`} />
     <WorkDirectorySettings directory={directory} disabled={backupBusy} />
+    <section className="settings-content" aria-labelledby="settings-workspace-title">
+      <h2 id="settings-workspace-title">工作区</h2>
+      <div className="settings-visibility-options">
+        <label><input type="checkbox" checked={workspaceVisibility.models} onChange={(event) => onWorkspaceVisibilityChange('models', event.currentTarget.checked)} />显示模特</label>
+        <label><input type="checkbox" checked={workspaceVisibility.planning} onChange={(event) => onWorkspaceVisibilityChange('planning', event.currentTarget.checked)} />显示策划</label>
+      </div>
+    </section>
     <section className="settings-content" aria-labelledby="settings-backup-title">
       <h2 id="settings-backup-title">备份与恢复</h2>
       <p className="muted">导出 ZIP 备份时，可仅保存图库资料与缩略图，也可一并保存全部原片。</p>

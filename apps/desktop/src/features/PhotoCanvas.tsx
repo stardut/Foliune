@@ -170,9 +170,10 @@ export function PhotoCanvas({ ref, photos, sections, selected, onSelect, onPrevi
     if (restoreUnit !== -1) indices.add(restoreUnit);
     return [...indices].sort((a, b) => a - b).map((index) => units[index]).filter(Boolean);
   }, [wall.layout, start, end, focusedUnit, queuedUnit, restoreUnit]);
+  const completedReveal = useRef<typeof onReveal>(undefined);
   useLayoutEffect(() => {
-    if (!onReveal) return;
-    if (wall.error) { onReveal([]); return; }
+    if (!onReveal || completedReveal.current === onReveal) return;
+    if (wall.error) { completedReveal.current = onReveal; onReveal([]); return; }
     if (!wall.layout || !wall.current) return;
     const canvas = canvasRef.current;
     const main = canvas?.closest('main');
@@ -198,7 +199,7 @@ export function PhotoCanvas({ ref, photos, sections, selected, onSelect, onPrevi
       if (!element) return;
       elements.push(element);
     }
-    if (elements.length) onReveal(elements);
+    if (elements.length) { completedReveal.current = onReveal; onReveal(elements); }
   }, [onReveal, wall.layout, wall.current, wall.pending, wall.error, restore, restoreIndex, requestedUnit, visibleUnits]);
   useLayoutEffect(() => {
     if (!deferredFocus) return;

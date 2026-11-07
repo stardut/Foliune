@@ -7,6 +7,7 @@ import type { ModelProfile } from '../../lib/model-types';
 import { listPlans } from '../../lib/planning-api';
 import type { ShootPlan } from '../../lib/planning-types';
 import type { Photo } from '../../lib/types';
+import { defaultWorkspaceVisibility, isWorkspaceVisible, type WorkspaceVisibility } from '../../lib/workspace-visibility';
 import { LibraryWorkspace, type LibraryWorkspaceProps } from '../LibraryWorkspace';
 import { comparePlanExecutionDate, errorMessage, planSearchText } from '../planning/plan-content';
 import { bookSearchText, findSearchItems, indexSearchItems, modelSearchText, photoSearchText, planMatchLine, searchTerm } from './search-matches';
@@ -35,6 +36,7 @@ export interface SearchSession {
 
 interface SearchWorkspaceProps extends LibraryWorkspaceProps {
   session: SearchSession;
+  workspaceVisibility?: WorkspaceVisibility;
   onOpenBook: (id: string) => void;
   onOpenModel: (model: ModelProfile) => void;
   onOpenPlan: (plan: ShootPlan) => void;
@@ -65,7 +67,7 @@ function useSearchMatches<T>(source: Source<T>, textOf: (item: T) => string, ter
   return useMemo(() => findSearchItems(index, term), [index, term]);
 }
 
-export function SearchWorkspace({ session, onOpenBook, onOpenModel, onOpenPlan, ...library }: SearchWorkspaceProps) {
+export function SearchWorkspace({ session, workspaceVisibility = defaultWorkspaceVisibility, onOpenBook, onOpenModel, onOpenPlan, ...library }: SearchWorkspaceProps) {
   const rootRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState(session.query);
@@ -76,8 +78,8 @@ export function SearchWorkspace({ session, onOpenBook, onOpenModel, onOpenPlan, 
   const term = searchTerm(query);
   const [started, setStarted] = useState(!!term);
   const [books, reloadBooks] = useSearchSource(listBooks, started);
-  const [models, reloadModels] = useSearchSource(listModels, started);
-  const [plans, reloadPlans] = useSearchSource(readPlans, started);
+  const [models, reloadModels] = useSearchSource(listModels, started && workspaceVisibility.models);
+  const [plans, reloadPlans] = useSearchSource(readPlans, started && workspaceVisibility.planning);
   const photoIndex = useMemo(() => started ? indexSearchItems(library.snapshot.photos, photoSearchText) : [], [library.snapshot.photos, started]);
   const photoById = useMemo(() => new Map(library.snapshot.photos.map((photo) => [photo.id, photo])), [library.snapshot.photos]);
   const photoMatches = useMemo(() => findSearchItems(photoIndex, term), [photoIndex, term]);
@@ -86,7 +88,9 @@ export function SearchWorkspace({ session, onOpenBook, onOpenModel, onOpenPlan, 
   const planMatches = useSearchMatches(plans, planSearchText, term);
   const sources = { books, models, planning: plans };
   const reload = { books: reloadBooks, models: reloadModels, planning: reloadPlans };
-  const visibleRemote = remoteCategories.filter((item) => category === 'all' || category === item);
+  const enabledRemote = remoteCategories.filter((item) => isWorkspaceVisible(item, workspaceVisibility));
+  const searchCategories = ['photos', ...enabledRemote] as const;
+  const visibleRemote = enabledRemote.filter((item) => category === 'all' || category === item);
   const matches = { photos: photoMatches, books: bookMatches, models: modelMatches, planning: planMatches };
   const hasRemoteMatches = visibleRemote.some((item) => matches[item].length > 0);
   const mixedResults = category === 'all' && photoMatches.length > 0 && hasRemoteMatches;
@@ -107,7 +111,7 @@ export function SearchWorkspace({ session, onOpenBook, onOpenModel, onOpenPlan, 
   const restoring = useRef<{ scrollTop: number; focusResult?: string } | null>({ scrollTop: session.scrollTop, focusResult: session.focusResult });
   const savedFocus = restoring.current?.focusResult;
   const focusType = savedFocus?.split(':', 1)[0];
-  const focusSourceIndex = remoteCategories.findIndex((item) => item === focusType);
+  const focusSourceIndex = visibleRemote.findIndex((item) => item === focusType);
   // A restored photo from the second preview row needs a related result to appear first.
   const waitingForSecondRow = category === 'all' && wideWindow && !hasRemoteMatches && hasLoading
     && photoMatches.slice(PREVIEW_COUNT, WIDE_PHOTO_PREVIEW_COUNT).some((photo) => savedFocus === `photos:${photo.id}`);
@@ -248,7 +252,7 @@ export function SearchWorkspace({ session, onOpenBook, onOpenModel, onOpenPlan, 
       <WorkspaceHeader title="搜索" />
       <div className="search-field" role="search">
         <Search size={19} aria-hidden="true" />
-        <input id="global-search-input" ref={inputRef} aria-label="全局搜索" placeholder="搜索照片、画册、模特、策划"
+        <input id="global-search-input" ref={inputRef} aria-label="全局搜索" placeholder={`搜索${searchCategories.map((item) => categories[item]).join('、')}`}
           value={draft}
           onChange={(event) => { if (composing.current) setDraft(event.target.value); else changeQuery(event.target.value); }}
           onCompositionStart={() => { composing.current = true; }}
@@ -256,7 +260,7 @@ export function SearchWorkspace({ session, onOpenBook, onOpenModel, onOpenPlan, 
         {draft && <IconButton label="清空搜索" onClick={() => { changeQuery(''); inputRef.current?.focus({ preventScroll: true }); }}><X size={16} /></IconButton>}
       </div>
       {term && <div className="segmented search-categories" role="group" aria-label="结果类别">
-        {(Object.keys(categories) as Category[]).map((item) => <button key={item} type="button" className={category === item ? 'active' : ''}
+        {(['all', ...searchCategories] as const).map((item) => <button key={item} type="button" className={category === item ? 'active' : ''}
           data-search-category={item} aria-pressed={category === item} onClick={() => chooseCategory(item)}>{categories[item]}</button>)}
       </div>}
     </div>

@@ -12,7 +12,7 @@ const layouts = [
 const photoSortOptions = Object.keys(photoSortLabels) as PhotoSort[];
 const workViewOptions = [{ id: 'none', label: '不分组' }, { id: 'location', label: '地点' }, { id: 'project', label: '项目' }] as const;
 
-export function AlbumDetailHeader({ name, homeTitle, discarded, activeLabel, canImport, canPlay, canSort, selection, airDrop, layout, sort, onBack, onImport, onPlay, onStatus, onLayout, onSort, workView, onWorkView, onMenuOpenChange, onFocusWall }: {
+export function AlbumDetailHeader({ name, homeTitle, discarded, activeLabel, canImport, canPlay, canSort, selection, airDrop, layout, sort, onBack, onImport, onPlay, onStatus, onLayout, onSort, workView, onWorkView, onBeforeMenuOpen, onMenuOpenChange, onFocusWall }: {
   name: string; homeTitle: string; discarded: boolean; activeLabel: string;
   canImport: boolean; canPlay: boolean; canSort: boolean; layout: AlbumPhotoLayout;
   selection?: { allSelected: boolean; disabled: boolean; run: () => void };
@@ -22,6 +22,7 @@ export function AlbumDetailHeader({ name, homeTitle, discarded, activeLabel, can
   onStatus: (discarded: boolean) => void; onLayout: (layout: AlbumPhotoLayout) => void;
   workView?: WorkView; onWorkView?: (view: WorkView) => void;
   onMenuOpenChange?: (open: boolean) => void;
+  onBeforeMenuOpen: () => void;
   onFocusWall?: () => boolean;
 }) {
   return <header className="album-detail-header">
@@ -31,7 +32,7 @@ export function AlbumDetailHeader({ name, homeTitle, discarded, activeLabel, can
       {layouts.map(({ id, label, Icon }) => <button key={id} type="button" className={`icon-button ${layout === id ? 'is-active' : ''}`} aria-pressed={layout === id} aria-label={label} title={label} onClick={() => onLayout(id)}><Icon size={17} aria-hidden="true" /></button>)}
     </div>
     <DropdownMenu label="相簿操作" triggerLabel="相簿更多操作" title="更多" icon={<MoreHorizontal size={20} aria-hidden="true" />}
-      onOpenChange={onMenuOpenChange} onTabForward={onFocusWall} groups={[
+      onBeforeOpen={onBeforeMenuOpen} onOpenChange={onMenuOpenChange} onTabForward={onFocusWall} groups={[
         { items: [
           { id: 'import', label: '导入照片', icon: <ImagePlus size={15} aria-hidden="true" />, disabled: !canImport, run: onImport },
           ...(selection ? [{ id: 'select-all', label: selection.allSelected ? '取消全选' : '全选', icon: selection.allSelected ? <X size={15} aria-hidden="true" /> : <CheckCheck size={15} aria-hidden="true" />, disabled: selection.disabled, run: selection.run }] : []),

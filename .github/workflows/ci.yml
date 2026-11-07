@@ -60,6 +60,9 @@ jobs:
       - name: Test release preparation
         run: node --test scripts/prepare-release.test.mjs
 
+      - name: Test website deployment guard
+        run: node --test scripts/check-pages-deployment.test.mjs
+
       - name: Run Rust unit tests
         run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
 

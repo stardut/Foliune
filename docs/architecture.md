@@ -24,6 +24,12 @@ Rust `link_import.rs` 管理请求标识、启动图库绑定、取消和候选�
 旧 `apps/macos` SwiftUI 工程保留归档，不参与本路线的构建。没有新增移动端工程。
 Tauri 的结构具备跨桌面平台扩展条件，但当前仅验证 macOS，Windows 构建和系统集成仍需目标环境验收。
 
+## 原生操作菜单
+
+`use-context-menu.ts` 保留菜单动作、目标有效性、共享互斥和取消回焦；调用点明确区分鼠标上下文与键盘/更多按钮的定位请求。鼠标路径调用 `popup_context_menu`，键盘和更多按钮沿用 Tauri 定位菜单。`TextContextMenu` 只接管未被业务处理的文本编辑入口，与业务菜单共用互斥；空白、图片及普通网页内容不显示 WebView 默认菜单。
+
+macOS 的 `context_menu.rs` / `context_menu_macos.m` 只在主窗口保存原始右键或 Control+左键 down，不生成或投递输入。下次鼠标/键盘输入、窗口失去键盘焦点、应用失活或消费会清理待用事件；菜单构建耗时本身不使其失效。IPC 从当前 WebView 资源表取已有 Menu，在主线程按窗口与坐标关联原始事件，调用公开 NSMenu context API；关联失败明确反馈，不改走其它 API。Arc<Menu> 与原始 NSEvent 持有到跟踪结束，Promise 此时才完成；关闭窗口移除 local monitor 与通知观察者，弱引用避免 window/observer/monitor 循环。不使用全局方法替换或对象布局转换。其他平台保留 Tauri 原有定位路径。
+
 ## 模块职责
 
 - `src/lib/types.ts`：照片、分组、成员关系及操作输入。

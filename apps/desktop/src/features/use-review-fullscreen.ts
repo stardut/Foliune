@@ -4,7 +4,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 type Mode = 'windowed' | 'entering' | 'fullscreen' | 'exiting';
-// A completed handoff closes the review itself instead of returning to it.
+// A handled exit suppresses the default direct-entry close behavior.
 type AfterExit = () => boolean;
 type Operation = { target: boolean; issued: boolean; deadlineReached: boolean; afterExit?: AfterExit };
 
@@ -29,7 +29,7 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
     let direct = entry === 'direct';
     let nativeFullscreen = false;
     let ownsFullscreen = false;
-    let exitAfterEntry = false;
+    let exitAfterEntry: { afterExit?: AfterExit } | undefined;
     let restoringFocus = false;
     let operation: Operation | null = null;
     let resizeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -52,8 +52,8 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
         return;
       }
       setMode(fullscreen ? 'fullscreen' : 'windowed');
-      if (fullscreen && exitAfterEntry) change(false);
-      exitAfterEntry = false;
+      if (fullscreen && exitAfterEntry) change(false, exitAfterEntry.afterExit);
+      exitAfterEntry = undefined;
     }
     async function restoreAfterExit(requestedExit: boolean, afterExit?: AfterExit) {
       // AppKit can make the window itself first responder after leaving a Space.
@@ -70,7 +70,7 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
     function fail(target: boolean) {
       if (disposed) return;
       if (target) direct = false;
-      exitAfterEntry = false;
+      exitAfterEntry = undefined;
       operation = null;
       setError(target ? '无法进入全屏。' : '无法退出全屏。');
       settle(nativeFullscreen);
@@ -130,7 +130,7 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
       toggle: () => { if (!operation) change(!nativeFullscreen); },
       exit: (afterExit) => {
         if (restoringFocus) return true;
-        if (operation?.target === true) exitAfterEntry = true;
+        if (operation?.target === true) exitAfterEntry = { afterExit };
         else if (nativeFullscreen && !operation) change(false, afterExit);
         else if (!operation) return false;
         return true;

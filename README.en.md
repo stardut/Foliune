@@ -3,6 +3,7 @@
   <h1>Foliune</h1>
   <p><strong>For photographs worth returning to.</strong></p>
   <p><a href="README.md">中文</a> · English</p>
+  <p><a href="https://stardut.github.io/Foliune/en.html">Visit the website</a></p>
 </div>
 
 <br />

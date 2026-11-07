@@ -24,7 +24,7 @@ const bundle = await build({
     build.onResolve({ filter: /^(?:@tauri-apps\/api\/(?:core|window|webview)|\.\.?\/.*(?:\/api|PhotoReviewImage))$/ }, ({ path }) => ({ path, namespace: 'review-boundary' }));
     build.onLoad({ filter: /.*/, namespace: 'review-boundary' }, ({ path }) => ({
       contents: {
-        '@tauri-apps/api/core': 'export const isTauri = () => true;',
+        '@tauri-apps/api/core': 'export const isTauri = () => true; export const invoke = () => { throw new Error("未配置的菜单IPC"); };',
         '@tauri-apps/api/window': 'export const getCurrentWindow = () => globalThis.reviewWindow;',
         '@tauri-apps/api/webview': 'export const getCurrentWebview = () => globalThis.reviewWebview;',
       }[path] ?? (path.endsWith('/api')
@@ -120,8 +120,11 @@ test('直接全屏只显示目标照片，方向键、指针和 Tab 不显示控
     assert.deepEqual(requests, [true, false]);
     assert.deepEqual(closed, []);
     await nativeResize(false);
-    assert.deepEqual(closed, [['last', false]]);
-    assert.deepEqual(focusEvents, ['webview', 'close']);
+    assert.deepEqual(closed, []);
+    assert.equal(dialog().open, true);
+    assert.equal(dialog().dataset.fullscreen, undefined);
+    assert.ok(dialog().querySelector('.photo-review-back'));
+    assert.deepEqual(focusEvents, ['webview']);
   });
 });
 
@@ -147,6 +150,8 @@ test('从大图用 F 切换全屏，退回后仍停在当前照片并显示窗�
     await key('Escape', { repeat: true });
     assert.deepEqual(closed, []);
     await key('Escape');
+    assert.deepEqual(closed, []);
+    await act(async () => dialog().querySelector('.photo-review-back').click());
     assert.deepEqual(closed, [['first', false]]);
   });
 });
@@ -218,7 +223,8 @@ test('macOS 等 AppKit 完成退全屏才恢复键盘焦点', async (t) => {
     assert.equal(document.activeElement, stage());
     assert.deepEqual(focusEvents, ['webview']);
     await key('Escape');
-    assert.deepEqual(closed, [['last', false]]);
+    assert.deepEqual(closed, []);
+    assert.equal(dialog().open, true);
   }, { mac: true });
 });
 
@@ -232,7 +238,7 @@ test('大图右键和全屏键盘菜单定位当前照片，操作等原生全�
     };
     await rightClick();
     assert.equal(menus[0].photo.id, 'middle');
-    assert.deepEqual(menus[0].at, { x: 80, y: 120 });
+    assert.deepEqual(menus[0].at, { x: 80, y: 120, source: 'mouse' });
     assert.equal(menus[0].trigger, stage());
     assert.equal(menus[0].review.fullscreen, false);
     await act(async () => menus[0].review.toggleFullscreen());
@@ -271,6 +277,32 @@ test('菜单请求退出全屏失败后，普通退出不会执行旧操作', as
     await key('Escape');
     assert.deepEqual(requests, [true, false]);
     await nativeDidChange(false);
-    assert.deepEqual(closed, [['middle', false]]);
+    assert.deepEqual(closed, []);
+    assert.equal(dialog().open, true);
   }, { mac: true, onPhotoMenu: (_photo, _at, _trigger, review) => { menu = review; } });
+});
+
+test('进入直接全屏过渡中按 Escape，系统退场后保留大图且可明确返回', async (t) => {
+  await scenario(t, 'direct', async ({ dialog, key, nativeDidChange, requests, closed }) => {
+    await key('Escape');
+    assert.deepEqual(requests, [true]);
+    await nativeDidChange(true);
+    assert.deepEqual(requests, [true, false]);
+    await nativeDidChange(false);
+    assert.equal(dialog().open, true);
+    assert.equal(dialog().dataset.fullscreen, undefined);
+    assert.deepEqual(closed, []);
+    await act(async () => dialog().querySelector('.photo-review-back').click());
+    assert.deepEqual(closed, [['middle', false]]);
+  }, { mac: true });
+});
+
+test('直接全屏的 F 明确退出仍结束查看，独立于 Escape 保留大图', async (t) => {
+  await scenario(t, 'direct', async ({ key, nativeDidChange, requests, closed }) => {
+    await nativeDidChange(true);
+    await key('f');
+    assert.deepEqual(requests, [true, false]);
+    await nativeDidChange(false);
+    assert.deepEqual(closed, [['middle', false]]);
+  }, { mac: true });
 });

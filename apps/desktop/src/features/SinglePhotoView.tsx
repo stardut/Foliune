@@ -1,3 +1,4 @@
+import type { ContextMenuPosition } from './use-context-menu';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { useReducedMotion } from 'motion/react';
 import { Check, ImageOff } from 'lucide-react';
@@ -6,7 +7,7 @@ import { photoUnavailableLabel } from '../lib/photo-availability';
 import { PhotoReviewImage, useReviewPresentation } from './PhotoReviewImage';
 import { isPhotoMenuTracking } from './use-photo-menu';
 
-type PhotoMenu = (photo: Photo, at: { x: number; y: number }, trigger: HTMLElement) => void;
+type PhotoMenu = (photo: Photo, at: ContextMenuPosition, trigger: HTMLElement) => void;
 export type SinglePhotoCursor = { id: string; index: number };
 const FILMSTRIP_OVERSCAN = 4;
 
@@ -147,7 +148,7 @@ export function SinglePhotoView({ photos, selected, initialCursor, rememberCurso
   return <section ref={view} className="album-single-view" aria-label="单张浏览">
     <div className="album-single-stage" aria-busy={images.waiting} onContextMenu={(event) => {
       event.preventDefault(); event.stopPropagation();
-      if (!images.outgoing && current && activeThumbnail.current) onMenu(current, { x: event.clientX, y: event.clientY }, activeThumbnail.current);
+      if (!images.outgoing && current && activeThumbnail.current) onMenu(current, { x: event.clientX, y: event.clientY, source: 'mouse' }, activeThumbnail.current);
     }}>
       <PhotoReviewImage state={images} controller={controller} onRelink={onRelink} busy={busy} allowZoom={false} />
     </div>
@@ -175,7 +176,7 @@ export function SinglePhotoView({ photos, selected, initialCursor, rememberCurso
         if (!target) return;
         event.preventDefault(); event.stopPropagation();
         target.focus({ preventScroll: true });
-        onMenu(photos[Number(target.dataset.photoIndex)], { x: event.clientX, y: event.clientY }, target);
+        onMenu(photos[Number(target.dataset.photoIndex)], { x: event.clientX, y: event.clientY, source: 'mouse' }, target);
       }}
       onKeyDown={(event) => {
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
@@ -183,7 +184,7 @@ export function SinglePhotoView({ photos, selected, initialCursor, rememberCurso
         if (!target) return;
         event.preventDefault(); event.stopPropagation();
         const rect = target.getBoundingClientRect();
-        onMenu(photos[Number(target.dataset.photoIndex)], { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, target);
+        onMenu(photos[Number(target.dataset.photoIndex)], { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, source: 'position' }, target);
       }}>
       <div className="album-filmstrip-track" style={{ '--filmstrip-count': photos.length } as CSSProperties}>
         <span className="album-filmstrip-pitch" ref={pitchProbe} aria-hidden="true" />

@@ -1,3 +1,4 @@
+import type { ContextMenuPosition } from './use-context-menu';
 import { useId, useState, type CSSProperties } from 'react';
 import { ChevronRight, Images } from 'lucide-react';
 import { Modal } from '../components/ui';
@@ -15,7 +16,7 @@ export function AlbumOverview({ albums, busy, jobs = [], retrying, onRetry, onOp
   retrying?: ReadonlySet<string>;
   onRetry?: (job: WorkDirectoryJob) => void;
   onOpen: (id: string) => void;
-  onMenu: (group: Group, at: { x: number; y: number }, trigger: HTMLElement) => void;
+  onMenu: (group: Group, at: ContextMenuPosition, trigger: HTMLElement) => void;
 }) {
   const byAlbumId = new Map(jobs.map((job) => [job.albumId, job]));
   const albumIds = new Set(albums.map(({ group }) => group.id));
@@ -33,7 +34,7 @@ function AlbumCard({ group, photos, job, busy, retrying, onRetry, onOpen, onMenu
   group?: Group; photos: Photo[]; job?: WorkDirectoryJob; busy: boolean; retrying: boolean;
   onRetry?: (job: WorkDirectoryJob) => void;
   onOpen: (id: string) => void;
-  onMenu: (group: Group, at: { x: number; y: number }, trigger: HTMLElement) => void;
+  onMenu: (group: Group, at: ContextMenuPosition, trigger: HTMLElement) => void;
 }) {
   const statusId = useId();
   const sourceId = `${statusId}-source`;
@@ -70,12 +71,12 @@ function AlbumCard({ group, photos, job, busy, retrying, onRetry, onOpen, onMenu
     {group ? <button type="button" className="album-open" disabled={busy} onClick={() => onOpen(group.id)}
         aria-label={`打开相簿 ${group.name}，${photos.length} 张照片${group.capacity !== null ? `，容量 ${group.capacity} 张` : ''}`}
         aria-describedby={description}
-        onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(group, { x: event.clientX, y: event.clientY }, event.currentTarget); }}
+        onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(group, { x: event.clientX, y: event.clientY, source: 'mouse' }, event.currentTarget); }}
         onKeyDown={(event) => {
           if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
           event.preventDefault(); event.stopPropagation();
           const rect = event.currentTarget.getBoundingClientRect();
-          onMenu(group, { x: rect.left + 24, y: rect.top + 32 }, event.currentTarget);
+          onMenu(group, { x: rect.left + 24, y: rect.top + 32, source: 'position' }, event.currentTarget);
         }}>
       {content}
     </button> : <div className="album-open album-open-placeholder">{content}</div>}

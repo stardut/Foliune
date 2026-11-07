@@ -1,3 +1,4 @@
+import type { ContextMenuPosition } from './use-context-menu';
 import { memo, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { flushSync } from 'react-dom';
 import { motion, useReducedMotion } from 'motion/react';
@@ -14,7 +15,7 @@ interface PhotoActions {
   onPreview: (photo: Photo, trigger: HTMLButtonElement) => void;
   onRelink: (photo: Photo) => Promise<void>;
   busy: boolean;
-  onMenu: (photo: Photo, at: { x: number; y: number }, trigger: HTMLElement) => void;
+  onMenu: (photo: Photo, at: ContextMenuPosition, trigger: HTMLElement) => void;
 }
 
 export interface PhotoCanvasHandle {
@@ -280,14 +281,14 @@ const PhotoTile = memo(function PhotoTile({ photo, tile, selected, selecting, on
     onContextMenu={(event) => {
       event.preventDefault(); event.stopPropagation();
       const trigger = event.currentTarget.querySelector<HTMLButtonElement>('.photo-interaction-target');
-      if (trigger) onMenu(photo, { x: event.clientX, y: event.clientY }, trigger);
+      if (trigger) onMenu(photo, { x: event.clientX, y: event.clientY, source: 'mouse' }, trigger);
     }}
     onKeyDown={(event) => {
       if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
       event.preventDefault(); event.stopPropagation();
       const trigger = event.target as HTMLElement;
       const rect = trigger.getBoundingClientRect();
-      onMenu(photo, { x: rect.left + Math.min(rect.width, 24), y: rect.top + Math.min(rect.height, 32) }, trigger);
+      onMenu(photo, { x: rect.left + Math.min(rect.width, 24), y: rect.top + Math.min(rect.height, 32), source: 'position' }, trigger);
     }}>
     <div className="photo-image">
       <PhotoImage photo={photo} softReveal onRelink={onRelink} busy={busy} />
@@ -300,8 +301,8 @@ const PhotoTile = memo(function PhotoTile({ photo, tile, selected, selecting, on
   </article>;
 });
 
-export function SelectionBar({ count, busy, onClear, onBook, onMore, onSocial, onCollage }: { count: number; busy: boolean; onClear: () => void; onBook: () => void; onSocial?: () => void; onCollage?: () => void; onMore: (at: { x: number; y: number }, trigger: HTMLElement) => void }) {
+export function SelectionBar({ count, busy, onClear, onBook, onMore, onSocial, onCollage }: { count: number; busy: boolean; onClear: () => void; onBook: () => void; onSocial?: () => void; onCollage?: () => void; onMore: (at: ContextMenuPosition, trigger: HTMLElement) => void }) {
   const reduce = useReducedMotion();
   if (count === 0) return null;
-  return <motion.div className="selection-bar" initial={false} animate={{ opacity: 1 }} transition={{ duration: reduce ? 0 : 0.15 }} role="toolbar" aria-label="照片操作"><span aria-live="polite">已选 {count} 张</span><button type="button" className="text-button selection-book" onClick={onBook} disabled={busy}><BookPlus size={15} />加入画册</button>{onCollage && <button type="button" className="text-button" onClick={onCollage} disabled={busy}><Grid2X2 size={15} />拼图</button>}{onSocial && <button type="button" className="text-button selection-social" onClick={onSocial} disabled={busy}><LayoutTemplate size={15} />模拟排版</button>}<button type="button" className="icon-button" aria-label={`所选 ${count} 张照片的更多操作`} title="更多操作" aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMore({ x: rect.left, y: rect.top }, event.currentTarget); }}><MoreHorizontal size={18} /></button><IconButton label="取消全选" onClick={onClear}><X size={16} /></IconButton></motion.div>;
+  return <motion.div className="selection-bar" initial={false} animate={{ opacity: 1 }} transition={{ duration: reduce ? 0 : 0.15 }} role="toolbar" aria-label="照片操作"><span aria-live="polite">已选 {count} 张</span><button type="button" className="text-button selection-book" onClick={onBook} disabled={busy}><BookPlus size={15} />加入画册</button>{onCollage && <button type="button" className="text-button" onClick={onCollage} disabled={busy}><Grid2X2 size={15} />拼图</button>}{onSocial && <button type="button" className="text-button selection-social" onClick={onSocial} disabled={busy}><LayoutTemplate size={15} />模拟排版</button>}<button type="button" className="icon-button" aria-label={`所选 ${count} 张照片的更多操作`} title="更多操作" aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMore({ x: rect.left, y: rect.top, source: 'position' }, event.currentTarget); }}><MoreHorizontal size={18} /></button><IconButton label="取消全选" onClick={onClear}><X size={16} /></IconButton></motion.div>;
 }

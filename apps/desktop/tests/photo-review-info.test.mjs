@@ -75,7 +75,7 @@ async function scenario(photos, run, onClose = () => {}) {
 test('返回报告已呈现帧，等待中的下一张不覆盖，并先解除模态', async () => {
   const first = photo('first');
   const second = photo('second');
-  for (const [visible, closeBy] of [[first, 'button'], [second, 'cancel']]) {
+  for (const visible of [first, second]) {
     const closed = [];
     await scenario([first, second], async ({ container }) => {
       const dialog = container.querySelector('dialog');
@@ -83,12 +83,31 @@ test('返回报告已呈现帧，等待中的下一张不覆盖，并先解除�
       await act(async () => container.querySelector('[aria-label="下一张"]').click());
       assert.equal(dialog.querySelector('h2').textContent, visible.title);
       await act(async () => {
-        if (closeBy === 'button') dialog.querySelector('.photo-review-back').click();
-        else dialog.dispatchEvent(new window.Event('cancel', { cancelable: true }));
+        dialog.querySelector('.photo-review-back').click();
       });
       assert.deepEqual(closed, [[visible.id, false]]);
     }, (id) => closed.push([id, !!document.querySelector('dialog[open]')]));
   }
+});
+
+test('大图遮罩、空白及 Escape/cancel 保留当前照片，返回按钮仍可关闭', async () => {
+  const closed = [];
+  await scenario([photo('first')], async ({ container }) => {
+    const dialog = container.querySelector('dialog');
+    const stage = container.querySelector('.photo-review-stage');
+    await act(async () => {
+      dialog.click();
+      stage.click();
+      stage.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    const cancel = new window.Event('cancel', { cancelable: true });
+    await act(async () => dialog.dispatchEvent(cancel));
+    assert.equal(cancel.defaultPrevented, true);
+    assert.equal(dialog.open, true);
+    assert.deepEqual(closed, []);
+    await act(async () => dialog.querySelector('.photo-review-back').click());
+    assert.deepEqual(closed, ['first']);
+  }, id => closed.push(id));
 });
 
 test('按需读取原件并排列拍摄参数，保持手填时间地点', async () => {

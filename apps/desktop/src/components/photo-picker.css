@@ -5,6 +5,27 @@
 .photo-picker-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 6px; margin: -6px; }
 .photo-picker-scroll .empty-state { min-height: 200px; }
 .photo-picker > .page-controls { flex-shrink: 0; margin: 16px 0 0; padding: 0; }
+.photo-picker-navigation { display: flex; align-items: center; gap: 8px; flex-shrink: 0; min-height: 36px; margin-bottom: 18px; }
+.photo-picker-navigation h3 { min-width: 0; margin: 0; font-size: 15px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
+.photo-picker-navigation h3:focus { outline: none; }
+.photo-picker-context { margin-left: auto; padding-left: 12px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.photo-picker-libraries { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; padding: 4px 0; }
+.photo-picker-library { display: flex; align-items: center; gap: 16px; min-height: 112px; padding: 24px; border: 1px solid var(--control-line); border-radius: 10px; background: var(--control-fill); text-align: left; transition: background .15s, border-color .15s; }
+.photo-picker-library > svg { color: var(--muted); }
+.photo-picker-library > svg:last-child { margin-left: auto; }
+.photo-picker-library > span { font-size: 17px; font-weight: 500; }
+.photo-picker-library:hover:not(:disabled) { border-color: var(--control-edge); background: var(--control-hover); }
+.photo-picker-albums { display: grid; gap: 5px; }
+.photo-picker-album { display: flex; align-items: center; gap: 16px; min-width: 0; padding: 10px; border-radius: var(--radius-control); text-align: left; transition: background .15s; }
+.photo-picker-album:hover:not(:disabled) { background: var(--soft); }
+.photo-picker-album-preview { display: flex; align-items: center; justify-content: center; width: 72px; height: 56px; flex-shrink: 0; overflow: hidden; border-radius: 4px; color: var(--muted); background: var(--photo-mat); }
+.photo-picker-album-preview .image-asset { height: 100%; }
+.photo-picker-album-preview .image-asset > img { width: 100%; height: 100%; object-fit: contain; }
+.photo-picker-album-preview .missing-photo { padding: 5px; font-size: 10px; }
+.photo-picker-album-preview .missing-photo p { display: none; }
+.photo-picker-album-name { min-width: 0; flex: 1; overflow-wrap: anywhere; font-size: 14px; }
+.photo-picker-album-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.photo-picker-album > svg { color: var(--muted); }
 .photo-picker-tools { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; }
 .photo-picker-tools, .photo-picker-footer { flex-shrink: 0; }
 .photo-picker-tools .search-field { flex: 1; max-width: none; margin: 0; }
@@ -28,5 +49,5 @@
 .photo-picker-selection .text-button:disabled { color: var(--disabled); }
 .photo-picker-footer .form-actions { flex: 1 0 auto; margin: 0; padding: 0; }
 .photo-picker-missing { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--danger); font-size: 12px; margin-bottom: 20px; }
-@media (max-width: 720px) { .photo-picker-tools { align-items: stretch; flex-direction: column; gap: 10px; } .photo-picker-tools .segmented { align-self: flex-start; } }
-@media (max-width: 580px) { .photo-picker-footer .form-actions { flex-basis: 100%; margin-top: 8px; } }
+@media (prefers-reduced-motion: reduce) { .photo-picker-library, .photo-picker-album { transition: none; } }
+@media (max-width: 580px) { .photo-picker-libraries { grid-template-columns: 1fr; gap: 10px; } .photo-picker-library { min-height: 82px; padding: 18px; } .photo-picker-album { gap: 10px; padding-inline: 4px; } .photo-picker-footer .form-actions { flex-basis: 100%; margin-top: 8px; } }

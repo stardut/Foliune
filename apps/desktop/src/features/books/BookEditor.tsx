@@ -16,8 +16,8 @@ function organize(input: VersionInput): VersionInput {
   const pages = input.chapters.flatMap((chapter) => input.pages.filter((page) => page.chapterId === chapter.id));
   return { ...input, pages, chapters: input.chapters.map((chapter) => ({ ...chapter, photoIds: pages.filter((page) => page.chapterId === chapter.id).flatMap((page) => page.items.map((item) => item.photoId)) })) };
 }
-export function BookEditor({ detail, photos, onSnapshot, onChange, onBack, onPlay, onDirtyChange, onBusyChange, onRelink, fromSearch = false }: {
-  detail: BookDetail; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onChange: (next: BookDetail) => void; onBack: () => void;
+export function BookEditor({ detail, snapshot, photos, onSnapshot, onChange, onBack, onPlay, onDirtyChange, onBusyChange, onRelink, fromSearch = false }: {
+  detail: BookDetail; snapshot: LibrarySnapshot; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onChange: (next: BookDetail) => void; onBack: () => void;
   onPlay?: (photoIds: string[]) => void; onDirtyChange?: (dirty: boolean) => void; onBusyChange?: (busy: boolean) => void; onRelink?: (photo: Photo) => Promise<void>; fromSearch?: boolean;
 }) {
   const version = detail.versions.find((v) => v.id === detail.book.currentVersionId)!;
@@ -125,7 +125,7 @@ export function BookEditor({ detail, photos, onSnapshot, onChange, onBack, onPla
 
       </aside>
     </div>
-    {pickingSource && <PhotoSourceDialog photos={available} library="collection" title="添加画册照片" onBusyChange={setSourceBusy} onClose={() => setPickingSource(false)} onConfirm={({ photoIds, snapshot }) => { if (snapshot) onSnapshot(snapshot); addPhotos(photoIds); setPickingSource(false); }} />}
+    {pickingSource && <PhotoSourceDialog snapshot={{ ...snapshot, photos: available }} library="collection" title="添加画册照片" onBusyChange={setSourceBusy} onClose={() => setPickingSource(false)} onConfirm={({ photoIds, snapshot }) => { if (snapshot) onSnapshot(snapshot); addPhotos(photoIds); setPickingSource(false); }} />}
     {reading && <BookReader version={{ ...version, ...draft }} photos={photos} title={`${detail.book.title}${dirty ? ' · 未保存预览' : ''}`} initialPageIndex={currentPageIndex} onClose={() => setReading(false)} onRelink={onRelink} />}
     {leaving && <Modal title="离开编辑？" onClose={() => setLeaving(false)}><p>当前修改尚未保存。{fromSearch ? '返回搜索' : '返回书架'}会放弃这些修改。</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setLeaving(false)}>继续编辑</button><button type="button" className="button" onClick={onBack}>放弃并返回</button></div></Modal>}
   </section>;

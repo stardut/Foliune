@@ -1,9 +1,11 @@
 import { useId, useMemo, useState } from 'react';
-import { FolderOpen, Link2, Search, X } from 'lucide-react';
+import { Files, FolderOpen, Link2 } from 'lucide-react';
 import type { LibraryKind, LibrarySnapshot, Photo } from '../lib/types';
 import type { CurationDraft } from '../lib/curation-types';
 import { CurationWorkspace } from '../features/CurationWorkspace';
-import { Busy, EmptyState, IconButton, Modal } from './ui';
+import { Busy, EmptyState, Modal } from './ui';
+import { DropdownMenu } from './DropdownMenu';
+import { PhotoLibraryPicker } from './PhotoPicker';
 import { PhotoSelectionControls } from './PhotoSelectionControls';
 import { PhotoSourceGrid } from './PhotoSourceGrid';
 import { usePhotoSourceImport } from './use-photo-source-import';
@@ -12,7 +14,7 @@ import './photo-source.css';
 
 export interface PhotoSourceResult { photoIds: string[]; snapshot?: LibrarySnapshot }
 export interface PhotoSourceDialogProps {
-  photos: Photo[];
+  snapshot: LibrarySnapshot;
   selectedIds?: string[];
   library: LibraryKind;
   groupId?: string;
@@ -38,22 +40,15 @@ function LinkImportProgress({ total, ready, onStop }: { total: number | null; re
   </>;
 }
 
-export function PhotoSourceDialog({ photos, selectedIds = [], library, groupId, allowLibrary = true,
+export function PhotoSourceDialog({ snapshot, selectedIds = [], library, groupId, allowLibrary = true,
   maxSelection, title = '选择照片', onConfirm, onClose, onBusyChange }: PhotoSourceDialogProps) {
   const [source, setSource] = useState<Source>(allowLibrary ? 'library' : 'local');
   const [selected, setSelected] = useState(() => allowLibrary ? [...new Set(selectedIds)] : []);
   const [pendingSelected, setPendingSelected] = useState<string[]>([]);
-  const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<'all' | LibraryKind>('all');
   const [input, setInput] = useState('');
   const [reviewDraft, setReviewDraft] = useState<CurationDraft | null>(null);
   const linkHintId = useId();
   const session = usePhotoSourceImport({ library, groupId, onBusyChange });
-  const filtered = useMemo(() => {
-    const term = query.trim().toLocaleLowerCase();
-    return photos.filter((photo) => (filter === 'all' || photo.library === filter)
-      && (!term || [photo.title, photo.originalName, photo.location, photo.project, ...photo.tags].join(' ').toLocaleLowerCase().includes(term)));
-  }, [photos, query, filter]);
   const pendingPhotos = useMemo(() => {
     const pending = new Set(session.draft?.pendingIds);
     const byId = new Map(session.draft?.candidates.map((photo) => [photo.id, photo]));
@@ -62,7 +57,6 @@ export function PhotoSourceDialog({ photos, selectedIds = [], library, groupId, 
   const showLinkProgress = !session.cleaning && !session.error && (session.linkProgress !== null || pendingPhotos.length > 0);
   const loadingNextPhoto = session.linkProgress !== null
     && (session.linkProgress.total === null || session.linkProgress.photos.length < session.linkProgress.total);
-  const missing = selected.filter((id) => !photos.some((photo) => photo.id === id));
   const totalSelected = selected.length + pendingSelected.length;
   const overLimit = maxSelection !== undefined && totalSelected > maxSelection;
 
@@ -86,10 +80,16 @@ export function PhotoSourceDialog({ photos, selectedIds = [], library, groupId, 
       setSource(next);
     }
   }
-  async function prepare() {
+  async function prepare(directory = false) {
     if (source === 'library' || session.busy) return;
     setPendingSelected([]);
-    await session.prepare(source, input);
+    const draft = await session.prepare(source === 'local' && directory ? 'folder' : source, input);
+    if (source === 'local' && draft && session.isMounted()) {
+      const available = maxSelection === undefined
+        ? draft.pendingIds.length
+        : Math.max(0, maxSelection - selected.length);
+      setPendingSelected(draft.pendingIds.slice(0, available));
+    }
   }
   async function finish(keepIds: string[], draft: CurationDraft) {
     const pending = new Set(draft.pendingIds);
@@ -128,25 +128,21 @@ export function PhotoSourceDialog({ photos, selectedIds = [], library, groupId, 
           <button key={value} type="button" className={source === value ? 'active' : ''} aria-pressed={source === value}
             disabled={session.committing || session.cleaning} onClick={() => void changeSource(value)}>{label}</button>)}
       </div>
-      {source === 'library' ? <>
-        <div className="photo-picker-tools">
-          <div className="search-field"><Search size={16} /><input autoFocus aria-label="搜索图库照片" placeholder="搜索照片" value={query}
-            onChange={(event) => setQuery(event.target.value)} />{query && <IconButton label="清空搜索" onClick={() => setQuery('')}><X size={14} /></IconButton>}</div>
-          <div className="segmented" role="group" aria-label="筛选图库">{([['all', '全部'], ['work', '作品'], ['collection', '收藏']] as const).map(([value, label]) =>
-            <button key={value} type="button" aria-pressed={filter === value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div>
-        </div>
-        {!!missing.length && <div className="photo-picker-missing" role="status"><span>{missing.length} 张已选照片记录缺失</span>{missing.map((id) =>
-          <button type="button" className="text-button" key={id} onClick={() => toggle(id, false)}>移除第 {selected.indexOf(id) + 1} 张<X size={12} /></button>)}</div>}
-        <PhotoSourceGrid photos={filtered} selectedIds={selected} totalSelected={totalSelected} maxSelection={maxSelection}
-          onToggle={(id) => toggle(id, false)} emptyTitle={photos.length ? '没有找到照片' : '图库还没有照片'} />
-      </> : <>
+      {source === 'library' ? <PhotoLibraryPicker snapshot={snapshot} selectedIds={selected} onChange={setSelected} maxSelection={maxSelection} disabled={session.busy} actions={<>
+        <button type="button" className="button" disabled={session.committing || session.cleaning} onClick={() => void close()}>取消</button>
+        <button type="button" className="button button-primary" disabled={session.busy || overLimit} onClick={confirm}>确认选择</button>
+      </>} /> : <>
         <div className="photo-source-input">
           {source === 'link' && <div className="search-field"><Link2 size={16} /><input autoFocus aria-label="小红书或 Instagram 链接"
             aria-describedby={showLinkProgress ? undefined : linkHintId} placeholder="粘贴链接"
             value={input} disabled={session.busy} onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); if (!session.busy && input.trim()) void prepare(); } }} /></div>}
-          <button type="button" className="button" disabled={session.busy || (source === 'link' && !input.trim())}
-            onClick={() => void prepare()}>{source === 'local' ? <><FolderOpen size={15} />{session.draft ? '重新选择照片' : '选择本地照片'}</> : '获取图片'}</button>
+          {source === 'local' ? <DropdownMenu label="选择本地文件" triggerText="选择本地文件"
+            icon={<Files size={15} aria-hidden="true" />} disabled={session.busy} groups={[{ items: [
+              { id: 'photos', label: '选择照片', icon: <Files size={15} aria-hidden="true" />, run: () => void prepare() },
+              { id: 'folder', label: '选择文件夹', icon: <FolderOpen size={15} aria-hidden="true" />, run: () => void prepare(true) },
+            ] }]} /> : <button type="button" className="button" disabled={session.busy || !input.trim()}
+              onClick={() => void prepare()}>获取图片</button>}
         </div>
         {source === 'link' && <div className="photo-source-link-meta">{showLinkProgress
           ? <LinkImportProgress total={session.linkProgress ? session.linkProgress.total : pendingPhotos.length}
@@ -163,14 +159,14 @@ export function PhotoSourceDialog({ photos, selectedIds = [], library, groupId, 
           <ul>{session.draft.failures.map((failure, index) => <li key={`${index}-${failure.path}`}>{failure.path} · {failure.message}</li>)}</ul></div>}
       </>}
       {session.error && <p className="form-error photo-source-error" role="alert">{session.error}</p>}
-      <div className="photo-picker-footer">
-        <PhotoSelectionControls photos={source === 'library' ? filtered : pendingPhotos} selectedIds={[...selected, ...pendingSelected]}
+      {source !== 'library' && <div className="photo-picker-footer">
+        <PhotoSelectionControls photos={pendingPhotos} selectedIds={[...selected, ...pendingSelected]}
           maxSelection={maxSelection} disabled={session.busy} onSelect={addSelection}
           onClear={() => { setSelected([]); setPendingSelected([]); }} />
         <div className="form-actions"><button type="button" className="button" disabled={session.committing || session.cleaning} onClick={() => void close()}>取消</button>
-          <button type="button" className="button button-primary" disabled={session.busy || overLimit || (source !== 'library' && !pendingSelected.length)} onClick={confirm}>
-            {session.committing ? '正在导入…' : source === 'library' ? '确认选择' : '确认导入'}</button></div>
-      </div>
+          <button type="button" className="button button-primary" disabled={session.busy || overLimit || !pendingSelected.length} onClick={confirm}>
+            {session.committing ? '正在导入…' : '确认导入'}</button></div>
+      </div>}
     </div>
   </Modal>;
 }

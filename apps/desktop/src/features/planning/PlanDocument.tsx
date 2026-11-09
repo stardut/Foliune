@@ -5,8 +5,8 @@ import { PlanField } from './PlanFields';
 import { PlanParts } from './PlanParts';
 import { sharedFields } from './plan-content';
 
-export function PlanDocument({ value, photos, editing, disabled, executionDateErrorId, onChange, onSnapshot, onSourceBusyChange }: {
-  value: ShootPlanInput; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onSourceBusyChange: (busy: boolean) => void;
+export function PlanDocument({ value, snapshot, photos, editing, disabled, executionDateErrorId, onChange, onSnapshot, onSourceBusyChange }: {
+  value: ShootPlanInput; snapshot: LibrarySnapshot; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onSourceBusyChange: (busy: boolean) => void;
   editing: boolean; disabled: boolean; executionDateErrorId?: string; onChange: (value: ShootPlanInput) => void;
 }) {
   const info = [['shootDate', '拍摄时间'], ['location', '地点'], ['team', '出镜与团队'], ['deliverables', '成片与用途']] as const;
@@ -23,7 +23,7 @@ export function PlanDocument({ value, photos, editing, disabled, executionDateEr
     </header>
     {(editing || value.visualDirection.trim() || referenceNotes.length > 0) && <section className="plan-visual" aria-label="整体视觉"><PlanField label="整体视觉" value={value.visualDirection} onChange={editing ? (visualDirection) => onChange({ ...value, visualDirection }) : undefined} placeholder="整组共用的色彩、气质或视觉约定" />{referenceNotes.length > 0 && <div className="plan-reference-notes plan-visual-notes"><span>参考要点</span><div>{referenceNotes.map((reference) => <p key={reference.id}>{reference.intent}</p>)}</div></div>}</section>}
     {(editing || sharedFields.some(([key]) => value[key].trim())) && <section className="plan-shared-preparation" aria-label="整组准备"><h2>整组准备</h2><div className="plan-shared-fields">{sharedFields.map(([key, label]) => <PlanField key={key} label={label} value={value[key]} onChange={editing ? (text) => onChange({ ...value, [key]: text }) : undefined} />)}</div></section>}
-    <PlanParts value={value} photos={photos} onSnapshot={onSnapshot} onSourceBusyChange={onSourceBusyChange} editing={editing} disabled={disabled} onChange={onChange} />
+    <PlanParts snapshot={snapshot} value={value} photos={photos} onSnapshot={onSnapshot} onSourceBusyChange={onSourceBusyChange} editing={editing} disabled={disabled} onChange={onChange} />
     {(editing || value.preparation.trim()) && <section className="plan-preparation"><h2>执行准备</h2><PlanField label="日程与准备" value={value.preparation} onChange={editing ? (preparation) => onChange({ ...value, preparation }) : undefined} placeholder="集合、转场、物品与注意事项" /></section>}
   </fieldset></article>;
 }

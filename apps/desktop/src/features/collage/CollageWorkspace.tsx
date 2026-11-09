@@ -118,7 +118,7 @@ export function CollageWorkspace({ snapshot, library, initialPhotoIds, onExit, o
       <CollageSequence ids={state.photoIds} photos={photos} activeId={activeId} disabled={blocked} onActive={(id) => { setActiveId(id); setEditing(false); }} onChange={(photoIds) => update({ ...state, photoIds })} onPick={() => setPicking(true)} />
     </div><CollageTools state={state} activeId={activeId} editing={editing} disabled={blocked} onChange={update} onEditing={setEditing} /></div>
     {error && !exporting && <p className="form-error" role="alert">{error}</p>}
-    {picking && <PhotoPicker title="拼图选片" photos={photos} selectedIds={state.photoIds} maxSelection={COLLAGE_MAX_PHOTOS} onConfirm={(photoIds) => { update({ ...state, photoIds }); setPicking(false); }} onClose={() => setPicking(false)} />}
+    {picking && <PhotoPicker title="拼图选片" snapshot={snapshot} allowedLibraries={[library]} selectedIds={state.photoIds} maxSelection={COLLAGE_MAX_PHOTOS} onConfirm={(photoIds) => { update({ ...state, photoIds }); setPicking(false); }} onClose={() => setPicking(false)} />}
     {exporting && <CollageExportDialog layout={layout} busy={busy} error={error} onClose={() => { setExporting(false); setError(''); }} onExport={exportImage} />}
     {leaving && <Modal title="放弃拼图并返回？" onClose={() => setLeaving(false)}><p className="replacement-copy">拼图尚未导出，返回将放弃当前编辑。</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setLeaving(false)}>继续编辑</button><button type="button" className="button" onClick={onExit}>放弃并返回</button></div></Modal>}
   </section>;

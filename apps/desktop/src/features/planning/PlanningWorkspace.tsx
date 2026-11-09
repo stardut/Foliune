@@ -8,8 +8,8 @@ import { PlanDetail } from './PlanDetail';
 import { comparePlanExecutionDate, errorMessage, planSearchText, shotCount } from './plan-content';
 import './planning.css';
 
-export function PlanningWorkspace({ photos, onSnapshot, onDirtyChange, onBusyChange, initialPlan, onBackToSearch }: {
-  photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onDirtyChange: (dirty: boolean) => void; onBusyChange: (busy: boolean) => void;
+export function PlanningWorkspace({ snapshot, photos, onSnapshot, onDirtyChange, onBusyChange, initialPlan, onBackToSearch }: {
+  snapshot: LibrarySnapshot; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onDirtyChange: (dirty: boolean) => void; onBusyChange: (busy: boolean) => void;
   initialPlan?: ShootPlan; onBackToSearch?: () => void;
 }) {
   const [plans, setPlans] = useState<ShootPlan[]>([]);
@@ -32,7 +32,7 @@ export function PlanningWorkspace({ photos, onSnapshot, onDirtyChange, onBusyCha
   }, [plans, query]);
   const photosById = useMemo(() => new Map(photos.map((photo) => [photo.id, photo])), [photos]);
   const closeDetail = onBackToSearch ?? (() => setActive(null));
-  if (active) return <PlanDetail key={active === 'new' ? 'new' : active.id} plan={active === 'new' ? undefined : active} photos={photos} onSnapshot={onSnapshot}
+  if (active) return <PlanDetail snapshot={snapshot} key={active === 'new' ? 'new' : active.id} plan={active === 'new' ? undefined : active} photos={photos} onSnapshot={onSnapshot}
     onDirtyChange={onDirtyChange} onBusyChange={onBusyChange} backLabel={onBackToSearch ? '返回搜索' : undefined} onClose={closeDetail}
     onSaved={(saved) => { setPlans((items) => [saved, ...items.filter((item) => item.id !== saved.id)]); setActive(saved); }}
     onDeleted={(id) => { setPlans((items) => items.filter((item) => item.id !== id)); closeDetail(); }} />;

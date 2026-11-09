@@ -9,8 +9,8 @@ import { BookCreator } from './BookCreator';
 import { BookEditor } from './BookEditor';
 import './books.css';
 
-export function BookWorkspace({ photos, onSnapshot, onPlay, onDirtyChange, onRelink, onBusyChange, initialBook, onBackToSearch }: {
-  photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onPlay?: (photoIds: string[]) => void; onDirtyChange?: (dirty: boolean) => void;
+export function BookWorkspace({ snapshot, photos, onSnapshot, onPlay, onDirtyChange, onRelink, onBusyChange, initialBook, onBackToSearch }: {
+  snapshot: LibrarySnapshot; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onPlay?: (photoIds: string[]) => void; onDirtyChange?: (dirty: boolean) => void;
   onBusyChange?: (busy: boolean) => void; onRelink?: (photo: Photo) => Promise<void>; initialBook?: BookDetail; onBackToSearch?: () => void;
 }) {
   const [books, setBooks] = useState<BookSummary[]>([]); const [detail, setDetail] = useState<BookDetail | null>(initialBook ?? null);
@@ -94,7 +94,7 @@ export function BookWorkspace({ photos, onSnapshot, onPlay, onDirtyChange, onRel
       if (mounted.current && menuState.current.context === context) setDetail(next);
     });
   }
-  if (detail) return <BookEditor onSnapshot={onSnapshot} detail={detail} photos={photos} onChange={changed} onPlay={onPlay} onDirtyChange={onDirtyChange} onBusyChange={onBusyChange} onRelink={onRelink}
+  if (detail) return <BookEditor snapshot={snapshot} onSnapshot={onSnapshot} detail={detail} photos={photos} onChange={changed} onPlay={onPlay} onDirtyChange={onDirtyChange} onBusyChange={onBusyChange} onRelink={onRelink}
     fromSearch={!!onBackToSearch} onBack={onBackToSearch ?? (() => { setDetail(null); void reload(); })} />;
   return <section className="book-workspace" aria-label="画册">
     <WorkspaceHeader title="画册" count={`${books.length} 本画册`}>
@@ -119,7 +119,7 @@ export function BookWorkspace({ photos, onSnapshot, onPlay, onDirtyChange, onRel
       <BookCover key={`${cover?.id}:${cover?.thumbnailUrl}:${cover?.availability}`} title={book.title} photo={cover} hasPhotos={book.photoCount > 0} busy={busy} />
     </article>;
     })}</div>}
-    {creating && <BookCreator onSnapshot={onSnapshot} onBusyChange={setSourceBusy} photos={photos} busy={busy} onClose={() => setCreating(false)} onCreate={create} />}
+    {creating && <BookCreator snapshot={snapshot} onSnapshot={onSnapshot} onBusyChange={setSourceBusy} photos={photos} busy={busy} onClose={() => setCreating(false)} onCreate={create} />}
     {renaming && <Modal title="重命名画册" onClose={() => setRenaming(null)}><form onSubmit={(event) => void rename(event)}><label>画册名称<input autoFocus value={name} maxLength={200} required onChange={(e) => setName(e.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions"><button className="button" type="button" onClick={() => setRenaming(null)}>取消</button><button className="button button-primary" type="submit" disabled={busy}>保存</button></div></form></Modal>}
     {deleting && <Modal title="删除画册？" onClose={() => { if (!busy) setDeleting(null); }}><p>将删除《{deleting.title}》。仅在此画册使用的照片将从全局搜索和图库选片中移除，照片文件会保留。</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions"><button type="button" className="button" autoFocus disabled={busy} onClick={() => setDeleting(null)}>取消</button><button type="button" className="button button-primary" disabled={busy} onClick={() => void remove()}>确认删除</button></div></Modal>}
   </section>;

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { readFile } from 'node:fs/promises';
 
 const require = createRequire(new URL('../package.json', import.meta.url));
 const { Window } = require('happy-dom');
@@ -16,7 +17,7 @@ const { createRoot } = require('react-dom/client');
 const { build } = createRequire(require.resolve('vite/package.json'))('esbuild');
 const bundle = await build({
   stdin: {
-    contents: "export { PhotoReview } from './PhotoReview'; export { PhotoReviewImage as ActualReviewImage } from './PhotoReviewImage.tsx';",
+    contents: "export { PhotoReview } from './PhotoReview'; export { PhotoReviewImage as ActualReviewImage } from './PhotoReviewImage.tsx'; export { installInputModality } from '../lib/input-modality';",
     resolveDir: fileURLToPath(new URL('../src/features/', import.meta.url)),
   },
   bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external', write: false, loader: { '.css': 'empty' },
@@ -38,9 +39,47 @@ const bundle = await build({
 });
 const module = { exports: {} };
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(require, module, module.exports);
-const { PhotoReview, ActualReviewImage } = module.exports;
+const { PhotoReview, ActualReviewImage, installInputModality } = module.exports;
 
 const photos = ['first', 'middle', 'last'].map(id => ({ id, title: id, originalPath: `/test/${id}.jpg`, originalAvailable: true }));
+
+test('大图方向键切图不描绘整块舞台，显式键盘定位仍有焦点反馈', async (t) => {
+  const style = document.head.appendChild(document.createElement('style'));
+  style.textContent = (await Promise.all(['theme.css', 'index.css', 'features/photo-review.css'].map(path => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')))).join('\n');
+  const removeModality = installInputModality(document);
+  // Happy DOM caches ancestor selectors across dataset changes. Start in the
+  // keyboard modality so this checks the real keyboard rule before mounting.
+  document.documentElement.dataset.inputMode = 'keyboard';
+  try {
+    await scenario(t, 'available', async ({ dialog, stage, key, tick }) => {
+      assert.equal(document.activeElement, stage());
+      assert.equal(window.getComputedStyle(stage()).outlineStyle, 'none');
+      await key('ArrowRight');
+      assert.equal(stage().textContent, 'last');
+      assert.equal(document.documentElement.dataset.inputMode, 'keyboard');
+      assert.equal(window.getComputedStyle(stage()).outlineStyle, 'none', '方向键切图时不应出现包围舞台的焦点框');
+      await key('ArrowLeft');
+      assert.equal(stage().textContent, 'middle');
+      assert.equal(window.getComputedStyle(stage()).outlineStyle, 'none');
+      const counterStyle = window.getComputedStyle(dialog().querySelector('.photo-review-position'));
+      assert.match(counterStyle.backgroundImage, /linear-gradient/, '键盘观看位置在现有页码处提示');
+      assert.equal(counterStyle.backgroundSize, '32px 1px', '页码只显示居中的短底线');
+      assert.equal(counterStyle.backgroundPosition, 'center bottom');
+      assert.equal(counterStyle.backgroundRepeat, 'no-repeat');
+      await tick(2300);
+      assert.equal(dialog().dataset.controlsHidden, 'true', '舞台焦点不阻止工具栏静止后隐藏');
+      await key('ArrowLeft');
+      assert.equal(dialog().dataset.controlsHidden, 'false', '再次切图唤醒工具栏');
+      const back = dialog().querySelector('.photo-review-back');
+      await act(async () => back.focus());
+      assert.equal(window.getComputedStyle(back).outlineStyle, 'solid', '键盘操作按钮应保留焦点反馈');
+    }, { onPhotoMenu() {} });
+  } finally {
+    removeModality();
+    style.remove();
+    delete document.documentElement.dataset.inputMode;
+  }
+});
 
 async function scenario(t, entry, run, { mac = false, onPhotoMenu } = {}) {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });

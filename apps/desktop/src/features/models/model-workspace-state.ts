@@ -2,6 +2,7 @@ import type { LibrarySnapshot, Photo } from '../../lib/types';
 import type { ModelProfile } from '../../lib/model-types';
 
 export interface ModelWorkspaceProps {
+  snapshot: LibrarySnapshot;
   photos: Photo[];
   onSnapshot: (snapshot: LibrarySnapshot) => void;
   onDirtyChange: (dirty: boolean) => void;

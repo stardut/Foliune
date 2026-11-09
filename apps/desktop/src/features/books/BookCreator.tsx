@@ -1,9 +1,10 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
-import { Check, ChevronLeft, ChevronRight, Plus, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { Modal } from '../../components/ui';
 import { DropdownSelect } from '../../components/DropdownSelect';
 import { templates, type BookChapter, type BookPage, type BookTemplate, type CreateBookInput } from '../../lib/book-types';
 import type { LibrarySnapshot, Photo } from '../../lib/types';
+import { PhotoLibraryPicker } from '../../components/PhotoPicker';
 import { PhotoSourceDialog } from '../../components/PhotoSourceDialog';
 import { BookPageView } from './BookPageView';
 
@@ -13,10 +14,9 @@ const paperSizes = [
   { label: '方形 · 1:1', width: 1000, height: 1000 },
 ];
 const paperOptions = [{ value: -1, label: '自定义比例', disabled: true }, ...paperSizes.map(({ label }, value) => ({ value, label }))];
-const libraryOptions = [{ value: 'all', label: '全部图库' }, { value: 'collection', label: '收藏' }, { value: 'work', label: '作品' }];
 const templateNotes = { white: '单图留白，完整构图', full: '单图铺满，裁切填充', pair: '双图并置，完整构图' };
 
-export function BookCreator({ photos, busy, onSnapshot, onBusyChange, onClose, onCreate, initialSelected = [] }: { photos: Photo[]; busy: boolean; onSnapshot: (snapshot: LibrarySnapshot) => void; onBusyChange?: (busy: boolean) => void; onClose: () => void; onCreate: (input: CreateBookInput) => Promise<void>; initialSelected?: string[] }) {
+export function BookCreator({ snapshot, photos, busy, onSnapshot, onBusyChange, onClose, onCreate, initialSelected = [] }: { snapshot: LibrarySnapshot; photos: Photo[]; busy: boolean; onSnapshot: (snapshot: LibrarySnapshot) => void; onBusyChange?: (busy: boolean) => void; onClose: () => void; onCreate: (input: CreateBookInput) => Promise<void>; initialSelected?: string[] }) {
   const [pickingSource, setPickingSource] = useState(false);
   const [sourceBusy, setSourceBusy] = useState(false);
   const blocked = busy || sourceBusy;
@@ -28,15 +28,7 @@ export function BookCreator({ photos, busy, onSnapshot, onBusyChange, onClose, o
   const [selected, setSelected] = useState<string[]>(() => [...new Set(initialSelected.filter((id) => photos.some((p) => p.id === id)))]);
   const [assignments, setAssignments] = useState<Record<string, string>>(() => Object.fromEntries(initialSelected.map((id) => [id, chapters[0].id])));
   const [step, setStep] = useState(() => initialSelected.some((id) => photos.some((p) => p.id === id)) ? 1 : 0);
-  const [pickerPage, setPickerPage] = useState(0);
-  const [query, setQuery] = useState(''); const [library, setLibrary] = useState('all'); const [error, setError] = useState('');
-  const available = photos.filter((p) => (library === 'all' || p.library === library) && `${p.title} ${p.tags.join(' ')}`.toLowerCase().includes(query.toLowerCase()));
-  const selectedIds = new Set(selected);
-  const allAvailableSelected = available.every((photo) => selectedIds.has(photo.id));
-  const lastPage = Math.max(0, Math.ceil(available.length / 60) - 1);
-  const currentPage = Math.min(pickerPage, lastPage);
-  useEffect(() => { setPickerPage(0); }, [query, library]);
-  const visiblePhotos = available.slice(currentPage * 60, (currentPage + 1) * 60);
+  const [error, setError] = useState('');
   const chapterOptions = chapters.map((chapter) => ({ value: chapter.id, label: chapter.title || '未命名章节' }));
   const orderedChapters = chapters.map((chapter) => ({ ...chapter, photoIds: selected.filter((id) => assignments[id] === chapter.id) }));
   const firstChapter = orderedChapters.find((chapter) => chapter.photoIds.length);
@@ -56,13 +48,9 @@ export function BookCreator({ photos, busy, onSnapshot, onBusyChange, onClose, o
     setSelected((previous) => previous.includes(id) ? previous.filter((p) => p !== id) : [...previous, id]);
     setAssignments((previous) => ({ ...previous, [id]: previous[id] || chapters[0].id }));
   }
-  function selectAll() {
-    setSelected((previous) => [...new Set([...previous, ...available.map((photo) => photo.id)])]);
-    setAssignments((previous) => {
-      const next = { ...previous };
-      for (const photo of available) next[photo.id] ??= chapters[0].id;
-      return next;
-    });
+  function choosePhotos(ids: string[]) {
+    setSelected(ids);
+    setAssignments((previous) => ({ ...previous, ...Object.fromEntries(ids.map((id) => [id, previous[id] || chapters[0].id])) }));
   }
   function move(id: string, offset: number) {
     const chapterIds = selected.filter((photoId) => assignments[photoId] === assignments[id]);
@@ -85,11 +73,8 @@ export function BookCreator({ photos, busy, onSnapshot, onBusyChange, onClose, o
       </nav>
       <fieldset className="book-create-body" disabled={blocked}>
         {step === 0 ? <section className="book-choose-photos" aria-label="选择画册照片">
-          <div className="book-source-tools"><button type="button" className="button" onClick={() => setPickingSource(true)}><Plus size={14} />添加照片</button><div className="book-search"><Search size={16} /><input aria-label="搜索可选照片" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索标题或标签" /></div>
-            <DropdownSelect label="照片来源" value={library} options={libraryOptions} disabled={blocked} onChange={setLibrary} />
-          </div>
-          <div className="book-photo-picker">{visiblePhotos.map((photo) => <button type="button" key={photo.id} className={selectedIds.has(photo.id) ? 'selected' : ''} aria-pressed={selectedIds.has(photo.id)} onClick={() => toggle(photo.id)}><div className="book-picker-image">{photo.thumbnailAvailable ? <img src={photo.thumbnailUrl} alt="" loading="lazy" /> : <span>预览缺失</span>}<span className="book-picker-check" aria-hidden="true">{selectedIds.has(photo.id) && <Check size={13} />}</span></div><span><span className="book-picker-title" title={photo.title}>{photo.title}</span><small>{photo.library === 'work' ? '作品' : '收藏'}</small></span></button>)}{!available.length && <p className="book-picker-empty">{query || library !== 'all' ? '没有符合条件的照片' : '还没有照片'}</p>}</div>
-          {available.length > 60 && <div className="book-picker-pagination"><button type="button" className="button button-quiet" disabled={currentPage === 0} onClick={() => setPickerPage(currentPage - 1)}>上一页</button><span>{currentPage + 1} / {lastPage + 1} · 共 {available.length} 张</span><button type="button" className="button button-quiet" disabled={currentPage === lastPage} onClick={() => setPickerPage(currentPage + 1)}>下一页</button></div>}
+          <div className="book-source-tools"><button type="button" className="button" onClick={() => setPickingSource(true)}><Plus size={14} />添加照片</button></div>
+          <PhotoLibraryPicker snapshot={snapshot} selectedIds={selected} onChange={choosePhotos} />
         </section> : <div className="book-create-arrange">
           <section className="book-create-preview" aria-label="版式示意"><div className="book-create-paper" style={{ '--book-page-ratio': width / height } as CSSProperties}><BookPageView page={sample} pageWidth={width} pageHeight={height} photos={photos} number={1} /></div><p>版式示意 · {width} × {height}</p></section>
           <section className="book-create-options" aria-label="画册设置">
@@ -111,19 +96,14 @@ export function BookCreator({ photos, busy, onSnapshot, onBusyChange, onClose, o
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="book-create-footer">
         <div className="book-create-selection">
-          <span aria-live="polite">已选 {selected.length} 张照片</span>
-          {step === 0 && <>
-            <button className="text-button" type="button" title="选择所有筛选结果" disabled={blocked || allAvailableSelected} onClick={selectAll}>全选</button>
-            <button className="text-button" type="button" disabled={blocked || !selected.length} onClick={() => setSelected([])}>取消全选</button>
-          </>}
+          {step === 1 && <span aria-live="polite">已选 {selected.length} 张照片</span>}
         </div>
         <div>{step === 1 ? <button className="button button-quiet" type="button" disabled={blocked} onClick={() => setStep(0)}><ChevronLeft size={15} />返回选片</button> : <button className="button button-quiet" type="button" disabled={blocked} onClick={onClose}>取消</button>}<button className="button button-primary" type="submit" disabled={blocked || !selected.length}>{busy ? '创建中…' : step === 0 ? <>设置画册<ChevronRight size={15} /></> : '创建并排版'}</button></div>
       </div>
     </form>
-    {pickingSource && <PhotoSourceDialog photos={photos} selectedIds={selected} library="collection" title="选择画册照片" onBusyChange={setSourceBusy} onClose={() => setPickingSource(false)} onConfirm={({ photoIds, snapshot }) => {
+    {pickingSource && <PhotoSourceDialog snapshot={snapshot} selectedIds={selected} library="collection" title="选择画册照片" onBusyChange={setSourceBusy} onClose={() => setPickingSource(false)} onConfirm={({ photoIds, snapshot }) => {
       if (snapshot) onSnapshot(snapshot);
-      setSelected(photoIds);
-      setAssignments((previous) => Object.fromEntries(photoIds.map((id) => [id, previous[id] || chapters[0].id])));
+      choosePhotos(photoIds);
       setPickingSource(false);
     }} />}
   </Modal>;

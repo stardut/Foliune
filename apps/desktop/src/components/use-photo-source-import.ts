@@ -69,7 +69,7 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
     }
   }
 
-  async function prepare(source: 'local' | 'link', input = '') {
+  async function prepare(source: 'local' | 'folder' | 'link', input = '') {
     if (!await clear() || !mounted.current) return;
     const ownGeneration = ++generation.current;
     const requestId = source === 'link' ? crypto.randomUUID() : null;
@@ -83,13 +83,14 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
           if (!mounted.current || generation.current !== ownGeneration || request.current !== requestId) return;
           setLinkProgress((current) => current && { total, photos: photo ? [...current.photos, photo] : current.photos });
         })
-        : await prepareImport(library, groupId);
+        : await prepareImport(library, groupId, source === 'folder');
       if (!mounted.current || generation.current !== ownGeneration) {
         if (next) await cancelCuration(next.id);
         return;
       }
       currentDraft.current = next;
       setDraft(next);
+      return next;
     } catch (cause) {
       if (mounted.current && generation.current === ownGeneration) setError(messageOf(cause));
       else console.error('过期照片候选请求或清理失败', cause);

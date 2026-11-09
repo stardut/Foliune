@@ -10,7 +10,7 @@ import { ModelFields, type ModelDraft } from './ModelFields';
 import { defaultModelStyles } from './ModelStyleTags';
 import { ModelSamples } from './ModelSamples';
 
-export function ModelEditor({ model, photos, onSnapshot, onDirtyChange, onBusyChange, onRelink, onClose, onSaved }: ModelWorkspaceProps & {
+export function ModelEditor({ model, snapshot, photos, onSnapshot, onDirtyChange, onBusyChange, onRelink, onClose, onSaved }: ModelWorkspaceProps & {
   model?: ModelProfile; onClose: () => void; onSaved: (model: ModelProfile) => void;
 }) {
   const [baseline, setBaseline] = useState(() => draftOf(model));
@@ -62,7 +62,7 @@ export function ModelEditor({ model, photos, onSnapshot, onDirtyChange, onBusyCh
         {draft.photoIds.length ? <ModelSamples ids={draft.photoIds} coverId={draft.coverPhotoId} photos={photos} disabled={busy} onChange={setPhotos} onCover={(id) => update({ ...draft, coverPhotoId: id })} onRelink={onRelink} /> : <EmptyState title="还没有样片" action={<button type="button" className="button" disabled={busy} onClick={() => setPicking(true)}><ImagePlus size={15} />选择样片</button>} />}
       </section>
     </div>
-    {picking && <PhotoSourceDialog photos={photos} library="work" selectedIds={draft.photoIds} title="选择模特样片" onBusyChange={setSourceBusy} onClose={() => setPicking(false)} onConfirm={({ photoIds, snapshot }) => { if (snapshot) onSnapshot(snapshot); setPhotos(photoIds); setPicking(false); }} />}
+    {picking && <PhotoSourceDialog snapshot={snapshot} library="work" selectedIds={draft.photoIds} title="选择模特样片" onBusyChange={setSourceBusy} onClose={() => setPicking(false)} onConfirm={({ photoIds, snapshot }) => { if (snapshot) onSnapshot(snapshot); setPhotos(photoIds); setPicking(false); }} />}
     {leaving && <Modal title="保存档案修改？" onClose={() => { if (!busy) setLeaving(false); }}><p>离开后，未保存的资料与样片调整将丢失。</p><div className="form-actions"><button type="button" className="button" disabled={busy} onClick={() => setLeaving(false)}>继续编辑</button><button type="button" className="button" disabled={busy} onClick={onClose}>放弃修改</button><button type="button" className="button button-primary" disabled={busy} onClick={() => void save()}>{busy ? '保存中…' : '保存并离开'}</button></div></Modal>}
   </section>;
 }

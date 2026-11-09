@@ -7,7 +7,7 @@ import type { LibrarySnapshot, Photo } from '../../lib/types';
 import { BookCreator } from './BookCreator';
 import './books.css';
 
-export function AddPhotosToBook({ photos, selectedIds, onSnapshot, onBusyChange, onClose, onComplete }: { photos: Photo[]; selectedIds: string[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onBusyChange?: (busy: boolean) => void; onClose: () => void; onComplete?: () => void }) {
+export function AddPhotosToBook({ snapshot, photos, selectedIds, onSnapshot, onBusyChange, onClose, onComplete }: { snapshot: LibrarySnapshot; photos: Photo[]; selectedIds: string[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onBusyChange?: (busy: boolean) => void; onClose: () => void; onComplete?: () => void }) {
   const [books, setBooks] = useState<BookSummary[]>([]); const [target, setTarget] = useState(''); const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false); const [loading, setLoading] = useState(true); const [error, setError] = useState('');
   const [sourceBusy, setSourceBusy] = useState(false);
@@ -16,7 +16,7 @@ export function AddPhotosToBook({ photos, selectedIds, onSnapshot, onBusyChange,
   function done() { onComplete?.(); onClose(); }
   async function append() { setBusy(true); setError(''); try { await api.appendPhotosToBook(target, selectedIds); done(); } catch (cause) { setError(message(cause)); } finally { setBusy(false); } }
   async function create(input: CreateBookInput) { setBusy(true); try { await api.createBook(input); done(); } finally { setBusy(false); } }
-  if (creating) return <BookCreator onSnapshot={onSnapshot} onBusyChange={setSourceBusy} photos={photos} initialSelected={selectedIds} busy={busy} onClose={() => setCreating(false)} onCreate={create} />;
+  if (creating) return <BookCreator snapshot={snapshot} onSnapshot={onSnapshot} onBusyChange={setSourceBusy} photos={photos} initialSelected={selectedIds} busy={busy} onClose={() => setCreating(false)} onCreate={create} />;
   return <Modal title="加入画册" onClose={() => { if (!busy) onClose(); }}>
     <div className="stack-form">
       <p>已选 {selectedIds.length} 张照片</p>

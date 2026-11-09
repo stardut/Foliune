@@ -12,12 +12,14 @@ function draftImages(draft: CurationDraft, localImport = false): CurationDraft {
     : photo) };
 }
 
-export async function prepareImport(library: LibraryKind, groupId?: string): Promise<CurationDraft | null> {
+export async function prepareImport(library: LibraryKind, groupId?: string, directory = false): Promise<CurationDraft | null> {
   const { isDesktop } = await import('./api');
   if (!isDesktop()) throw new Error('请在 Foliune 桌面应用中导入照片。');
-  const paths = await open({ multiple: true, directory: false, title: '导入照片',
-    filters: [{ name: '照片（JPEG / PNG / WebP）', extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
-  });
+  const paths = await open(directory
+    ? { multiple: false, directory: true, title: '选择照片文件夹' }
+    : { multiple: true, directory: false, title: '导入照片',
+      filters: [{ name: '照片（JPEG / PNG / WebP）', extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
+    });
   if (!paths || paths.length === 0) return null;
   return prepareImportFiles(Array.isArray(paths) ? paths : [paths], library, groupId);
 }

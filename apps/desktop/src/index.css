@@ -22,6 +22,8 @@ input, textarea, .dropdown-select { color: var(--ink); width: 100%; min-width: 0
 /* Editing focus belongs to the existing field edge, without an outer ring. */
 :is(input:not([type=checkbox], [type=radio], [type=range]), textarea, .dropdown-select):focus:not(:disabled), .dropdown-select[aria-expanded=true] { outline: none; border-color: var(--focus-border); }
 :root[data-input-mode="keyboard"] :is(input:not([type=checkbox], [type=radio], [type=range]), textarea, .dropdown-select):focus-visible:not(:disabled) { border-color: var(--focus); }
+/* Search restores reading position to a heading, not an interactive control. */
+.search-result-detail h1[tabindex="-1"]:focus-visible { outline: none; }
 input::placeholder, textarea::placeholder { color: var(--muted); }
 textarea { resize: vertical; }
 input[type=checkbox], input[type=radio] { width: 16px; height: 16px; min-height: 0; padding: 0; accent-color: var(--accent); flex-shrink: 0; cursor: pointer; }

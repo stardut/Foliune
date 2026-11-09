@@ -34,6 +34,8 @@
 .book-create-steps button > span { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; font-size: 11px; }
 .book-create-steps button.active > span { background: var(--primary); border-color: var(--primary-line); color: var(--primary-ink); }
 .book-create-body { border: 0; padding: 0 3px 3px; margin: 0 -3px; min-width: 0; flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
+.book-choose-photos { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.book-choose-photos > .book-source-tools { flex-shrink: 0; }
 .book-source-tools { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
 .book-source-tools > .dropdown-select { width: 132px; }
 .book-search { display: flex; align-items: center; flex: 1; gap: 10px; border-bottom: 1px solid var(--line); color: var(--muted); padding: 0 4px; }
@@ -172,6 +174,7 @@
 .book-reader-mode { flex-shrink: 0; }
 .book-reader-mode button { min-width: 46px; font-size: 12px; }
 .book-reader-stage { display: flex; min-width: 0; min-height: 0; padding: 28px 36px; background: var(--photo-mat); }
+.book-reader-stage:focus-visible { outline: none; }
 .book-reader-viewport { container-type: size; flex: 1; min-width: 0; min-height: 0; display: grid; place-items: center; }
 .book-reader-pages { display: grid; grid-template-columns: repeat(var(--book-reader-columns), minmax(0, 1fr)); gap: var(--book-reader-gap); align-items: start; width: min(100cqw, calc(100cqh * var(--book-page-ratio) * var(--book-reader-columns) + var(--book-reader-gap))); }
 .book-reader-empty-page { align-self: stretch; }

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
-import { Check } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 import { DropdownLayer, revealDropdownRow, stepDropdownIndex, useDropdown } from './dropdown-layer';
 
 interface MenuItem {
@@ -17,9 +17,10 @@ interface MenuGroup {
   items: MenuItem[];
 }
 
-export function DropdownMenu({ label, triggerLabel, title, icon, groups, disabled = false, onBeforeOpen, onOpenChange, onTabForward }: {
+export function DropdownMenu({ label, triggerLabel, triggerText, title, icon, groups, disabled = false, onBeforeOpen, onOpenChange, onTabForward }: {
   label: string;
   triggerLabel?: string;
+  triggerText?: string;
   title?: string;
   icon: ReactNode;
   groups: MenuGroup[];
@@ -80,9 +81,11 @@ export function DropdownMenu({ label, triggerLabel, title, icon, groups, disable
   }
 
   return <div onKeyDown={onKeyDown} onBlur={onBlur}>
-    <button type="button" className={`icon-button${open ? ' is-active' : ''}`} ref={trigger} disabled={disabled}
+    <button type="button" className={`${triggerText ? 'button' : 'icon-button'}${open ? ' is-active' : ''}`} ref={trigger} disabled={disabled}
       aria-label={triggerLabel ?? label} title={title ?? triggerLabel ?? label} aria-haspopup="menu" aria-expanded={open}
-      aria-controls={open ? id : undefined} onClick={() => { if (open) closeAndFocus(); else show(); }}>{icon}</button>
+      aria-controls={open ? id : undefined} onClick={() => { if (open) closeAndFocus(); else show(); }}>
+      {icon}{triggerText && <>{triggerText}<ChevronDown size={13} aria-hidden="true" /></>}
+    </button>
     {open && <DropdownLayer id={id} trigger={trigger} panel={panel} role="menu" label={label} align="end" close={close}>
       {groups.map((group) => <div key={group.label ?? id} role="group" aria-label={group.label}
         className={`dropdown-group${group.compact ? ' dropdown-group-compact' : ''}`}>

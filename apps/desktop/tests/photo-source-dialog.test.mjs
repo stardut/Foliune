@@ -26,7 +26,11 @@ const bundle = await build({
 const thumbnailUrl = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 const photo = id => ({ id, library: 'collection', title: id, originalName: `${id}.jpg`, originalPath: '/test.jpg', thumbnailPath: '/test.jpg', originalUrl: '/test.jpg', thumbnailUrl, originalAvailable: true, thumbnailAvailable: true, width: 100, height: 150, tags: [], regions: [], annotation: '', source: '', capturedAt: null, location: '', project: '', importedAt: '' });
 const draft = (ids = ['new1', 'new2']) => ({ id: 'draft-1', groupId: null, groupName: '相簿', capacity: null, candidates: ids.map(photo), activeIds: [], pendingIds: ids, failures: [] });
-const snapshot = { photos: [], groups: [], memberships: [] };
+const makeSnapshot = photos => {
+  const groups = ['collection', 'work'].map(library => ({ id: `${library}-album`, library, name: `${library}-album`, description: '', capacity: null, createdAt: '' }));
+  return { photos, groups, memberships: photos.map((item, position) => ({ groupId: `${item.library}-album`, photoId: item.id, status: 'active', position })) };
+};
+const snapshot = makeSnapshot([]);
 const deferred = () => { let resolve, reject; const promise = new Promise((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; };
 
 async function scenario(options, run) {
@@ -55,9 +59,20 @@ async function scenario(options, run) {
   };
   const select = async id => {
     const button = container.querySelector(`button[aria-label="选择 ${id}"]`);
-    assert(button, `photo ${id} exists`); assert.equal(button.disabled, false);
+    if (button) { assert.equal(button.disabled, false); await act(async () => button.click()); }
+    else assert(container.querySelector(`button[aria-label="取消选择 ${id}"]`), `photo ${id} is already selected`);
+  };
+  const deselect = async id => {
+    const button = container.querySelector(`button[aria-label="取消选择 ${id}"]`);
+    assert(button, `selected photo ${id} exists`); assert.equal(button.disabled, false);
     await act(async () => button.click());
   };
+  const clickAlbum = async name => {
+    const button = [...container.querySelectorAll('.photo-picker-album')].find(item => item.querySelector('.photo-picker-album-name')?.textContent === name);
+    assert(button, `album ${name} exists`);
+    await act(async () => button.click());
+  };
+  const chooseLocalPhotos = async () => { await click('选择本地文件'); await click('选择照片'); };
   const enterText = async (label, value) => {
     const input = container.querySelector(`input[aria-label="${label}"]`);
     await act(async () => {
@@ -74,10 +89,11 @@ async function scenario(options, run) {
   let unmounted = false;
   const unmount = async () => { if (!unmounted) { await act(async () => root.unmount()); unmounted = true; } };
   try {
-    const content = h(options.libraryOnly ? PhotoPicker : PhotoSourceDialog, { photos: [photo('existing')], library: 'collection', ...options.props,
+    const photos = options.props?.photos ?? [photo('existing')];
+    const content = h(options.libraryOnly ? PhotoPicker : PhotoSourceDialog, { snapshot: makeSnapshot(photos), library: 'collection', ...options.props,
       onConfirm: result => calls.confirm.push(result), onClose() {}, onBusyChange: value => calls.busy.push(value) });
     await act(async () => root.render(options.outerForm ? h('form', { onSubmit: event => { event.preventDefault(); options.outerForm(); } }, content) : content));
-    await run({ calls, click, getButton, select, enterText, link, container, unmount });
+    await run({ calls, click, getButton, select, deselect, clickAlbum, enterText, link, chooseLocalPhotos, container, unmount });
   } finally { await unmount(); container.remove(); }
 }
 
@@ -86,9 +102,10 @@ for (const libraryOnly of [false, true]) {
     const matching = Array.from({ length: 62 }, (_, index) => photo(`series-${index + 1}`));
     const photos = [{ ...photo('series-work'), library: 'work' }, photo('unmatched'), ...matching];
     const selectedIds = ['series-62', 'series-work'];
-    await scenario({ libraryOnly, props: { photos, selectedIds } }, async ({ calls, click, getButton, enterText, container }) => {
+    await scenario({ libraryOnly, props: { photos, selectedIds } }, async ({ calls, click, clickAlbum, getButton, enterText, container }) => {
       await click('收藏');
-      await enterText('搜索图库照片', 'series-');
+      await clickAlbum('collection-album');
+      await enterText('搜索当前相簿照片', 'series-');
       await click('下一页');
       assert.equal(container.querySelectorAll('.photo-picker-item').length, 2);
       await click('全选');
@@ -103,18 +120,20 @@ for (const libraryOnly of [false, true]) {
   });
 }
 
-test('候选默认不选，选满上限包含已有照片并依次追加候选', async () => {
-  await scenario({ props: { selectedIds: ['existing'], maxSelection: 3 }, prepare: () => ({ ...draft(['new1', 'new2', 'new3']), candidates: ['new3', 'new2', 'new1'].map(photo) }) }, async ({ calls, click, getButton, select, container }) => {
-    await click('本地'); await click('选择本地照片');
-    assert.equal(container.querySelectorAll('.photo-picker-item.is-selected').length, 0);
-    assert.equal([...container.querySelectorAll('button')].find(b => b.textContent === '确认导入').disabled, true);
-    assert.deepEqual([...container.querySelectorAll('.photo-picker-item')].map(b => b.getAttribute('aria-label')), ['选择 new1', '选择 new2', '选择 new3']);
-    await select('new2'); await click('选满 3 张');
+test('本地候选按上限默认勾选，并可在满额时调整照片', async () => {
+  await scenario({ props: { selectedIds: ['existing'], maxSelection: 3 }, prepare: () => ({ ...draft(['new1', 'new2', 'new3']), candidates: ['new3', 'new2', 'new1'].map(photo) }) }, async ({ calls, click, getButton, select, deselect, container, chooseLocalPhotos }) => {
+    await click('本地'); await chooseLocalPhotos();
+    assert.equal(container.querySelectorAll('.photo-picker-item.is-selected').length, 2);
+    assert.equal([...container.querySelectorAll('button')].find(b => b.textContent === '确认导入').disabled, false);
+    assert.deepEqual([...container.querySelectorAll('.photo-picker-item')].map(b => b.getAttribute('aria-label')), ['取消选择 new1', '取消选择 new2', '选择 new3']);
+    await select('new1');
+    await deselect('new2');
+    await click('选满 3 张');
     assert.equal(getButton('选满 3 张').disabled, true);
     assert.equal(container.querySelector('button[aria-label="选择 new3"]').disabled, true);
     await click('确认导入');
-    assert.deepEqual(calls.commit, [['draft-1', ['new2', 'new1']]]);
-    assert.deepEqual(calls.confirm, [{ photoIds: ['existing', 'new2', 'new1'], snapshot }]);
+    assert.deepEqual(calls.commit, [['draft-1', ['new1', 'new2']]]);
+    assert.deepEqual(calls.confirm, [{ photoIds: ['existing', 'new1', 'new2'], snapshot }]);
   });
 });
 
@@ -187,8 +206,8 @@ test('链接准备中切换来源忽略迟到进度，卸载后迟到的候选�
     await unmount(); assert.equal(calls.busy.at(-1), false);
   });
   const local = deferred();
-  await scenario({ props: { allowLibrary: false }, prepare: () => local.promise }, async ({ calls, click, unmount }) => {
-    await click('选择本地照片'); await unmount();
+  await scenario({ props: { allowLibrary: false }, prepare: () => local.promise }, async ({ calls, chooseLocalPhotos, unmount }) => {
+    await chooseLocalPhotos(); await unmount();
     await act(async () => local.resolve(draft()));
     assert.deepEqual(calls.cancel, ['draft-1']); assert.equal(calls.confirm.length, 0);
   });
@@ -239,24 +258,24 @@ test('停止获取保留弹窗；重新获取期间的旧进度和旧候选不�
 });
 
 test('提交失败清空已消费会话，显示重准备错误，不能重复提交旧draft', async () => {
-  await scenario({ failCommit: true, props: { allowLibrary: false } }, async ({ calls, click, select, container }) => {
-    await click('选择本地照片'); await select('new1'); await click('确认导入');
+  await scenario({ failCommit: true, props: { allowLibrary: false } }, async ({ calls, click, container, chooseLocalPhotos }) => {
+    await chooseLocalPhotos(); await click('确认导入');
     assert.match(container.textContent, /提交测试失败.*重新准备/);
     assert.equal([...container.querySelectorAll('button')].find(b => b.textContent === '确认导入').disabled, true);
     assert.equal(calls.commit.length, 1); assert.equal(calls.confirm.length, 0);
-    await click('选择本地照片'); assert.equal(calls.prepare.length, 2);
+    await chooseLocalPhotos(); assert.equal(calls.prepare.length, 2);
   });
 });
 
 test('满额取舍仅含所选新候选；取消取舍清理会话，不改变图库', async () => {
-  await scenario({ props: { allowLibrary: false }, prepare: () => ({ ...draft(), capacity: 2, activeIds: ['old1', 'old2'], candidates: ['old1', 'old2', 'new1', 'new2'].map(photo) }) }, async ({ calls, click, select, container }) => {
-    await click('选择本地照片'); await select('new1'); await click('确认导入');
+  await scenario({ props: { allowLibrary: false }, prepare: () => ({ ...draft(), capacity: 2, activeIds: ['old1', 'old2'], candidates: ['old1', 'old2', 'new1', 'new2'].map(photo) }) }, async ({ calls, click, select, deselect, container, chooseLocalPhotos }) => {
+    await chooseLocalPhotos(); await select('new1'); await deselect('new2'); await click('确认导入');
     assert.equal(container.querySelectorAll('.candidate').length, 3);
     assert.equal(container.querySelectorAll('.candidate input[type="checkbox"]').length, 6);
     assert(!container.textContent.includes('new2'));
     await click('取消全部变更');
     assert.deepEqual(calls.cancel, ['draft-1']); assert.equal(calls.commit.length, 0);
-    assert(container.textContent.includes('选择本地照片'));
+    assert(container.textContent.includes('选择本地文件'));
   });
 });
 
@@ -274,8 +293,8 @@ test('链接Enter阻止外层表单提交；候选失败项直接显示', async 
 
 
 test('取舍取消清理失败会显示真实错误，重试前保留会话所有权', async () => {
-  await scenario({ failCancelOnce: true, props: { allowLibrary: false }, prepare: () => ({ ...draft(), capacity: 1, activeIds: ['old1'], candidates: ['old1', 'new1', 'new2'].map(photo) }) }, async ({ calls, click, select, container }) => {
-    await click('选择本地照片'); await select('new1'); await click('确认导入');
+  await scenario({ failCancelOnce: true, props: { allowLibrary: false }, prepare: () => ({ ...draft(), capacity: 1, activeIds: ['old1'], candidates: ['old1', 'new1', 'new2'].map(photo) }) }, async ({ calls, click, select, deselect, container, chooseLocalPhotos }) => {
+    await chooseLocalPhotos(); await select('new1'); await deselect('new2'); await click('确认导入');
     await click('取消全部变更');
     assert.match(container.textContent, /取消失败：候选目录无法清理/);
     assert.equal(container.querySelectorAll('.candidate').length, 2);

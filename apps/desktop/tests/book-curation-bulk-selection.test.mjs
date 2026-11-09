@@ -35,6 +35,11 @@ const photo = (id) => ({
   width: 16, height: 12, tags: [],
 });
 const photos = Array.from({ length: 63 }, (_, index) => photo(`match-${index + 1}`));
+const snapshotOf = photos => ({
+  photos,
+  groups: ['collection', 'work'].map(library => ({ id: `${library}-album`, library, name: `${library}-album`, description: '', capacity: null, createdAt: '' })),
+  memberships: photos.map((item, position) => ({ groupId: `${item.library}-album`, photoId: item.id, status: 'active', position })),
+});
 
 async function scenario(Component, props, run) {
   const container = document.createElement('div');
@@ -58,8 +63,9 @@ async function scenario(Component, props, run) {
 
 test('画册全选跨页追加筛选结果，保留原选片顺序与章节，清除跨筛选', async () => {
   const created = [];
+  const allPhotos = [...photos, photo('outside'), photo('unselected')];
   await scenario(BookCreator, {
-    photos: [...photos, photo('outside'), photo('unselected')],
+    snapshot: snapshotOf(allPhotos), photos: allPhotos,
     initialSelected: ['match-2', 'outside', 'match-5'],
     busy: false, onSnapshot() {}, onClose() {}, onCreate: async (input) => created.push(input),
   }, async ({ container, button, click }) => {
@@ -68,16 +74,18 @@ test('画册全选跨页追加筛选结果，保留原选片顺序与章节，�
     await click([...container.querySelectorAll('[role="option"]')].find((option) => option.textContent === '第 2 章'));
     await click('返回选片');
 
-    const query = container.querySelector('[aria-label="搜索可选照片"]');
+    await click('收藏');
+    await click([...container.querySelectorAll('.photo-picker-album')].find(item => item.querySelector('.photo-picker-album-name')?.textContent === 'collection-album'));
+    const query = container.querySelector('[aria-label="搜索当前相簿照片"]');
     await act(async () => {
       Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(query, 'match');
       query.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await click('全选');
-    assert.match(container.querySelector('.book-create-selection').textContent, /已选 64 张照片/);
+    assert.match(container.querySelector('.photo-picker-selection [role="status"]').textContent, /已选 64 张/);
     assert.equal(button('全选').disabled, true);
     await click('下一页');
-    assert.equal(container.querySelectorAll('.book-photo-picker button[aria-pressed="true"]').length, 3);
+    assert.equal(container.querySelectorAll('.photo-picker-item[aria-pressed="true"]').length, 3);
     assert.deepEqual(created, []);
 
     await click('设置画册');
@@ -88,7 +96,7 @@ test('画册全选跨页追加筛选结果，保留原选片顺序与章节，�
     ]);
     await click('返回选片');
     await click('取消全选');
-    assert.match(container.querySelector('.book-create-selection').textContent, /已选 0 张照片/);
+    assert.match(container.querySelector('.photo-picker-selection [role="status"]').textContent, /已选 0 张/);
     assert.equal(button('设置画册').disabled, true);
   });
 });

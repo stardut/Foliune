@@ -7,6 +7,7 @@ pub fn prepare_import_files(
     library: &str,
     group_id: Option<&str>,
 ) -> Result<CurationDraft, String> {
+    let paths = expand_import_paths(paths)?;
     let mut draft = {
         let conn = store.connection.lock().map_err(|e| e.to_string())?;
         import_draft(&conn, library, group_id)?
@@ -41,6 +42,41 @@ pub fn prepare_import_files(
         return Err("图库已切换，本次候选已取消。".into());
     }
     register(drafts, draft)
+}
+
+fn expand_import_paths(paths: Vec<String>) -> Result<Vec<String>, String> {
+    let mut files = Vec::new();
+    for path in paths {
+        let source = Path::new(&path);
+        if !source.is_dir() {
+            files.push(path);
+            continue;
+        }
+        let entries =
+            fs::read_dir(source).map_err(|error| format!("无法读取文件夹「{path}」：{error}"))?;
+        let mut photos = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|error| format!("无法读取文件夹「{path}」：{error}"))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|error| format!("无法读取「{}」：{error}", entry.path().display()))?;
+            if file_type.is_file() && photos::supported_extension(&entry.path()) {
+                photos.push(entry.path());
+            }
+        }
+        photos.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+        if photos.is_empty() {
+            return Err(format!(
+                "文件夹「{path}」当前层级没有 JPEG、PNG 或 WebP 照片。"
+            ));
+        }
+        files.extend(
+            photos
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned()),
+        );
+    }
+    Ok(files)
 }
 
 fn import_draft(conn: &Connection, library: &str, group_id: Option<&str>) -> Result<Draft, String> {

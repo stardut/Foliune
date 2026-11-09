@@ -70,6 +70,8 @@
 .social-post-header { display: flex; align-items: center; gap: 10px; padding: 14px 17px; }
 .social-post-header > svg { margin-left: auto; }
 .social-carousel { position: relative; aspect-ratio: 4 / 5; background: #f0f0f2; }
+.social-carousel:focus-visible { outline: none; }
+:root[data-input-mode="keyboard"] .social-carousel:focus-visible .social-page-number { box-shadow: inset 0 0 0 1px var(--focus); }
 .social-carousel > .social-preview-empty { height: 100%; }
 .social-page-number { position: absolute; top: 13px; right: 13px; background: #16171b9e; color: #fff; border-radius: 20px; font-size: 11px; padding: 3px 10px; font-variant-numeric: tabular-nums; }
 .social-carousel-controls { position: absolute; inset: 0; display: flex; justify-content: space-between; align-items: center; padding: 0 12px; pointer-events: none; }

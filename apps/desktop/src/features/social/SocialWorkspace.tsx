@@ -2,16 +2,17 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { ArrowLeft, Plus } from 'lucide-react';
 import { IconButton } from '../../components/ui';
 import { PhotoPicker } from '../../components/PhotoPicker';
-import type { Photo } from '../../lib/types';
+import type { LibrarySnapshot, Photo } from '../../lib/types';
 import type { SocialSimulationInput } from '../../lib/social-types';
 import { SocialPreview, platformOptions } from './SocialPreview';
 import { SocialPhotoSequence } from './SocialPhotoSequence';
 import './social.css';
 
-export function SocialWorkspace({ photos, onRelink, initialPhotoIds, onExit }: {
-  photos: Photo[]; initialPhotoIds: string[]; onExit: () => void;
+export function SocialWorkspace({ snapshot, onRelink, initialPhotoIds, onExit }: {
+  snapshot: LibrarySnapshot; initialPhotoIds: string[]; onExit: () => void;
   onRelink?: (photo: Photo) => Promise<void>;
 }) {
+  const photos = snapshot.photos;
   const [input, setInput] = useState<SocialSimulationInput>(() => ({ platform: 'moments', title: '', body: '', photoIds: [...initialPhotoIds] }));
   const [picking, setPicking] = useState(false);
   const workspaceRef = useRef<HTMLElement>(null);
@@ -61,6 +62,6 @@ export function SocialWorkspace({ photos, onRelink, initialPhotoIds, onExit }: {
       </div>
       <SocialPreview key={input.platform} input={input} photos={photos} onRelink={onRelink} />
     </div>
-    {picking && <PhotoPicker title="排版选片" photos={photos} selectedIds={input.photoIds} onConfirm={(ids) => { patch('photoIds', ids); setPicking(false); }} onClose={() => setPicking(false)} />}
+    {picking && <PhotoPicker title="排版选片" snapshot={snapshot} selectedIds={input.photoIds} onConfirm={(ids) => { patch('photoIds', ids); setPicking(false); }} onClose={() => setPicking(false)} />}
   </section>;
 }

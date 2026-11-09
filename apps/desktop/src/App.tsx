@@ -211,11 +211,11 @@ export default function App() {
       onBrowsingIdleChange={setPhotoBrowsingIdle}
       workDirectory={space === 'work' ? workDirectory : undefined}
       onOpenWorkDirectorySettings={space === 'work' ? () => navigate('settings') : undefined} />;
-    if (space === 'books') return <BookWorkspace photos={snapshot.photos} onSnapshot={setSnapshot} onPlay={openPlayer} onDirtyChange={setBookDirty} onBusyChange={setBookBusy} onRelink={relinkPhoto}
+    if (space === 'books') return <BookWorkspace snapshot={snapshot} photos={snapshot.photos} onSnapshot={setSnapshot} onPlay={openPlayer} onDirtyChange={setBookDirty} onBusyChange={setBookBusy} onRelink={relinkPhoto}
       initialBook={result?.space === 'books' ? result.book : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
-    if (space === 'models') return <ModelWorkspace photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setModelDirty} onBusyChange={setModelBusy} onRelink={relinkPhoto}
+    if (space === 'models') return <ModelWorkspace snapshot={snapshot} photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setModelDirty} onBusyChange={setModelBusy} onRelink={relinkPhoto}
       initialModel={result?.space === 'models' ? result.model : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
-    if (space === 'planning') return <PlanningWorkspace photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setPlanningDirty} onBusyChange={setPlanningBusy}
+    if (space === 'planning') return <PlanningWorkspace snapshot={snapshot} photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setPlanningDirty} onBusyChange={setPlanningBusy}
       initialPlan={result?.space === 'planning' ? result.plan : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
     return <SettingsWorkspace snapshot={snapshot} directory={workDirectory} onRestored={setSnapshot} onBusyChange={setSettingsBusy}
       workspaceVisibility={workspaceVisibility} onWorkspaceVisibilityChange={changeWorkspaceVisibility} />;
@@ -271,7 +271,7 @@ function SearchResultLoader({ target, onBack, children }: { target: SearchTarget
     const heading = root.current?.querySelector('h1');
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
   }, [detail, attempt]);
-  return <div ref={root}>{detail ? children(detail) : <>
+  return <div ref={root} className="search-result-detail">{detail ? children(detail) : <>
     <WorkspaceHeader title={title}><button type="button" className="button" onClick={onBack}>返回搜索</button></WorkspaceHeader>
     {error ? <div role="alert"><EmptyState title="暂时无法打开结果" description={error} action={<button type="button" className="button" onClick={() => { setError(''); setAttempt((value) => value + 1); }}>重新读取</button>} /></div> : <Busy label={`正在读取${title}`} />}
   </>}</div>;

@@ -10,8 +10,8 @@ import { IconButton } from '../../components/ui';
 import { moved } from './plan-content';
 import { PlanTextarea } from './PlanFields';
 
-export function PlanPhotos({ references, photos, editing = false, disabled = false, maxSelection, onChange, onSnapshot, onBusyChange, layout = 'default' }: {
-  references: PlanReference[]; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onBusyChange: (busy: boolean) => void; editing?: boolean; disabled?: boolean; maxSelection: number;
+export function PlanPhotos({ references, snapshot, photos, editing = false, disabled = false, maxSelection, onChange, onSnapshot, onBusyChange, layout = 'default' }: {
+  references: PlanReference[]; snapshot: LibrarySnapshot; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onBusyChange: (busy: boolean) => void; editing?: boolean; disabled?: boolean; maxSelection: number;
   onChange: (references: PlanReference[]) => void; layout?: 'default' | 'scene' | 'shot';
 }) {
   const [picking, setPicking] = useState(false);
@@ -35,6 +35,6 @@ export function PlanPhotos({ references, photos, editing = false, disabled = fal
       </figure>;
     })}</div>}
     {editing && <button type="button" className="button plan-add-photos" disabled={disabled || maxSelection === 0} onClick={() => setPicking(true)}><ImagePlus size={14} />{references.length ? '调整参考图' : '添加参考图'}</button>}
-    {picking && createPortal(<PhotoSourceDialog library="collection" onBusyChange={onBusyChange} title={layout === 'scene' ? '选择场景参考 · 最多 3 张' : '选择参考图'} photos={photos} selectedIds={references.map((ref) => ref.photoId)} maxSelection={maxSelection} onClose={() => setPicking(false)} onConfirm={({ photoIds, snapshot }) => { if (snapshot) onSnapshot(snapshot); onChange(photoIds.map((photoId) => references.find((ref) => ref.photoId === photoId) ?? { id: crypto.randomUUID(), photoId, intent: '' })); setPicking(false); }} />, document.body)}
+    {picking && createPortal(<PhotoSourceDialog library="collection" onBusyChange={onBusyChange} title={layout === 'scene' ? '选择场景参考 · 最多 3 张' : '选择参考图'} snapshot={snapshot} selectedIds={references.map((ref) => ref.photoId)} maxSelection={maxSelection} onClose={() => setPicking(false)} onConfirm={({ photoIds, snapshot }) => { if (snapshot) onSnapshot(snapshot); onChange(photoIds.map((photoId) => references.find((ref) => ref.photoId === photoId) ?? { id: crypto.randomUUID(), photoId, intent: '' })); setPicking(false); }} />, document.body)}
   </div>;
 }

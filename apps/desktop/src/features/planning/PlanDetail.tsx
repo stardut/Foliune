@@ -12,8 +12,8 @@ import { renderPlanPng } from './plan-export';
 
 const executionDateError = '请选择有效的执行日期。';
 
-export function PlanDetail({ plan, photos, onSnapshot, onClose, onSaved, onDeleted, onDirtyChange, onBusyChange, backLabel = '返回策划列表' }: {
-  plan?: ShootPlan; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onClose: () => void; onSaved: (plan: ShootPlan) => void;
+export function PlanDetail({ plan, snapshot, photos, onSnapshot, onClose, onSaved, onDeleted, onDirtyChange, onBusyChange, backLabel = '返回策划列表' }: {
+  plan?: ShootPlan; snapshot: LibrarySnapshot; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onClose: () => void; onSaved: (plan: ShootPlan) => void;
   onDeleted: (id: string) => void; onDirtyChange: (dirty: boolean) => void; onBusyChange: (busy: boolean) => void; backLabel?: string;
 }) {
   const [draft, setDraft] = useState<ShootPlanInput>(() => inputOf(plan));
@@ -110,7 +110,7 @@ export function PlanDetail({ plan, photos, onSnapshot, onClose, onSaved, onDelet
     </header>
     {error && <p id={errorId} className="form-error plan-error" role="alert">{error}</p>}
     <form id={formId} ref={form} noValidate onSubmit={(event) => { event.preventDefault(); if (editing) void save(); }}>
-      <PlanDocument value={draft} photos={photos} onSnapshot={onSnapshot} onSourceBusyChange={setSourceBusy} editing={editing} disabled={!!busy}
+      <PlanDocument snapshot={snapshot} value={draft} photos={photos} onSnapshot={onSnapshot} onSourceBusyChange={setSourceBusy} editing={editing} disabled={!!busy}
         executionDateErrorId={error === executionDateError ? errorId : undefined} onChange={(value) => {
           if (value.executionDate !== draft.executionDate && error === executionDateError) setError('');
           setDraft(value);

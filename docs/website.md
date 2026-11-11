@@ -25,7 +25,7 @@
 
 [官网工作流](../.github/workflows/pages.yml) 有两个入口：
 
-- **Release 完成后自动发布**：稳定版本 tag 推送触发 [Release macOS app](../.github/workflows/release.yml) 工作流。DMG 构建、校验并上传到公开 Release 成功后，该工作流才调用官网部署；部署使用同一 tag 提交中的 `site/`，不改用 `main` 的网页内容。版本校验复用软件发布脚本；预发布后缀、构建元数据、前导零及其他非法版本不发布。DMG 发布失败时官网不会更新。
+- **Release 完成后自动发布**：稳定版本 tag 推送触发 [Release macOS app](../.github/workflows/release.yml) 工作流。DMG 构建、校验并上传到公开 Release 成功后，该工作流才调用官网部署；部署使用同一 tag 提交中的 `site/`，不改用 `main` 的网页内容。手动重发已有版本时须从 `main` 运行，发布成功后也会刷新官网，部署使用当前 `main` 的 `site/`。版本校验复用软件发布脚本；预发布后缀、构建元数据、前导零及其他非法版本不发布。DMG 发布失败时官网不会更新。
 - **手动 main**：在 **Actions → Deploy Foliune website → Run workflow** 选择 `main`。只接受公开仓库的 `main` 手动运行，不接受其他分支或手动选择 tag。
 
 启用前需完成以下仓库设置：
@@ -50,9 +50,9 @@
 
 这是有意的单向发布策略，不提供自动回滚。若确需退回旧页面，应在当前 `main` 上提交有意的内容恢复，再正常发布；不要强移历史 tag 或绕开保护。保护覆盖采用本工作流的后续运行，不能阻止旧工作流、另一个并发组或手工外部部署覆盖网站。
 
-工作流将权限分开：打包阶段只有 `contents: read`、`pages: read`；部署阶段增加读取源码与部署历史所需的 `contents: read`、`deployments: read`，以及 GitHub Pages 必需的 `pages: write`、`id-token: write`。校验脚本只读 GitHub API，不申请 `contents: write`，不修改环境规则。
+工作流将权限分开：打包阶段使用 `contents: read` 读取最新正式版并生成下载元数据，以及 `pages: read`；部署阶段增加读取源码与部署历史所需的 `contents: read`、`deployments: read`，以及 GitHub Pages 必需的 `pages: write`、`id-token: write`。校验脚本只读 GitHub API，不申请 `contents: write`，不修改环境规则。
 
-官网部署作为 macOS 安装包 Release 工作流的后续 job，在 Release 成功上传 DMG 后运行。官网部署失败不会撤销已发布的安装包，但会使该 Actions 工作流标记失败；DMG 发布失败时不会部署官网。下载区仍通过 GitHub API 读取最新已公开的正式版及有效安装包。
+官网部署作为 macOS 安装包 Release 工作流的后续 job，在 Release 成功上传 DMG 后运行。官网部署失败不会撤销已发布的安装包，但会使该 Actions 工作流标记失败；DMG 发布失败时不会部署官网。访客页面读取部署时生成的同源下载元数据，不直接调用 GitHub API。
 
 ### 本地验证
 
@@ -63,6 +63,6 @@ pnpm test:release
 
 官网防回退测试已接入 PR/main CI，也在官网打包前执行。测试使用内存 API 响应及独立临时 Git 仓库，覆盖稳定版本、乱序/重跑、tag 移动或删除、main 更新、版本别名冲突、部署历史分页、失败关闭以及真实提交祖先关系；不连接 GitHub，不修改项目 Git 历史，也不部署。它们不能替代 GitHub Actions、环境保护和 Pages 服务的真实运行验证。
 
-下载区在访问时读取 GitHub 最新正式版接口。找到与发布标签对应、已上传且非空的 `Foliune_<版本号>_aarch64.dmg` 后，页面显示该版本号、安装包直链和版本说明。接口请求失败、受限或缺少符合条件的安装包时，主按钮仍会打开 GitHub 最新正式版，可在发布页查看安装包和说明。[接口说明](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) · [GitHub 最新正式版](https://github.com/stardut/Foliune/releases/latest)
+官网打包时通过 GitHub Actions 权限读取最新正式版，确认存在与 tag 对应且已完整上传的 `Foliune_<版本号>_aarch64.dmg` 后生成同源 `latest-release.json`。访客只读取该静态文件，不再逐人请求 GitHub API；有效时显示版本号和 DMG 直链，文件不可读或无效时保留 GitHub 最新正式版入口。[接口说明](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) · [GitHub 最新正式版](https://github.com/stardut/Foliune/releases/latest)
 
 网页用的截图由 `docs/screenshots/` 中的原图转换为 WebP，图标来自 `apps/desktop/src-tauri/icons/128x128.png`。摄影来源见[截图说明](screenshots/README.md)。

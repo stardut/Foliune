@@ -140,6 +140,7 @@ test('real Git ancestry accepts forward/equal commits and blocks rollback/diverg
 test('workflow keeps exact source, shared queue, guarded deploy, and scoped permissions', () => {
   const workflow = readFileSync(new URL('../.github/workflows/pages.yml', import.meta.url), 'utf8');
   const releaseWorkflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+  const ciWorkflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   assert.match(workflow, /workflow_call:/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /group: github-pages\s+cancel-in-progress: false/);
@@ -147,10 +148,15 @@ test('workflow keeps exact source, shared queue, guarded deploy, and scoped perm
   assert.equal((workflow.match(/ref: \$\{\{ github.sha \}\}/g) ?? []).length, 2);
   assert.match(workflow, /fetch-depth: 0/);
   assert.match(workflow, /deployments: read/);
+  assert.match(workflow, /name: Prepare latest release download metadata[\s\S]*?GITHUB_TOKEN: \$\{\{ github\.token \}\}[\s\S]*?run: node scripts\/prepare-site-release\.mjs/);
+  assert.match(workflow, /name: Upload website[\s\S]*?path: site\//);
   assert.match(workflow, /if: steps.guard.outputs.deploy == 'true'/);
   assert.match(workflow, /path: site\//);
   assert.doesNotMatch(workflow, /contents: write|deployments: write/);
   assert.match(releaseWorkflow, /deploy-website:[\s\S]*?needs: publish[\s\S]*?uses: \.\/\.github\/workflows\/pages\.yml/);
+  assert.match(releaseWorkflow, /Validate manual release source[\s\S]*?if: github\.event_name == 'workflow_dispatch'[\s\S]*?refs\/heads\/main/);
+  assert.match(releaseWorkflow, /deploy-website:[\s\S]*?github\.event_name == 'workflow_dispatch'[\s\S]*?refs\/heads\/main[\s\S]*?uses: \.\/\.github\/workflows\/pages\.yml/);
+  assert.match(ciWorkflow, /run: pnpm test:pages/);
 });
 
 test('rejected environment jobs fail instead of creating a false successful deployment', async (t) => {

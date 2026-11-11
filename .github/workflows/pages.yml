@@ -1,9 +1,7 @@
 name: Deploy Foliune website
 
 on:
-  push:
-    tags:
-      - "*.*.*"
+  workflow_call:
   workflow_dispatch:
 
 permissions: {}

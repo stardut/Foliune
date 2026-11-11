@@ -25,18 +25,18 @@
 
 [官网工作流](../.github/workflows/pages.yml) 有两个入口：
 
-- **版本 tag 推送**：推送稳定版本 tag（`0.5.1` 或 `v0.5.1`）后，发布该次 tag 事件对应提交中的 `site/`，不改用 `main` 的网页内容。版本校验复用软件发布脚本；预发布后缀、构建元数据、前导零及其他非法版本不发布。
+- **Release 完成后自动发布**：稳定版本 tag 推送触发 [Release macOS app](../.github/workflows/release.yml) 工作流。DMG 构建、校验并上传到公开 Release 成功后，该工作流才调用官网部署；部署使用同一 tag 提交中的 `site/`，不改用 `main` 的网页内容。版本校验复用软件发布脚本；预发布后缀、构建元数据、前导零及其他非法版本不发布。DMG 发布失败时官网不会更新。
 - **手动 main**：在 **Actions → Deploy Foliune website → Run workflow** 选择 `main`。只接受公开仓库的 `main` 手动运行，不接受其他分支或手动选择 tag。
 
 启用前需完成以下仓库设置：
 
 1. 将工作流、校验脚本、测试及官网内容合入 `main`；新版本 tag 必须指向包含这些文件的提交。已有旧 tag 不会自动获得新工作流，重复运行其历史工作流也不会获得本轮的保护。
 2. 将 `stardut/Foliune` 仓库设为公开，并在 **Settings → Pages → Build and deployment** 将 **Source** 设为 **GitHub Actions**。
-3. 在 **Settings → Environments → github-pages → Deployment branches and tags** 中，保留 **Branch `main`**，并增加 **Tag `*.*.*`**（两者类型不同）。该 tag 匹配规则兼容有无 `v` 前缀；真正的稳定版本格式由工作流严格校验。保留已有审批人与其他保护规则，不改成允许所有分支。只允许 `main` 分支时，tag 运行会在环境保护处被拦截，YAML 本身不能解除这个限制。
-4. 设置就绪后，手动运行 `main` 或推送下一个稳定版本 tag。工作流只上传 `site/`，不会打 tag、改版本文件、修改 GitHub 设置或发布安装包。
+3. 在 **Settings → Environments → github-pages → Deployment branches and tags** 中，保留 **Branch `main`**，并允许稳定版本 **Tag `*.*.*`**（两者类型不同）。官网作为可复用工作流在 Release 的 tag 上下文中运行，因此环境必须允许 tag；匹配规则兼容有无 `v` 前缀，真正的稳定版本格式由工作流严格校验。保留已有审批人与其他保护规则，不改成允许所有分支。
+4. 设置就绪后，手动运行 `main`，或推送稳定版本 tag 并等待 macOS Release 工作流成功。工作流只上传 `site/`，不会打 tag、改版本文件、修改 GitHub 设置或发布安装包。
 5. 部署成功后，在未登录 GitHub 的浏览器里打开 <https://stardut.github.io/Foliune/>，检查固定中文首页、直接切换英文、两页的图片和导航，以及 macOS 安装包下载；同时检查 canonical、分享元数据和 sitemap 的线上地址。
 
-2026-11-07 经授权已配置并回读确认 `github-pages` 环境保留 **Branch `main`**、新增 **Tag `*.*.*`**；Pages 的 Source 为 GitHub Actions，其他环境保护保持不变。tag 自动部署仍需将这些代码合入 `main`，并由包含新工作流的后续 tag 真实运行验证。之前的 GitHub Pages 部署失败不能仅凭本地测试判定已修复。
+2026-11-07 经授权已配置并回读确认 `github-pages` 环境保留 **Branch `main`**、新增 **Tag `*.*.*`**；Pages 的 Source 为 GitHub Actions，其他环境保护保持不变。既有 tag 需要合入此工作流后再推送新 tag，后续发布才会在 DMG 上传完成后部署官网。
 
 ### 防止旧内容覆盖
 
@@ -52,7 +52,7 @@
 
 工作流将权限分开：打包阶段只有 `contents: read`、`pages: read`；部署阶段增加读取源码与部署历史所需的 `contents: read`、`deployments: read`，以及 GitHub Pages 必需的 `pages: write`、`id-token: write`。校验脚本只读 GitHub API，不申请 `contents: write`，不修改环境规则。
 
-官网发布和 macOS 安装包 Release 是独立工作流。tag 推送不等待 DMG 构建完成，官网部署失败也不影响安装包发布；官网上线不代表安装包构建通过。下载区继续读取最新已公开的正式版及有效安装包，因此新 tag 的安装包尚未就绪时仍可显示之前可用的版本。
+官网部署作为 macOS 安装包 Release 工作流的后续 job，在 Release 成功上传 DMG 后运行。官网部署失败不会撤销已发布的安装包，但会使该 Actions 工作流标记失败；DMG 发布失败时不会部署官网。下载区仍通过 GitHub API 读取最新已公开的正式版及有效安装包。
 
 ### 本地验证
 

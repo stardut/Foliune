@@ -139,7 +139,8 @@ test('real Git ancestry accepts forward/equal commits and blocks rollback/diverg
 
 test('workflow keeps exact source, shared queue, guarded deploy, and scoped permissions', () => {
   const workflow = readFileSync(new URL('../.github/workflows/pages.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /push:\s+tags:\s+- "\*\.\*\.\*"/);
+  const releaseWorkflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /workflow_call:/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /group: github-pages\s+cancel-in-progress: false/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
@@ -149,6 +150,7 @@ test('workflow keeps exact source, shared queue, guarded deploy, and scoped perm
   assert.match(workflow, /if: steps.guard.outputs.deploy == 'true'/);
   assert.match(workflow, /path: site\//);
   assert.doesNotMatch(workflow, /contents: write|deployments: write/);
+  assert.match(releaseWorkflow, /deploy-website:[\s\S]*?needs: publish[\s\S]*?uses: \.\/\.github\/workflows\/pages\.yml/);
 });
 
 test('rejected environment jobs fail instead of creating a false successful deployment', async (t) => {

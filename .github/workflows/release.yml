@@ -13,6 +13,9 @@ on:
 
 permissions:
   contents: read
+  deployments: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
@@ -22,6 +25,8 @@ jobs:
   build:
     name: Build Apple Silicon DMG
     runs-on: macos-15
+    permissions:
+      contents: read
     env:
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
@@ -207,3 +212,9 @@ jobs:
             '.tag_name == $tag and .draft == false and any(.assets[]; .name == $name and .state == "uploaded" and (.size // 0) > 0)' \
             <<< "$final_release_json" >/dev/null
           echo "Published GitHub Release $TAG_NAME with DMG $asset_name."
+
+  deploy-website:
+    name: Deploy website after DMG publication
+    needs: publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    uses: ./.github/workflows/pages.yml

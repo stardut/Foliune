@@ -27,6 +27,14 @@ fn main() {
             .file(context_menu)
             .flag("-fobjc-arc")
             .compile("foliune_context_menu_macos");
+        if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64") {
+            let update_quit = "src/app_updates/termination_macos.m";
+            println!("cargo:rerun-if-changed={update_quit}");
+            cc::Build::new()
+                .file(update_quit)
+                .flag("-fobjc-arc")
+                .compile("foliune_update_termination_macos");
+        }
         for framework in [
             "AppKit",
             "CFNetwork",

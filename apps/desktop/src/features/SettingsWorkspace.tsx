@@ -7,18 +7,23 @@ import * as backup from '../lib/backup-api';
 import type { LibrarySnapshot } from '../lib/types';
 import type { OptionalWorkspace, WorkspaceVisibility } from '../lib/workspace-visibility';
 import { WorkDirectorySettings } from './WorkDirectory';
+import { AppUpdateSettings } from './AppUpdateSettings';
+import type { useAppUpdate } from './use-app-update';
 import type { useWorkDirectory } from './use-work-directory';
 import './settings.css';
 
 type BackupOperation = 'export' | 'choose' | 'restore';
 
-export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChange, workspaceVisibility, onWorkspaceVisibilityChange }: {
+export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChange, workspaceVisibility, onWorkspaceVisibilityChange, update, installBlocked, onInstall }: {
   snapshot: LibrarySnapshot;
   directory: ReturnType<typeof useWorkDirectory>;
   onRestored: (snapshot: LibrarySnapshot) => void;
   onBusyChange: (busy: boolean) => void;
   workspaceVisibility: WorkspaceVisibility;
   onWorkspaceVisibilityChange: (workspace: OptionalWorkspace, visible: boolean) => void;
+  update: ReturnType<typeof useAppUpdate>;
+  installBlocked: boolean;
+  onInstall: () => void;
 }) {
   const [operation, setOperation] = useState<BackupOperation | null>(null);
   const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
@@ -97,6 +102,7 @@ export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChang
 
   return <section>
     <WorkspaceHeader title="设置" count={`${snapshot.photos.length} 张照片 · ${snapshot.groups.length} 个相簿`} />
+    <AppUpdateSettings update={update} installBlocked={installBlocked || backupBusy || directoryBusy} onInstall={onInstall} />
     <WorkDirectorySettings directory={directory} disabled={backupBusy} />
     <section className="settings-content" aria-labelledby="settings-workspace-title">
       <h2 id="settings-workspace-title">工作区</h2>

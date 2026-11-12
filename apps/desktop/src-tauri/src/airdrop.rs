@@ -7,7 +7,13 @@ pub async fn share_album_airdrop(
     photo_ids: Option<Vec<String>>,
 ) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    return macos::share(window, group_id, photo_ids).await;
+    {
+        use tauri::Manager;
+        let app = window.app_handle().clone();
+        let store = app.state::<crate::db::Store>();
+        let _active = store.restart_gate.require_work()?;
+        return macos::share(window, group_id, photo_ids).await;
+    }
 
     #[cfg(not(target_os = "macos"))]
     {

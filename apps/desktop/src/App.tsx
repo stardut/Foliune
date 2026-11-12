@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Search, Settings2 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import * as api from './lib/api';
@@ -10,6 +10,7 @@ import { listPlans } from './lib/planning-api';
 import type { ShootPlan } from './lib/planning-types';
 import type { LibraryKind, LibrarySnapshot, Photo } from './lib/types';
 import { isWorkspaceVisible, readWorkspaceVisibility, saveWorkspaceVisibility, type OptionalWorkspace } from './lib/workspace-visibility';
+import { currentModalHost, subscribeModalStack } from './lib/modal-stack';
 import { Busy, EmptyState, Modal, WorkspaceHeader } from './components/ui';
 import { useToast } from './components/ToastProvider';
 import { PrimaryNavigation } from './components/PrimaryNavigation';
@@ -19,6 +20,7 @@ import { ModelWorkspace } from './features/models/ModelWorkspace';
 import { PlanningWorkspace } from './features/planning/PlanningWorkspace';
 import { SearchWorkspace, type SearchSession } from './features/search/SearchWorkspace';
 import { SettingsWorkspace } from './features/SettingsWorkspace';
+import { rememberUpdateNotice, useAppUpdate } from './features/use-app-update';
 import { PhotoPlayer } from './features/PhotoPlayer';
 import { WorkDirectoryDiscovery } from './features/WorkDirectory';
 import { useWorkDirectory } from './features/use-work-directory';
@@ -77,11 +79,32 @@ export default function App() {
     });
   }, []);
   const workDirectory = useWorkDirectory(ready, onDirectorySynced, onDirectoryAvailability);
+  const appUpdate = useAppUpdate();
+  const installingUpdate = appUpdate.status.type === 'installing';
+  const updateVersion = 'version' in appUpdate.status ? appUpdate.status.version : null;
+  const modalHost = useSyncExternalStore(subscribeModalStack, currentModalHost);
+  const noticedVersion = useRef<string | null>(null);
   const workspaceDirty = bookDirty || photoDirty || modelDirty || planningDirty;
-  const workspaceBusy = bookBusy || modelBusy || photoBusy || planningBusy || settingsBusy || relinkBusy || workDirectory.blocking;
+  const workspaceBusy = bookBusy || modelBusy || photoBusy || planningBusy || settingsBusy || relinkBusy || workDirectory.blocking || installingUpdate;
+  const installBlocked = workspaceDirty || workspaceBusy || workDirectory.busy || !!workDirectory.retrying?.size
+    || workDirectory.jobs.some((job) => job.status === 'running' || (job.status === 'queued' && workDirectory.state?.status === 'connected'))
+    || !!(pendingSpace || pendingClose || relinkConfirmation || playingIds || closing);
   const discoveryIdle = ready && !loading && (space === 'settings' || (photoBrowsingIdle && (space === 'collection' || space === 'work')))
     && !workspaceDirty && !workspaceBusy && !pendingSpace && !pendingClose && !relinkConfirmation && !playingIds;
   closeState.current = { dirty: workspaceDirty, busy: workspaceBusy };
+  useEffect(() => {
+    if (!ready || !updateVersion || noticedVersion.current === updateVersion || modalHost !== document.body || playingIds || workspaceDirty || workspaceBusy) return;
+    noticedVersion.current = updateVersion;
+    if (rememberUpdateNotice(updateVersion) && space !== 'settings') {
+      toast({ title: `Foliune ${updateVersion} 可更新，请在设置中查看`, status: 'info', duration: 6000 });
+    }
+  }, [ready, updateVersion, modalHost, playingIds, workspaceDirty, workspaceBusy, space, toast]);
+
+  function installUpdate() {
+    if (installBlocked || space !== 'settings' || document.querySelector('dialog[open]')) return;
+    void appUpdate.install();
+  }
+
   async function reload() {
     setLoading(true); setError('');
     if (!api.isDesktop()) { setLoading(false); return; }
@@ -218,7 +241,8 @@ export default function App() {
     if (space === 'planning') return <PlanningWorkspace snapshot={snapshot} photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setPlanningDirty} onBusyChange={setPlanningBusy}
       initialPlan={result?.space === 'planning' ? result.plan : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
     return <SettingsWorkspace snapshot={snapshot} directory={workDirectory} onRestored={setSnapshot} onBusyChange={setSettingsBusy}
-      workspaceVisibility={workspaceVisibility} onWorkspaceVisibilityChange={changeWorkspaceVisibility} />;
+      workspaceVisibility={workspaceVisibility} onWorkspaceVisibilityChange={changeWorkspaceVisibility}
+      update={appUpdate} installBlocked={installBlocked} onInstall={installUpdate} />;
   }
   return <div className={`app-shell ${space === 'collection' || space === 'work' || space === 'search' ? 'gallery-shell' : ''}`} aria-busy={loading || workspaceBusy}>
     <header className="app-header" data-tauri-drag-region>
@@ -228,7 +252,9 @@ export default function App() {
       <PrimaryNavigation items={navigationSpaces} value={space} durationMs={primaryNavigationDurationMs} onChange={navigate} />
       <nav className="header-actions" aria-label="工具">
         <button type="button" className={`icon-button ${space === 'search' ? 'is-active' : ''}`} aria-label="全局搜索 · ⌘K / Ctrl K" title="全局搜索 · ⌘K / Ctrl K" aria-current={space === 'search' ? 'page' : undefined} onClick={openSearch}><Search size={19} /></button>
-        <button type="button" className={`icon-button ${space === 'settings' ? 'is-active' : ''}`} aria-label="设置" title="设置" aria-current={space === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} /></button>
+        <button type="button" className={`icon-button ${space === 'settings' ? 'is-active' : ''} ${updateVersion && space !== 'settings' ? 'settings-update-notice' : ''}`}
+          aria-label={updateVersion ? '设置，有可用更新' : '设置'} title={updateVersion ? '设置 · 有可用更新' : '设置'}
+          aria-current={space === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} /></button>
       </nav>
     </header>
     {!api.isDesktop() && <div className="desktop-hint">当前为浏览器预览 · 请在 Foliune 桌面应用中导入和管理本地照片</div>}
@@ -238,6 +264,7 @@ export default function App() {
     {pendingClose && <Modal title="放弃修改并关闭窗口？" onClose={() => { if (!closing) setPendingClose(false); }}><p className="replacement-copy">当前修改尚未保存，关闭窗口将放弃这些修改。</p><div className="form-actions"><button type="button" className="button" autoFocus disabled={closing} onClick={() => setPendingClose(false)}>继续编辑</button><button type="button" className="button" disabled={closing || workspaceBusy} onClick={() => void discardAndClose()}>{closing ? '正在关闭…' : '放弃并关闭'}</button></div></Modal>}
     {pendingSpace && <Modal title="离开未保存的修改？" onClose={() => setPendingSpace(null)}><p className="replacement-copy">当前修改尚未保存。离开将放弃这些修改。</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setPendingSpace(null)}>继续编辑</button><button type="button" className="button" disabled={workspaceBusy} onClick={() => { if (workspaceBusy) return; setBookDirty(false); setPhotoDirty(false); setModelDirty(false); setPlanningDirty(false); changeSpace(pendingSpace.space, pendingSpace.target); }}>放弃并离开</button></div></Modal>}
     {playingIds && <PhotoPlayer photos={snapshot.photos} photoIds={playingIds} onClose={() => setPlayingIds(null)} onRelink={relinkPhoto} onFeedback={feedback} />}
+    {installingUpdate && <Modal title="安装更新"><Busy label="正在安装并重启 Foliune…" /></Modal>}
     <WorkDirectoryDiscovery directory={workDirectory} idle={discoveryIdle} />
   </div>;
 }

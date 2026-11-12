@@ -31,6 +31,7 @@ impl Drop for MusicCache {
 pub async fn music_import(app: tauri::AppHandle, path: String) -> Result<Track, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
         let source = Path::new(&path);
         let extension = source
             .extension()
@@ -75,6 +76,8 @@ pub async fn music_import(app: tauri::AppHandle, path: String) -> Result<Track, 
 #[tauri::command]
 pub async fn music_release(app: tauri::AppHandle, id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
         let cache = app.state::<MusicCache>();
         let mut files = cache.0.lock().map_err(|e| e.to_string())?;
         if let Some(path) = files.get(&id) {

@@ -3,6 +3,7 @@ use std::{
     io::{Cursor, Write},
     path::{Path, PathBuf},
 };
+use tauri::Manager;
 
 const MAX_BYTES: usize = 64 * 1024 * 1024;
 const MAX_EDGE: u32 = 32_768;
@@ -44,11 +45,16 @@ pub fn export_png(directory: &Path, title: &str, bytes: &[u8]) -> Result<PathBuf
 
 #[tauri::command]
 pub async fn plans_export_png(
+    app: tauri::AppHandle,
     directory: String,
     title: String,
     bytes: Vec<u8>,
 ) -> Result<PathBuf, String> {
-    tauri::async_runtime::spawn_blocking(move || export_png(Path::new(&directory), &title, &bytes))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<crate::db::Store>();
+        let _active = store.restart_gate.require_work()?;
+        export_png(Path::new(&directory), &title, &bytes)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

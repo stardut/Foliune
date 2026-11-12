@@ -24,6 +24,12 @@ Rust `link_import.rs` 管理请求标识、启动图库绑定、取消和候选�
 旧 `apps/macos` SwiftUI 工程保留归档，不参与本路线的构建。没有新增移动端工程。
 Tauri 的结构具备跨桌面平台扩展条件，但当前仅验证 macOS，Windows 构建和系统集成仍需目标环境验收。
 
+## 桌面更新发布
+
+Apple Silicon Mac 的发行构建使用 Tauri Updater。官网 `updater.json` 由已发布的稳定版本生成，提供平台对应的更新包与签名。客户端内置公钥，安装前校验更新包及签名绑定的应用版本。macOS 应用继续使用发布流程现有的 ad-hoc 签名。
+
+首次发布前，用 `tauri signer generate` 生成并备份发行密钥。将公钥内容配置到 GitHub Actions 仓库变量 `TAURI_UPDATER_PUBLIC_KEY`，将私钥内容配置到仓库机密 `TAURI_SIGNING_PRIVATE_KEY`。若密钥设有密码，将密码配置到 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。后续版本使用同一密钥。已装的旧客户端仍信任随旧版嵌入的公钥。
+
 ## 原生操作菜单
 
 `use-context-menu.ts` 保留菜单动作、目标有效性、共享互斥和取消回焦；调用点明确区分鼠标上下文与键盘/更多按钮的定位请求。鼠标路径调用 `popup_context_menu`，键盘和更多按钮沿用 Tauri 定位菜单。`TextContextMenu` 只接管未被业务处理的文本编辑入口，与业务菜单共用互斥；空白、图片及普通网页内容不显示 WebView 默认菜单。

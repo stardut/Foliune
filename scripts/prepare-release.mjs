@@ -9,6 +9,10 @@ export function releaseVersion(tag) {
   return tag.replace(/^v/, '');
 }
 
+export function completeAsset(asset) {
+  return asset?.state === 'uploaded' && Number.isSafeInteger(asset.size) && asset.size > 0;
+}
+
 function replaceTomlVersion(source, header, version, label) {
   const blocks = source.match(/^(?:\[\[?[^\n]+\]\]?)[\s\S]*?(?=^\[|$(?![\s\S]))/gm) ?? [];
   const matches = blocks.filter(header);

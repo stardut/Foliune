@@ -397,8 +397,10 @@ pub async fn prepare_import(
     group_id: Option<String>,
 ) -> Result<CurationDraft, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
         prepare_import_files(
-            &app.state::<Store>(),
+            &store,
             &app.state::<CurationStore>(),
             paths,
             &library,
@@ -426,12 +428,9 @@ pub async fn commit_curation(
     keep_ids: Vec<String>,
 ) -> Result<Snapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        commit(
-            &app.state::<Store>(),
-            &app.state::<CurationStore>(),
-            &draft_id,
-            keep_ids,
-        )
+        let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
+        commit(&store, &app.state::<CurationStore>(), &draft_id, keep_ids)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -440,11 +439,9 @@ pub async fn commit_curation(
 #[tauri::command]
 pub async fn cancel_curation(app: tauri::AppHandle, draft_id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        cancel(
-            &app.state::<Store>(),
-            &app.state::<CurationStore>(),
-            &draft_id,
-        )
+        let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
+        cancel(&store, &app.state::<CurationStore>(), &draft_id)
     })
     .await
     .map_err(|e| e.to_string())?

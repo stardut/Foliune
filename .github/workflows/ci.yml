@@ -58,7 +58,7 @@ jobs:
         run: node apps/desktop/src-tauri/src/link_import_extract_tests.js
 
       - name: Test release preparation
-        run: node --test scripts/prepare-release.test.mjs
+        run: pnpm test:release
 
       - name: Test website deployment guard
         run: pnpm test:pages

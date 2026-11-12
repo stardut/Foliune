@@ -12,7 +12,7 @@ cc = "1"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "~2.11.0", features = ["protocol-asset", "macos-private-api"] }
+tauri = { version = "~2.12.0", features = ["protocol-asset", "macos-private-api"] }
 tauri-plugin-dialog = "~2.7.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -35,6 +35,9 @@ libc = "0.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["socks"] }
 zune-jpeg = { version = "0.4", default-features = false }
+
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+tauri-plugin-updater = "=2.14.1"
 
 [dev-dependencies]
 tempfile = "3"

@@ -2,6 +2,7 @@ mod ai;
 mod ai_settings;
 mod airdrop;
 mod album_cover;
+mod app_updates;
 mod backup;
 mod book_export;
 mod book_layout;
@@ -25,6 +26,7 @@ mod photos;
 mod planning;
 mod planning_export;
 mod png_export;
+mod restart_gate;
 mod social;
 mod work_directory;
 
@@ -47,6 +49,7 @@ async fn import_photos(
 ) -> Result<photos::ImportResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
         photos::import_local(&store, paths, &library, group_id.as_deref()).map(|(result, _)| result)
     })
     .await
@@ -105,6 +108,7 @@ async fn set_membership_statuses(
 async fn relink_photo(app: AppHandle, photo_id: String, path: String) -> Result<Snapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
         photos::relink(&store, &photo_id, std::path::Path::new(&path))
     })
     .await
@@ -127,9 +131,14 @@ pub fn run() {
             app.manage(link_import::LinkImportStore::default());
             app.manage(music::MusicCache::default());
             work_directory::start_monitor(app.handle()).map_err(std::io::Error::other)?;
+            app_updates::setup(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(restart_gate::protect_invocations(tauri::generate_handler![
+            app_updates::app_update_info,
+            app_updates::check_app_update,
+            app_updates::download_app_update,
+            app_updates::install_app_update,
             context_menu::popup_context_menu,
             load_snapshot,
             import_photos,
@@ -184,9 +193,30 @@ pub fn run() {
             work_directory::runtime::resolve_work_directory,
             work_directory::runtime::retry_work_directory_job,
             music::music_release
-        ])
-        .run(tauri::generate_context!())
-        .expect("Foliune 桌面运行失败");
+        ]))
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main"
+                    && window
+                        .try_state::<Store>()
+                        .is_some_and(|store| store.restart_gate.is_locked())
+                {
+                    api.prevent_close();
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("Foliune 桌面运行失败")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if app
+                    .try_state::<Store>()
+                    .is_some_and(|store| store.restart_gate.is_installing())
+                {
+                    api.prevent_exit();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

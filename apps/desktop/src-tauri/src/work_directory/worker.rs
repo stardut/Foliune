@@ -21,6 +21,9 @@ pub(super) fn run_jobs(app: AppHandle, pending: Receiver<()>) {
     let manager = app.state::<WorkDirectoryMonitor>();
     while pending.recv().is_ok() {
         loop {
+            let Some(_active) = store.restart_gate.active_work() else {
+                break;
+            };
             match process_next(&store, &manager.cache, |library_id, synced| {
                 let refresh = synced.is_some();
                 emit(&app, library_id, refresh, synced);

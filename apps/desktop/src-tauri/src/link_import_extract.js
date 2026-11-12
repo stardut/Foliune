@@ -3,6 +3,7 @@
   const config = __FOLIUNE_CONFIG__;
   const started = Date.now();
   let previous = '', stable = 0, finished = false, gateSince = 0;
+  const incomplete = { images: [], expected: 0 };
   const walk = (root, visit) => {
     const stack = [root], seen = new Set();
     let count = 0;
@@ -29,12 +30,17 @@
         }
       }) && traversed;
     }
+    if (!traversed) return incomplete;
     const counts = [...new Set(matches.map(node => node.carousel_media_count).filter(count => count != null))];
     const hasCarousel = matches.some(node => node.media_type === 8 || node.__typename === 'XIGPolarisCarouselMedia');
-    const isVideo = node => node?.media_type === 2 || node?.is_video === true;
+    const mediaType = node => {
+      if (node?.media_type === 1 && node.is_video !== true) return 'image';
+      if ((node?.media_type === 2 && node.is_video !== false) || (node?.media_type == null && node?.is_video === true)) return 'video';
+      return null;
+    };
     const imageOf = node => {
       const candidates = node?.image_versions2?.candidates;
-      if (node?.media_type !== 1 || isVideo(node) || !Array.isArray(candidates)) return null;
+      if (!Array.isArray(candidates)) return null;
       const choices = candidates.filter(x => typeof x?.url === 'string');
       // Stable sorting preserves the platform's first choice when dimensions are absent.
       choices.sort((a, b) => ((b.width || 0) * (b.height || 0)) - ((a.width || 0) * (a.height || 0)));
@@ -43,43 +49,60 @@
     for (const node of matches) {
       if (node.media_type === 8 && Array.isArray(node.carousel_media)) {
         const children = node.carousel_media;
-        if (children.some(isVideo)) return { error: 'video' };
-        if (!traversed || children.length === 0) continue;
+        if (children.length === 0) continue;
         const counted = counts.length === 1 && counts[0] === children.length;
+        const polaris = publicCarousels.has(node) && node.__typename === 'XIGPolarisCarouselMedia';
         // The public Polaris payload carries the ordered media records without a separate count.
-        const publicList = counts.length === 0 && publicCarousels.has(node)
-          && node.__typename === 'XIGPolarisCarouselMedia' && children.length > 1
-          && children.every(child => child?.__typename === 'XIGPolarisImageMedia' && typeof child.id === 'string' && child.id.length > 0)
-          && new Set(children.map(child => child.id)).size === children.length;
-        if (counted || publicList) {
-          const images = children.map(imageOf);
-          if (images.every(Boolean)) return { images, expected: children.length };
+        if (!counted && !(counts.length === 0 && polaris && children.length > 1)) continue;
+        const types = children.map(mediaType);
+        if (types.includes(null)) continue;
+        if (polaris) {
+          const validChildren = children.every((child, index) => typeof child.id === 'string' && child.id.trim().length > 0
+            && (types[index] === 'image' ? child.__typename === 'XIGPolarisImageMedia'
+              : child.media_type === 2 && child.__typename === 'XIGPolarisVideoMedia'));
+          if (!validChildren || new Set(children.map(child => child.id)).size !== children.length) continue;
         }
-      }
-      if (isVideo(node)) return { error: 'video' };
-      if (!hasCarousel && node.media_type === 1 && counts.every(n => n === 1)) {
-        const image = imageOf(node);
-        if (traversed && image) return { images: [image], expected: 1 };
+        const images = children.filter((_, index) => types[index] === 'image').map(imageOf);
+        if (images.every(Boolean)) return images.length ? { images, expected: images.length } : { error: 'video' };
+      } else if (!hasCarousel && counts.every(n => n === 1)) {
+        const type = mediaType(node);
+        if (type === 'video') return { error: 'video' };
+        const image = type === 'image' && imageOf(node);
+        if (image) return { images: [image], expected: 1 };
       }
     }
-    return { images: [], expected: 0 };
+    return incomplete;
   };
   const xhs = () => {
     const notes = [];
-    let traversed = walk(window.__INITIAL_STATE__, node => {
+    const traversed = walk(window.__INITIAL_STATE__, node => {
       if ((node.noteId === config.id || node.id === config.id) && Array.isArray(node.imageList)) notes.push(node);
       const entry = node[config.id];
       if (entry?.note && Array.isArray(entry.note.imageList) && (entry.note.noteId === config.id || entry.note.id === config.id)) notes.push(entry.note);
     });
     const path = location.pathname.split('/').filter(Boolean);
-    if (path[path.length - 1] !== config.id) return { images: [], expected: 0 };
+    if (!traversed || path[path.length - 1] !== config.id) return incomplete;
     const counts = [...new Set(notes.map(note => note.imageList.length))];
-    if (notes.some(note => note.type === 'video')) return { error: 'video' };
-    const images = [...document.querySelectorAll('#noteContainer .swiper-slide:not(.swiper-slide-duplicate) .note-slider-img img')]
-      .map(img => ({ src: img.currentSrc || img.src, index: Number(img.closest('.swiper-slide')?.getAttribute('data-swiper-slide-index')) }));
-    const ordered = images.every((image, index) => image.src && image.index === index);
-    if (traversed && counts.length === 1 && counts[0] > 0 && images.length === counts[0] && ordered) return { images: images.map(x => x.src), expected: counts[0] };
-    return { images: [], expected: counts[0] || 0 };
+    if (counts.length !== 1 || counts[0] === 0) return incomplete;
+    const slides = [...document.querySelectorAll('#noteContainer .swiper-slide:not(.swiper-slide-duplicate)')];
+    if (counts[0] === 1 && notes.some(note => note.type === 'video')) {
+      // A single imageList entry on a video note with playable media is its cover.
+      const videoWithCover = notes.every(note => note.type === 'video' && (note.video?.consumer?.originVideoKey
+        || Object.values(note.video?.media?.stream || {}).some(items => Array.isArray(items) && items.length > 0)));
+      return videoWithCover && slides.length <= 1 ? { error: 'video' } : incomplete;
+    }
+    if (slides.length !== counts[0]) return incomplete;
+    const images = [];
+    for (const [index, slide] of slides.entries()) {
+      if (slide.getAttribute('data-swiper-slide-index') !== String(index)) return incomplete;
+      const isLivePhoto = notes.some(note => note.imageList[index]?.livePhoto === true);
+      if (!isLivePhoto && slide.querySelector('video')) continue;
+      const img = slide.querySelector('.note-slider-img img');
+      const src = img?.currentSrc || img?.src;
+      if (!src) return incomplete;
+      images.push(src);
+    }
+    return images.length ? { images, expected: images.length } : { error: 'video' };
   };
   const send = report => {
     if (finished) return;
@@ -100,8 +123,10 @@
       if (gate) { if (!gateSince) gateSince = Date.now(); } else gateSince = 0;
       const signature = JSON.stringify([media.images, media.expected, media.error, gate]);
       stable = signature === previous ? stable + 1 : 0; previous = signature;
-      if (media.error === 'video') return send({ status: 'video', images: [], expected: 0 });
-      if (!gate && media.images?.length > 0 && stable >= 3) return send({ status: 'complete', ...media });
+      if (!gate && stable >= 3) {
+        if (media.error === 'video') return send({ status: 'video', ...incomplete });
+        if (media.images?.length > 0) return send({ status: 'complete', ...media });
+      }
       if (gate && Date.now() - gateSince >= 12000 && Date.now() - started >= 15000) return send({ status: gate, images: [], expected: 0 });
       if (Date.now() - started >= 60000) send({ status: 'incomplete', images: [], expected: 0 });
     } catch {

@@ -20,7 +20,7 @@ Foliune is a local desktop app for photographers and photography enthusiasts. Ke
 
 Keep track of the light, colors, and compositions that caught your eye with tags and written notes. The photo wall gives landscape, portrait, and square photographs room to sit together at their original proportions, with each composition intact.
 
-Import local photographs, or preview and select images from individual Xiaohongshu and Instagram image posts before adding them to your library. Link imports depend on platform access and save the static image versions supplied by the platform.
+Import local photographs, or preview and select photos from individual Xiaohongshu and Instagram posts before adding them to your library. Link imports depend on platform access, save the static photos supplied by the platform, and skip videos and their cover images.
 
 ### Photobooks
 

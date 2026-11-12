@@ -39,7 +39,7 @@ fn report(url: &Url, nonce: &str, target: &Target) -> Result<Vec<String>, String
     }
     if report.status != "complete" {
         return Err(match report.status.as_str() {
-            "video" => "首版仅支持图片帖子，视频帖或混合视频的帖子尚不支持。",
+            "video" => "这篇帖子没有可导入的照片。",
             "login_required" => "该帖子需要网页登录后查看；当前无痕导入不使用账号 Cookie。",
             "blocked" => "平台要求安全验证或限制访问，无法导入该帖子。",
             "unavailable" => "帖子不存在、不可见或平台暂时无法展示。",

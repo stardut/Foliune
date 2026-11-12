@@ -121,7 +121,7 @@ pub(super) fn target(url: Url) -> Result<Target, String> {
             {
                 (*id).to_string()
             }
-            _ => return Err("首版仅支持 Instagram 静态图片帖（/p/ 链接）。".into()),
+            _ => return Err("请使用 Instagram 单篇帖子链接（/p/ 链接）。".into()),
         },
     };
     let canonical = match platform {

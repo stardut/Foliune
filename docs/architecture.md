@@ -14,7 +14,7 @@ macOS 的作品目录同步按文件内容识别 JPEG，从已校验的文件句
 
 `PhotoSourceDialog` / `PhotoSourceGrid` / `use-photo-source-import` 提供图库、本地、链接的共用选片与候选生命周期。`photo-import-api.ts` 封装 `prepare_link_import` / `cancel_link_import`，用请求专属的 Tauri Channel 接收总数和逐张就绪的候选。准备结果仍为 `CurationDraft`，确认和取消沿用候选提交接口。来源对话框负责候选选择与容量取舍，各业务只接收稳定照片 ID 和提交后的 snapshot。策划与画册新增 snapshot 回流，无需重新挂载编辑工作区。
 
-Rust `link_import.rs` 管理请求标识、启动图库绑定、取消和候选交接；`link_import_input.rs` 约束分享文本、平台路径与短链跳转；`link_import_webview.rs` 创建随机label的独立无痕窗口，拒绝新窗口与非平台导航，只接受带随机nonce的终态回传；网页没有匹配的远程图库IPC能力。`link_import_extract.js` 校验精确目标帖子和完整静态媒体列表，最终回传前不触发主框架诊断导航。`link_import_download.rs` 约束各平台HTTPS CDN、禁重定向、限时限量、后台解码与原字节暂存。LIVE照片仅取静态版本，视频不混作图片。
+Rust `link_import.rs` 管理请求标识、启动图库绑定、取消和候选交接；`link_import_input.rs` 约束分享文本、平台路径与短链跳转；`link_import_webview.rs` 创建随机label的独立无痕窗口，拒绝新窗口与非平台导航，只接受带随机nonce的终态回传；网页没有匹配的远程图库IPC能力。`link_import_extract.js` 校验精确目标帖子及其媒体列表，按原顺序回传确认的照片和照片总数，最终回传前不触发主框架诊断导航。`link_import_download.rs` 约束各平台HTTPS CDN、禁重定向、限时限量、后台解码与原字节暂存。LIVE照片仅取静态版本，视频和视频封面不作为候选。
 
 `link_import_source.rs` 对每张下载图片解码并生成缩略图，保存原字节和规范化帖子来源。原件和缩略图写入当前图库的会话暂存目录后才发布对应候选。整组成功后，`link_import_curation.rs` 将同一批候选交给取舍会话，正式入库仍由 curation 原子提交。取消与暂存文件写入串行，前端忽略过期会话的进度。会话和临时文件排除在备份之外，照片来源仅保留帖子地址。方案与验收见[统一照片来源](photo-source-import.md)。
 

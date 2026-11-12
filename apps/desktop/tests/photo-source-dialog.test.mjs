@@ -165,7 +165,9 @@ test('链接逐张预览并更新进度，拿到候选会话后原地启用选�
     assert.equal(first.querySelector('.photo-picker-check'), null);
     assert.equal(confirm.disabled, true);
     assert.equal(bar.getAttribute('aria-valuenow'), '1');
-    assert.deepEqual([...grid.children], [first, placeholder]);
+    assert.equal(grid.children.length, 2);
+    assert(grid.firstElementChild === placeholder);
+    assert(grid.lastElementChild === first);
     await act(async () => report({ total: 2, photo: photo('new2') }));
     assert.equal(bar.getAttribute('aria-valuenow'), '2');
     assert.equal(container.querySelectorAll('button[aria-label^="预览 "]').length, 2);
@@ -184,6 +186,51 @@ test('链接逐张预览并更新进度，拿到候选会话后原地启用选�
     assert.equal(container.querySelector('.photo-picker-selection [role="status"]').textContent, '已选 0 张');
     await select('new2'); await click('确认导入');
     assert.deepEqual(calls.commit, [['draft-1', ['new2']]]);
+  });
+});
+
+test('链接超过 60 张仍连续显示，保留首格占位与滚动位置', async () => {
+  const pending = deferred();
+  const ids = Array.from({ length: 63 }, (_, index) => `new${index + 1}`);
+  await scenario({ prepare: () => pending.promise }, async ({ calls, click, link, container }) => {
+    await link(); await click('获取图片');
+    const report = calls.prepare[0][4];
+    const grid = container.querySelector('.photo-picker-grid');
+    const scroll = container.querySelector('.photo-picker-scroll');
+    const labels = () => [...grid.querySelectorAll('.photo-picker-item')].map(button => button.getAttribute('aria-label'));
+    await act(async () => {
+      for (const id of ids.slice(0, 60)) report({ total: ids.length, photo: photo(id) });
+    });
+    assert(grid.firstElementChild.matches('.photo-picker-placeholder[aria-hidden="true"]'));
+    scroll.scrollTop = 100;
+    const firstPhoto = grid.querySelector('.photo-picker-item');
+    await act(async () => {
+      for (const id of ids.slice(60, -1)) report({ total: ids.length, photo: photo(id) });
+    });
+    assert.equal(container.querySelector('.page-controls'), null);
+    assert(grid.firstElementChild.matches('.photo-picker-placeholder'));
+    assert.deepEqual(labels(), ids.slice(0, -1).map(id => `预览 ${id}`));
+    assert.equal(scroll.scrollTop, 100);
+
+    await act(async () => report({ total: ids.length, photo: photo(ids.at(-1)) }));
+    assert.equal(grid.querySelector('.photo-picker-placeholder'), null);
+    assert.deepEqual(labels(), ids.map(id => `预览 ${id}`));
+    await act(async () => pending.resolve(draft(ids)));
+    assert.equal(container.querySelector('.page-controls'), null);
+    assert.deepEqual(labels(), ids.map(id => `选择 ${id}`));
+    assert(grid.firstElementChild === firstPhoto);
+    assert.equal(scroll.scrollTop, 100);
+  });
+});
+
+test('本地导入候选超过 60 张仍可翻页', async () => {
+  const ids = Array.from({ length: 62 }, (_, index) => `local${index + 1}`);
+  await scenario({ prepare: () => draft(ids) }, async ({ click, chooseLocalPhotos, container }) => {
+    await click('本地'); await chooseLocalPhotos();
+    const labels = () => [...container.querySelectorAll('.photo-picker-item')].map(button => button.getAttribute('aria-label'));
+    assert.deepEqual(labels(), ids.slice(0, 60).map(id => `取消选择 ${id}`));
+    await click('下一页');
+    assert.deepEqual(labels(), ['取消选择 local61', '取消选择 local62']);
   });
 });
 

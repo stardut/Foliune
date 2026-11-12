@@ -9,7 +9,9 @@ use std::{
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
-use tauri::{Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    utils::config::BackgroundThrottlingPolicy, Manager, Url, WebviewUrl, WebviewWindowBuilder,
+};
 
 #[derive(Deserialize)]
 struct Report {
@@ -86,6 +88,8 @@ pub(super) async fn extract(
                 .inner_size(1260.0, 900.0)
                 .visible(false)
                 .incognito(true)
+                // The extractor waits for the post to settle while this window stays hidden.
+                .background_throttling(BackgroundThrottlingPolicy::Disabled)
                 .initialization_script(script)
                 .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
                 .on_navigation(move |url| {

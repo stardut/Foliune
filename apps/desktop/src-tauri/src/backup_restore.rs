@@ -43,7 +43,7 @@ pub(super) fn validate_data(conn: &Connection) -> Result<(), String> {
 pub(super) fn merge(store: &Store, root: &Path, archive: &Path) -> Result<RestoreResult, String> {
     // Other app operations use this lock. A dedicated connection keeps the attached
     // archive and temporary tables out of the persistent application connection.
-    let _live = store.connection.lock().map_err(|error| error.to_string())?;
+    let live = store.connection.lock().map_err(|error| error.to_string())?;
     let mut conn = Connection::open_with_flags(
         root.join("library.sqlite"),
         OpenFlags::SQLITE_OPEN_READ_WRITE,
@@ -64,6 +64,7 @@ pub(super) fn merge(store: &Store, root: &Path, archive: &Path) -> Result<Restor
         let skipped_document_count = merge_documents(&tx)?;
         let unresolved_work_photo_count = merge_work_directory(&tx)?;
         validate_data(&tx).map_err(|error| format!("合并后的图库未通过校验：{error}"))?;
+        crate::work_directory::copy_availability(&live, &tx)?;
         let snapshot = db::snapshot(&tx)?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(RestoreResult {

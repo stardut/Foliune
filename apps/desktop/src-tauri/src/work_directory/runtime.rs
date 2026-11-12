@@ -4,7 +4,7 @@ use super::{
     relink,
     source::{RootDirectory, RootStamp},
     sync::{self, Candidate, Decision, SyncDelta},
-    unbind, Original, Root, Scan,
+    unbind, verification, Original, Root, Scan,
 };
 use crate::{
     db::{self, Store},
@@ -110,15 +110,9 @@ impl Cache {
                 .map(|root| Queue::load(conn, root))
                 .transpose()?
                 .unwrap_or_default();
-            self.state.library_id = if library == store.root {
-                "default".into()
-            } else {
-                library
-                    .file_name()
-                    .and_then(|id| id.to_str())
-                    .ok_or("图库路径无效")?
-                    .into()
-            };
+            self.state.library_id = library_id(&store.root, &library)
+                .ok_or("图库路径无效")?
+                .into();
             self.context_id = uuid::Uuid::new_v4();
             self.queue = queue;
             self.library = library;
@@ -206,6 +200,7 @@ pub(crate) struct WorkDirectoryMonitor {
     cache: Mutex<Cache>,
     signal: SyncSender<()>,
     work: SyncSender<()>,
+    verify: SyncSender<()>,
 }
 
 pub(crate) fn start_monitor(app: &AppHandle) -> Result<(), String> {
@@ -219,23 +214,46 @@ pub(crate) fn start_monitor(app: &AppHandle) -> Result<(), String> {
     }
     let (signal, receiver) = mpsc::sync_channel(1);
     let (work, pending) = mpsc::sync_channel(1);
+    let (verify, checks) = mpsc::sync_channel(1);
+    let _ = verify.try_send(());
     app.manage(WorkDirectoryMonitor {
         cache: Mutex::new(Cache::default()),
         signal: signal.clone(),
         work,
+        verify,
     });
     let worker_app = app.clone();
-    // A single worker serializes reads from the bound directory.
+    // A single sync worker serializes preparation of confirmed albums.
     std::thread::Builder::new()
         .name("work-directory-sync".into())
         .spawn(move || worker::run_jobs(worker_app, pending))
         .map_err(|e| format!("无法启动作品目录同步：{e}"))?;
+    let verify_app = app.clone();
+    std::thread::Builder::new()
+        .name("work-directory-verify".into())
+        .spawn(move || {
+            let store = verify_app.state::<Store>();
+            verification::run(&store, checks, |library| {
+                if let Some(library_id) = library_id(&store.root, library) {
+                    emit(&verify_app, library_id, true, None);
+                }
+            });
+        })
+        .map_err(|e| format!("无法启动作品目录原件校验：{e}"))?;
     let app = app.clone();
     std::thread::Builder::new()
         .name("work-directory-monitor".into())
         .spawn(move || monitor::run(app, receiver, signal))
         .map_err(|e| format!("无法启动作品目录监听：{e}"))?;
     Ok(())
+}
+
+fn library_id<'a>(base: &Path, library: &'a Path) -> Option<&'a str> {
+    if library == base {
+        Some("default")
+    } else {
+        library.file_name().and_then(|id| id.to_str())
+    }
 }
 
 pub(crate) fn wake_monitor(app: &AppHandle) {

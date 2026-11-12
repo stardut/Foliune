@@ -5,11 +5,13 @@ pub(crate) mod runtime;
 mod source;
 mod staging;
 mod sync;
+mod verification;
 
 pub(crate) use runtime::{serve, start_monitor, wake_monitor};
 pub(crate) use source::{
     open_file_at_path, original, original_status, stat_signature, BoundAvailability, Original,
 };
+pub(crate) use verification::copy_availability;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use std::{
@@ -63,7 +65,8 @@ pub(crate) fn init(conn: &Connection) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
     }
-    queue::init(conn)
+    queue::init(conn)?;
+    verification::init_availability(conn)
 }
 
 /// Confirmations belong to the live library and never to a portable archive.

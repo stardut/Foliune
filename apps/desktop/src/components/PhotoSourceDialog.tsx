@@ -153,7 +153,7 @@ export function PhotoSourceDialog({ snapshot, selectedIds = [], library, groupId
           : session.draft || session.linkProgress ? <PhotoSourceGrid key={source === 'link' ? 'link' : session.draft?.id}
             photos={session.linkProgress?.photos ?? pendingPhotos} selectedIds={[...selected, ...pendingSelected]} totalSelected={totalSelected}
             maxSelection={maxSelection} disabled={session.committing} previewOnly={session.linkProgress !== null} preservePosition={source === 'link'}
-            loadingNext={loadingNextPhoto} onToggle={(id) => toggle(id, true)} emptyTitle="没有可选择的照片" />
+            paginated={source !== 'link'} loadingNext={loadingNextPhoto} onToggle={(id) => toggle(id, true)} emptyTitle="没有可选择的照片" />
             : <div className="photo-source-empty"><EmptyState title={source === 'local' ? '选择要导入的照片' : '从链接获取照片'} /></div>}
         {!!session.draft?.failures.length && <div className="photo-source-failures" role="alert"><strong>{session.draft.failures.length} 张照片未能读取</strong>
           <ul>{session.draft.failures.map((failure, index) => <li key={`${index}-${failure.path}`}>{failure.path} · {failure.message}</li>)}</ul></div>}

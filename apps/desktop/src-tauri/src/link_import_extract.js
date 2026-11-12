@@ -16,28 +16,48 @@
   };
   const instagram = () => {
     const matches = [];
+    const publicCarousels = new Set();
     let traversed = true;
     for (const script of document.querySelectorAll('script[type="application/json"]')) {
       if (!script.textContent || script.textContent.length > 12 * 1024 * 1024) continue;
       let root; try { root = JSON.parse(script.textContent); } catch { continue; }
-      traversed = walk(root, node => { if (node.code === config.id) matches.push(node); }) && traversed;
+      traversed = walk(root, node => {
+        if (node.code === config.id) matches.push(node);
+        const post = node.result?.data?.xig_polaris_media;
+        if (post?.code === config.id && post.__typename === 'XIGPolarisCarouselMedia') {
+          publicCarousels.add(post.if_not_gated_logged_out);
+        }
+      }) && traversed;
     }
-    const counts = [...new Set(matches.map(node => node.carousel_media_count).filter(Number.isInteger))];
+    const counts = [...new Set(matches.map(node => node.carousel_media_count).filter(count => count != null))];
+    const hasCarousel = matches.some(node => node.media_type === 8 || node.__typename === 'XIGPolarisCarouselMedia');
+    const isVideo = node => node?.media_type === 2 || node?.is_video === true;
     const imageOf = node => {
-      if (node?.media_type !== 1 || node.is_video === true) return null;
-      const choices = (node.image_versions2?.candidates || []).filter(x => typeof x?.url === 'string');
+      const candidates = node?.image_versions2?.candidates;
+      if (node?.media_type !== 1 || isVideo(node) || !Array.isArray(candidates)) return null;
+      const choices = candidates.filter(x => typeof x?.url === 'string');
       // Stable sorting preserves the platform's first choice when dimensions are absent.
       choices.sort((a, b) => ((b.width || 0) * (b.height || 0)) - ((a.width || 0) * (a.height || 0)));
       return choices[0]?.url || null;
     };
     for (const node of matches) {
       if (node.media_type === 8 && Array.isArray(node.carousel_media)) {
-        if (node.carousel_media.some(child => child.media_type !== 1 || child.is_video === true)) return { error: 'video' };
-        const images = node.carousel_media.map(imageOf);
-        if (traversed && counts.length === 1 && counts[0] === images.length && images.every(Boolean)) return { images, expected: counts[0] };
+        const children = node.carousel_media;
+        if (children.some(isVideo)) return { error: 'video' };
+        if (!traversed || children.length === 0) continue;
+        const counted = counts.length === 1 && counts[0] === children.length;
+        // The public Polaris payload carries the ordered media records without a separate count.
+        const publicList = counts.length === 0 && publicCarousels.has(node)
+          && node.__typename === 'XIGPolarisCarouselMedia' && children.length > 1
+          && children.every(child => child?.__typename === 'XIGPolarisImageMedia' && typeof child.id === 'string' && child.id.length > 0)
+          && new Set(children.map(child => child.id)).size === children.length;
+        if (counted || publicList) {
+          const images = children.map(imageOf);
+          if (images.every(Boolean)) return { images, expected: children.length };
+        }
       }
-      if (node.media_type === 2 || node.is_video === true) return { error: 'video' };
-      if (node.media_type === 1 && counts.every(n => n === 1)) {
+      if (isVideo(node)) return { error: 'video' };
+      if (!hasCarousel && node.media_type === 1 && counts.every(n => n === 1)) {
         const image = imageOf(node);
         if (traversed && image) return { images: [image], expected: 1 };
       }

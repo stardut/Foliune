@@ -173,6 +173,10 @@ pub(super) fn run(app: AppHandle, receiver: Receiver<()>, signal: SyncSender<()>
         if changed {
             emit(&app, &library_id, refresh_snapshot, None);
         }
+        if from_signal || refresh_snapshot || incomplete_watcher {
+            // Keep at most one follow-up check queued while the verifier reads originals.
+            let _ = app.state::<WorkDirectoryMonitor>().verify.try_send(());
+        }
     }
 }
 

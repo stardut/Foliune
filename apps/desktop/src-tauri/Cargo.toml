@@ -26,6 +26,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 keyring = { version = "3", features = ["apple-native", "windows-native"] }
 sha2 = "0.10"
 notify = "8"
+same-file = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(unix)'.dependencies]

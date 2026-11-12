@@ -41,7 +41,7 @@ pub(super) fn photo(path: &Path, red: u8) {
         .unwrap();
 }
 
-fn sync_now(
+pub(super) fn sync_now(
     conn: &mut Connection,
     root: &Root,
     candidates: &[sync::Candidate],
@@ -288,6 +288,9 @@ fn offline_missing_and_relink_never_replace_original_content() {
     let moved = fixture.works.with_file_name("已移动");
     fs::rename(&fixture.works, &moved).unwrap();
     assert!(!scan(Some(&root)).connected);
+    drop(conn);
+    verification::verify_all(&fixture.store, |_| {}, source::fingerprint).unwrap();
+    let conn = fixture.store.connection.lock().unwrap();
     assert_eq!(
         db::snapshot(&conn).unwrap().photos[0].availability,
         Some(BoundAvailability::Offline)
@@ -309,6 +312,9 @@ fn offline_missing_and_relink_never_replace_original_content() {
     );
 
     fs::remove_file(moved.join("活动/首张.webp")).unwrap();
+    drop(conn);
+    verification::verify_all(&fixture.store, |_| {}, source::fingerprint).unwrap();
+    let conn = fixture.store.connection.lock().unwrap();
     assert_eq!(
         db::snapshot(&conn).unwrap().photos[0].availability,
         Some(BoundAvailability::Missing)
@@ -729,6 +735,9 @@ fn symlinks_are_neither_discovered_nor_followed_after_confirmed_file_replacement
     sync_now(&mut conn, &root, &first).unwrap();
     fs::remove_file(&original_path).unwrap();
     symlink(outside.join("首张.jpg"), &original_path).unwrap();
+    drop(conn);
+    verification::verify_all(&fixture.store, |_| {}, source::fingerprint).unwrap();
+    let conn = fixture.store.connection.lock().unwrap();
     let indexed = db::snapshot(&conn).unwrap().photos.remove(0);
     assert_eq!(indexed.availability, Some(BoundAvailability::Missing));
     assert!(original(&conn, &indexed.id, &indexed.original_path)

@@ -1,4 +1,4 @@
-use super::{supported_file, valid_component, LOCATOR_PREFIX};
+use super::{supported_file, valid_component, verification, Root, LOCATOR_PREFIX};
 use crate::{db, local_photo};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -19,25 +19,49 @@ pub(crate) enum BoundAvailability {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct BoundSource {
-    pub root: PathBuf,
-    pub authorized: bool,
+    pub root: Root,
     pub folder: String,
     pub file_name: String,
     pub sha256: String,
     pub stat_signature: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub(crate) struct Original {
     storage: Storage,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 enum Storage {
     Managed { root: PathBuf, path: PathBuf },
     Bound(BoundSource),
     Local(String),
 }
+
+impl PartialEq for Original {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.storage, &other.storage) {
+            (Storage::Bound(a), Storage::Bound(b)) => {
+                // A successful background verification only refreshes the stat cache.
+                a.root == b.root
+                    && a.folder == b.folder
+                    && a.file_name == b.file_name
+                    && a.sha256 == b.sha256
+            }
+            (Storage::Local(a), Storage::Local(b)) => a == b,
+            (
+                Storage::Managed { root, path },
+                Storage::Managed {
+                    root: other_root,
+                    path: other_path,
+                },
+            ) => root == other_root && path == other_path,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Original {}
 
 fn original_error(error: io::Error) -> String {
     if error.kind() == io::ErrorKind::NotFound {
@@ -68,9 +92,7 @@ impl Original {
                 }
                 Ok(file)
             }
-            Storage::Bound(source) => {
-                self.open_bound_with_signature(source).map(|(file, _)| file)
-            }
+            Storage::Bound(source) => self.open_bound_with_signature(source).map(|(file, _)| file),
             Storage::Local(locator) => local_photo::open(locator),
         }
     }
@@ -144,45 +166,18 @@ impl Original {
             }
         }
     }
-
-    pub(crate) fn availability(&self) -> Option<BoundAvailability> {
-        match &self.storage {
-            Storage::Bound(source) => Some(source.availability()),
-            Storage::Managed { .. } | Storage::Local(_) => None,
-        }
-    }
 }
+
+pub(super) const BOUND_SOURCE_COLUMNS: &str =
+    "r.id,r.path,r.authorized,p.folder,p.file_name,p.sha256,p.stat_signature";
 
 pub(crate) fn original(
     conn: &Connection,
     photo_id: &str,
     locator: &str,
 ) -> Result<Original, String> {
-    let storage = if let Some(id) = locator.strip_prefix(LOCATOR_PREFIX) {
-        if id != photo_id || uuid::Uuid::parse_str(id).is_err() {
-            return Err("作品原件引用无效".into());
-        }
-        Storage::Bound(
-            conn.query_row(
-                "SELECT r.path,r.authorized,p.folder,p.file_name,p.sha256,p.stat_signature
-             FROM work_directory_photos p JOIN work_directory_roots r ON r.id=p.root_id
-             WHERE p.photo_id=?1",
-                [photo_id],
-                |row| {
-                    Ok(BoundSource {
-                        root: PathBuf::from(row.get::<_, String>(0)?),
-                        authorized: row.get(1)?,
-                        folder: row.get(2)?,
-                        file_name: row.get(3)?,
-                        sha256: row.get(4)?,
-                        stat_signature: row.get(5)?,
-                    })
-                },
-            )
-            .optional()
-            .map_err(|e| e.to_string())?
-            .ok_or("作品原件引用不存在")?,
-        )
+    let storage = if locator.starts_with(LOCATOR_PREFIX) {
+        Storage::Bound(bound_source(conn, photo_id, locator)?)
     } else if local_photo::is_locator(locator) {
         Storage::Local(locator.to_owned())
     } else {
@@ -194,6 +189,23 @@ pub(crate) fn original(
     Ok(Original { storage })
 }
 
+fn bound_source(conn: &Connection, photo_id: &str, locator: &str) -> Result<BoundSource, String> {
+    if locator.strip_prefix(LOCATOR_PREFIX) != Some(photo_id)
+        || uuid::Uuid::parse_str(photo_id).is_err()
+    {
+        return Err("作品原件引用无效".into());
+    }
+    conn.prepare_cached(&format!(
+        "SELECT {BOUND_SOURCE_COLUMNS}
+         FROM work_directory_photos p JOIN work_directory_roots r ON r.id=p.root_id
+         WHERE p.photo_id=?1"
+    ))
+    .and_then(|mut statement| statement.query_row([photo_id], BoundSource::from_row))
+    .optional()
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "作品原件引用不存在".into())
+}
+
 pub(crate) fn original_status(
     conn: &Connection,
     photo_id: &str,
@@ -203,25 +215,44 @@ pub(crate) fn original_status(
         return Ok((local_photo::is_available(locator), None));
     }
     if locator.starts_with(LOCATOR_PREFIX) {
-        let availability = original(conn, photo_id, locator)?.availability();
+        let source = bound_source(conn, photo_id, locator)?;
+        let availability = if source.root.authorized {
+            verification::cached_availability(conn, photo_id, &source)?
+        } else {
+            BoundAvailability::Offline
+        };
         return Ok((
-            availability == Some(BoundAvailability::Available),
-            availability,
+            availability == BoundAvailability::Available,
+            Some(availability),
         ));
     }
     Ok((Path::new(locator).is_file(), None))
 }
 
 impl BoundSource {
-    fn expected_size(&self) -> Option<u64> {
+    pub(super) fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            root: Root {
+                id: row.get(0)?,
+                path: PathBuf::from(row.get::<_, String>(1)?),
+                authorized: row.get(2)?,
+            },
+            folder: row.get(3)?,
+            file_name: row.get(4)?,
+            sha256: row.get(5)?,
+            stat_signature: row.get(6)?,
+        })
+    }
+
+    pub(super) fn expected_size(&self) -> Option<u64> {
         expected_size(self.stat_signature.as_deref())
     }
 
     fn open(&self) -> Result<File, String> {
-        if !self.authorized {
+        if !self.root.authorized {
             return Err("作品目录尚未重新定位".into());
         }
-        let root = RootDirectory::open(&self.root).map_err(|_| "作品目录当前不可用")?;
+        let root = RootDirectory::open(&self.root.path).map_err(|_| "作品目录当前不可用")?;
         let file = root
             .photo(&self.folder, &self.file_name)
             .map_err(|_| format!("作品原件缺失或无法读取：{}", self.file_name))?;
@@ -229,30 +260,6 @@ impl BoundSource {
             return Err(format!("作品原件内容已变化：{}", self.file_name));
         }
         Ok(file)
-    }
-
-    fn availability(&self) -> BoundAvailability {
-        if !self.authorized {
-            return BoundAvailability::Offline;
-        }
-        let Ok(root) = RootDirectory::open(&self.root) else {
-            return BoundAvailability::Offline;
-        };
-        let Ok(mut file) = root.photo(&self.folder, &self.file_name) else {
-            return BoundAvailability::Missing;
-        };
-        if !size_matches(&file, self.expected_size()) {
-            return BoundAvailability::Missing;
-        }
-        let unchanged = self
-            .stat_signature
-            .as_ref()
-            .is_some_and(|expected| stat_signature(&file).as_ref() == Some(expected));
-        if unchanged || fingerprint(&mut file).is_ok_and(|actual| actual == self.sha256) {
-            BoundAvailability::Available
-        } else {
-            BoundAvailability::Missing
-        }
     }
 }
 

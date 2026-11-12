@@ -170,38 +170,20 @@ pub async fn ai_save_settings(
     app: tauri::AppHandle,
     input: SettingsInput,
 ) -> Result<AiSettings, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        ai_settings::save(
-            &*app
-                .state::<Store>()
-                .connection
-                .lock()
-                .map_err(|e| e.to_string())?,
-            input,
-            &SystemCredentials,
-        )
+    crate::db::with_connection(app, move |conn| {
+        ai_settings::save(conn, input, &SystemCredentials)
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 pub async fn ai_remove_settings(
     app: tauri::AppHandle,
     provider: String,
 ) -> Result<AiSettings, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        ai_settings::remove(
-            &*app
-                .state::<Store>()
-                .connection
-                .lock()
-                .map_err(|e| e.to_string())?,
-            &provider,
-            &SystemCredentials,
-        )
+    crate::db::with_connection(app, move |conn| {
+        ai_settings::remove(conn, &provider, &SystemCredentials)
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 pub fn ai_list_analyses(store: tauri::State<'_, Store>) -> Result<Vec<Analysis>, String> {
@@ -229,6 +211,8 @@ pub async fn ai_analyze_photo(
     provider: String,
     prompt: Option<String>,
 ) -> Result<Analysis, String> {
+    let store = app.state::<Store>();
+    let _active = store.restart_gate.require_work()?;
     let cloned = app.clone();
     let selected = photo_id.clone();
     let service = provider.clone();
@@ -265,7 +249,6 @@ pub async fn ai_analyze_photo(
         text,
         analyzed_at: chrono::Utc::now().to_rfc3339(),
     };
-    let store = app.state::<Store>();
     let conn = store.connection.lock().map_err(|e| e.to_string())?;
     if crate::db::library_root(&conn)? != root {
         return Err("图库已切换，AI 结果未写入其他图库".into());

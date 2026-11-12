@@ -224,8 +224,9 @@ pub async fn prepare_link_import(
     // Validate cheap input and category before creating files or visiting a website.
     input::input_url(&input)?;
     crate::models::library(&library)?;
+    let store = app.state::<Store>();
+    let _active = store.restart_gate.require_work()?;
     let session = {
-        let store = app.state::<Store>();
         let conn = store.connection.lock().map_err(|e| e.to_string())?;
         app.state::<LinkImportStore>()
             .begin(db::library_root(&conn)?, &request_id)?
@@ -286,9 +287,11 @@ pub async fn prepare_link_import(
 #[tauri::command]
 pub async fn cancel_link_import(app: tauri::AppHandle, request_id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
         let draft = app.state::<LinkImportStore>().cancel(&request_id)?;
         if let Some(id) = draft {
-            curation::cancel(&app.state::<Store>(), &app.state::<CurationStore>(), &id)?;
+            curation::cancel(&store, &app.state::<CurationStore>(), &id)?;
         }
         Ok(())
     })

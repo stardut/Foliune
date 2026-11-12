@@ -11,8 +11,8 @@ importers:
   apps/desktop:
     dependencies:
       '@tauri-apps/api':
-        specifier: ~2.11.1
-        version: 2.11.1
+        specifier: ~2.12.4
+        version: 2.12.4
       '@tauri-apps/plugin-dialog':
         specifier: ~2.7.3
         version: 2.7.3
@@ -549,6 +549,9 @@ packages:
 
   '@tauri-apps/api@2.11.1':
     resolution: {integrity: sha512-M2FPuYND2m+wh5hfW9ZpSdxMPdEJovPBWwoHJmwUpysTYNHaOkVFN419m/K0LIgjb/7KU2vBgsUepJWugQCvAA==, tarball: https://registry.npmjs.org/@tauri-apps/api/-/api-2.11.1.tgz}
+
+  '@tauri-apps/api@2.12.4':
+    resolution: {integrity: sha512-pVmfis+4zT8H0Qhp3xPZx9Ju7kpzvA6rr/PSJPyuwfvucTQ8sVt61NYU9KMkK703UFlYadFmjKA4HhybOtN0gg==, tarball: https://registry.npmjs.org/@tauri-apps/api/-/api-2.12.4.tgz}
 
   '@tauri-apps/cli-darwin-arm64@2.12.4':
     resolution: {integrity: sha512-OxqKSckIkoJ6vX2AjifIJpTasFC0Hbdoo7gEiCmAjauABO3U8m2MRsLWe+QTiBwDx1mIrvgA+rvI7tvDnbnHVg==, tarball: https://registry.npmjs.org/@tauri-apps/cli-darwin-arm64/-/cli-darwin-arm64-2.12.4.tgz}
@@ -1381,6 +1384,8 @@ snapshots:
       vite: 7.3.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.32.0)
 
   '@tauri-apps/api@2.11.1': {}
+
+  '@tauri-apps/api@2.12.4': {}
 
   '@tauri-apps/cli-darwin-arm64@2.12.4':
     optional: true

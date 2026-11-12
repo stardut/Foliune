@@ -254,7 +254,9 @@ pub async fn export_collage_png(
     input: CollageInput,
 ) -> Result<PathBuf, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        export_png(&app.state::<Store>(), Path::new(&directory), input)
+        let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
+        export_png(&store, Path::new(&directory), input)
     })
     .await
     .map_err(|e| e.to_string())?

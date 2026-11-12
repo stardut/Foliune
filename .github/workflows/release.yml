@@ -11,11 +11,7 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: read
-  deployments: read
-  pages: write
-  id-token: write
+permissions: {}
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
@@ -23,28 +19,51 @@ concurrency:
 
 jobs:
   build:
-    name: Build Apple Silicon DMG
+    name: Build Apple Silicon release assets
     runs-on: macos-15
     permissions:
       contents: read
+    outputs:
+      updater: ${{ steps.source.outputs.updater }}
     env:
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
       TAG_NAME: ${{ inputs.tag || github.ref_name }}
 
     steps:
-      - name: Check out existing tag
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
-          persist-credentials: false
-
       - name: Validate manual release source
         if: github.event_name == 'workflow_dispatch'
         run: |
           if [ "$GITHUB_REF" != "refs/heads/main" ]; then
             echo "Run a manual release from main so the website can be refreshed after publication." >&2
             exit 1
+          fi
+
+      - name: Check out existing tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release source and detect updater support
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG_NAME" =~ ^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Expected a stable version tag." >&2
+            exit 1
+          fi
+          if [ "$(git rev-parse --verify "refs/tags/${TAG_NAME}^{commit}")" != "$(git rev-parse HEAD)" ] ||
+              ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+            echo "Release tag must point to the checked-out commit in main history." >&2
+            exit 1
+          fi
+          if [ -f scripts/updater-release.mjs ]; then
+            echo 'updater=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'updater=false' >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up Node.js
@@ -57,6 +76,12 @@ jobs:
 
       - name: Test release preparation
         run: node --test scripts/prepare-release.test.mjs
+
+      - name: Prepare updater configuration
+        if: steps.source.outputs.updater == 'true'
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: node scripts/updater-release.mjs config "$RUNNER_TEMP/tauri-release.json"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -87,7 +112,8 @@ jobs:
       - name: Run Rust unit tests
         run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
 
-      - name: Build ad-hoc signed DMG
+      - name: Build legacy ad-hoc signed DMG
+        if: steps.source.outputs.updater == 'false'
         timeout-minutes: 25
         env:
           # Tauri skips Finder layout and background setup when CI=true unless opted in.
@@ -98,8 +124,30 @@ jobs:
           --config '{"bundle":{"macOS":{"signingIdentity":"-"}}}'
           -- --locked
 
+      - name: Build release app with updater configuration
+        if: steps.source.outputs.updater == 'true'
+        timeout-minutes: 25
+        run: >-
+          pnpm --filter @foliune/desktop tauri build --ci --no-bundle
+          --target aarch64-apple-darwin --config "$RUNNER_TEMP/tauri-release.json"
+          -- --locked
+
+      - name: Bundle ad-hoc signed DMG and sign updater archive
+        if: steps.source.outputs.updater == 'true'
+        timeout-minutes: 10
+        env:
+          TAURI_BUNDLER_DMG_IGNORE_CI: "true"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is required." >&2
+            exit 1
+          fi
+          pnpm --filter @foliune/desktop tauri bundle --ci --target aarch64-apple-darwin \
+            --bundles app,dmg --config "$RUNNER_TEMP/tauri-release.json"
+
       - name: Verify local DMG and app signature
-        id: verify-dmg
         shell: bash
         run: |
           set -euo pipefail
@@ -135,13 +183,25 @@ jobs:
           rmdir "$mount_dir"
           trap - EXIT
           shasum -a 256 "${dmg_paths[0]}"
-          printf 'path=%s\n' "${dmg_paths[0]}" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/release-artifact"
+          cp "${dmg_paths[0]}" "$RUNNER_TEMP/release-artifact/"
 
-      - name: Stage verified DMG
+      - name: Verify and stage updater archive and signature
+        if: steps.source.outputs.updater == 'true'
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir=apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos
+          node scripts/updater-release.mjs verify "$bundle_dir"
+          cp "$bundle_dir/Foliune.app.tar.gz" "$bundle_dir/Foliune.app.tar.gz.sig" "$RUNNER_TEMP/release-artifact/"
+
+      - name: Stage verified release assets
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg-${{ github.run_id }}
-          path: ${{ steps.verify-dmg.outputs.path }}
+          name: macos-release-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-artifact/
           if-no-files-found: error
           retention-days: 7
           overwrite: true
@@ -152,79 +212,41 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      TAG_NAME: ${{ inputs.tag || github.ref_name }}
-
     steps:
-      - name: Download verified DMG
+      - name: Check out release workflow source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.3.0"
+
+      - name: Download verified release assets
         uses: actions/download-artifact@v4
         with:
-          name: macos-dmg-${{ github.run_id }}
+          name: macos-release-${{ github.run_id }}
           path: release-artifact
 
-      - name: Publish verified DMG
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          dmg_paths=(release-artifact/*.dmg)
-          if [ "${#dmg_paths[@]}" -ne 1 ] || [ ! -s "${dmg_paths[0]}" ]; then
-            echo "Expected exactly one nonempty staged DMG for $TAG_NAME." >&2
-            exit 1
-          fi
-          dmg_path="${dmg_paths[0]}"
-          asset_name="$(basename "$dmg_path")"
-          asset_name_encoded="$(printf '%s' "$asset_name" | jq -sRr @uri)"
-
-          find_release() {
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-              | jq -s --arg tag "$TAG_NAME" '[.[][] | select(.tag_name == $tag)] | first'
-          }
-
-          release_json="$(find_release)"
-          if [ "$release_json" = "null" ]; then
-            release_notes=$'## 安装\n\n下载下方 DMG，打开后将 Foliune 拖入 Applications。\n\n此安装包仅面向 Apple Silicon，采用 ad-hoc 签名，未经 Apple Developer ID 签名或公证；macOS 可能阻止首次打开。最低系统要求沿用应用配置，实际兼容系统仍需实机验证。'
-            gh release create "$TAG_NAME" \
-              --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
-              --title "Foliune $TAG_NAME" --notes "$release_notes" --generate-notes
-            release_json="$(find_release)"
-          fi
-
-          release_id="$(jq -er '.id' <<< "$release_json")"
-          existing_asset="$(jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | [.state, (.size // 0)] | @tsv' <<< "$release_json")"
-          if [ -n "$existing_asset" ]; then
-            read -r existing_state existing_size <<< "$existing_asset"
-            if [ "$existing_state" != "uploaded" ] || [ "$existing_size" -le 0 ]; then
-              echo "Existing DMG is incomplete: $asset_name (state=$existing_state, size=$existing_size)." >&2
-              exit 1
-            fi
-            echo "Preserving existing complete DMG: $asset_name"
-          else
-            upload_url="$(jq -er '.upload_url | split("{")[0]' <<< "$release_json")"
-            gh api --method POST "${upload_url}?name=${asset_name_encoded}" \
-              --header "Content-Type: application/octet-stream" --input "$dmg_path" >/dev/null
-          fi
-
-          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"
-          jq -e --arg name "$asset_name" \
-            'any(.assets[]; .name == $name and .state == "uploaded" and (.size // 0) > 0)' \
-            <<< "$release_json" >/dev/null
-          if [ "$(jq -r '.draft' <<< "$release_json")" = "true" ]; then
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
-              -F draft=false >/dev/null
-          fi
-
-          final_release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"
-          jq -e --arg tag "$TAG_NAME" --arg name "$asset_name" \
-            '.tag_name == $tag and .draft == false and any(.assets[]; .name == $name and .state == "uploaded" and (.size // 0) > 0)' \
-            <<< "$final_release_json" >/dev/null
-          echo "Published GitHub Release $TAG_NAME with DMG $asset_name."
+      - name: Publish verified release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
+          UPDATER_ENABLED: ${{ needs.build.outputs.updater }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: node scripts/publish-release.mjs release-artifact
 
   deploy-website:
-    name: Deploy website after DMG publication
+    name: Deploy website after release publication
     needs: publish
     if: >-
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    permissions:
+      contents: read
+      deployments: read
+      pages: write
+      id-token: write
     uses: ./.github/workflows/pages.yml

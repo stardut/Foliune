@@ -16,6 +16,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 coverage/
+/site/latest-release.json
+/site/updater.json
 
 # Rust / Tauri 构建产物与自动生成的 schema
 target/

@@ -47,10 +47,11 @@ jobs:
       - name: Test latest release download metadata
         run: node --test scripts/latest-release.test.mjs scripts/prepare-site-release.test.mjs
 
-      - name: Prepare latest release download metadata
+      - name: Prepare release download and updater metadata
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
         run: node scripts/prepare-site-release.mjs
 
       - name: Configure GitHub Pages

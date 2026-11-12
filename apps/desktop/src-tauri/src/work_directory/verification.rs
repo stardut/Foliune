@@ -310,6 +310,9 @@ pub(super) fn verify_all(
         if !observed.changes(photo) {
             return Ok(false);
         }
+        let Some(_active) = store.restart_gate.active_work() else {
+            return Ok(false);
+        };
         let conn = store.connection.lock().map_err(|error| error.to_string())?;
         if db::library_root(&conn)? != library {
             return Ok(false);

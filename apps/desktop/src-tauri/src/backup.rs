@@ -316,7 +316,9 @@ pub async fn backup_create(
     mode: create_impl::BackupMode,
 ) -> Result<BackupResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        create_impl::create_with_mode(&app.state::<Store>(), Path::new(&path), mode)
+        let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
+        create_impl::create_with_mode(&store, Path::new(&path), mode)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -324,7 +326,9 @@ pub async fn backup_create(
 #[tauri::command]
 pub async fn backup_restore(app: tauri::AppHandle, path: String) -> Result<RestoreResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let result = restore(&app.state::<Store>(), Path::new(&path))?;
+        let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
+        let result = restore(&store, Path::new(&path))?;
         crate::work_directory::wake_monitor(&app);
         Ok(result)
     })

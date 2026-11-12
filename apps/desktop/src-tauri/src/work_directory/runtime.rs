@@ -260,6 +260,20 @@ pub(crate) fn wake_monitor(app: &AppHandle) {
     let _ = app.state::<WorkDirectoryMonitor>().signal.try_send(());
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub(crate) fn has_active_jobs(app: &AppHandle) -> Result<bool, String> {
+    let manager = app.state::<WorkDirectoryMonitor>();
+    let cache = manager.cache.lock().map_err(|error| error.to_string())?;
+    Ok(cache.source_locked())
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub(crate) fn resume_background_work(app: &AppHandle) {
+    let manager = app.state::<WorkDirectoryMonitor>();
+    let _ = manager.work.try_send(());
+    let _ = manager.verify.try_send(());
+}
+
 fn emit(app: &AppHandle, library_id: &str, refresh_snapshot: bool, synced: Option<SyncDelta>) {
     let _ = app.emit_to(
         "main",
@@ -337,6 +351,7 @@ async fn operate(
 ) -> Result<WorkDirectoryState, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
         let manager = app.state::<WorkDirectoryMonitor>();
         let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
         let mut cache = manager.cache.lock().map_err(|e| e.to_string())?;
@@ -465,6 +480,7 @@ pub(crate) async fn retry_work_directory_job(
 pub(crate) async fn delete_group(app: AppHandle, id: String) -> Result<Snapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
         let manager = app.state::<WorkDirectoryMonitor>();
         let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
         let mut cache = manager.cache.lock().map_err(|e| e.to_string())?;

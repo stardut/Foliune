@@ -10,6 +10,7 @@ use tauri::{AppHandle, Manager};
 pub struct Store {
     pub root: PathBuf,
     pub connection: Mutex<Connection>,
+    pub(crate) restart_gate: crate::restart_gate::RestartGate,
 }
 
 impl Store {
@@ -66,6 +67,7 @@ impl Store {
         Ok(Self {
             root,
             connection: Mutex::new(conn),
+            restart_gate: Default::default(),
         })
     }
 }
@@ -119,6 +121,7 @@ pub(crate) async fn with_connection<T: Send + 'static>(
 ) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
         let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
         operation(&mut conn)
     })

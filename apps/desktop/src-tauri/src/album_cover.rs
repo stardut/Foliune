@@ -334,7 +334,9 @@ async fn read_in_background(app: AppHandle, request: Request) -> Result<Vec<u8>,
     async_runtime::spawn_blocking(move || {
         // Keep the permit until decoding ends, even if the awaiting IPC call is cancelled.
         let _turn = turn;
-        read(&app.state::<Store>(), &request)
+        let store = app.state::<Store>();
+        let _active = store.restart_gate.require_work()?;
+        read(&store, &request)
     })
     .await
     .map_err(|error| error.to_string())?

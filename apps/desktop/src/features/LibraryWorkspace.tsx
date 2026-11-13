@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { ArrowUpRight, CheckCheck, FolderPlus, Grid2X2, ImagePlus, LayoutTemplate, Play, X } from 'lucide-react';
 import * as api from '../lib/api';
 import type { AlbumCover, Group, LibraryKind, LibrarySnapshot, Photo } from '../lib/types';
-import type { CurationDraft } from '../lib/curation-types';
+import type { CurationDraft, GroupCurationPatch, GroupInfoInput } from '../lib/curation-types';
 import { useToast } from '../components/ToastProvider';
 import { exportedFileName } from '../lib/export-directory';
 import { revealContent, slideContent } from '../lib/content-reveal';
@@ -440,8 +440,20 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     if (busy || importDisabled || draft || !currentGroup) return;
     setPickingSource(true);
   }
-  async function prepareGroup(id: string, patch: { photoIds?: string[]; capacity?: number | null; name?: string; description?: string }) {
-    const prepared = await run(() => api.prepareGroupCuration(id, patch)); if (mounted.current) setDraft(prepared); else await api.cancelCuration(prepared.id);
+  async function showCuration(prepared: CurationDraft) {
+    if (mounted.current) setDraft(prepared);
+    else await api.cancelCuration(prepared.id);
+  }
+  async function prepareGroup(id: string, patch: GroupCurationPatch) {
+    await showCuration(await run(() => api.prepareGroupCuration(id, patch)));
+  }
+  async function saveAlbumInfo(id: string, info: GroupInfoInput) {
+    const result = await run(() => api.saveAlbumInfo(id, info));
+    if (result.status === 'needsCuration') await showCuration(result.draft);
+    else {
+      onSnapshot(result.snapshot);
+      onFeedback('已保存相簿信息');
+    }
   }
   function validSelection(next: LibrarySnapshot, ids: string[]) {
     return ids.filter((id) => next.photos.some((photo) => photo.id === id) && (!groupId || next.memberships.some((member) => member.groupId === groupId && member.photoId === id && member.status === status)));
@@ -540,7 +552,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
       defaultCapacity={groupForm === 'new' && library === 'collection' ? 50 : undefined}
       counts={groupForm === 'new' ? undefined : groupCounts(groupForm.id)} busy={busy} onClose={() => setGroupForm(null)} onSave={async (values) => {
       if (groupForm === 'new') { const next = await run(() => api.createGroup({ library, ...values })); const created = next.groups.find((group) => group.library === library && !group.boundFolder && !snapshot.groups.some((old) => old.id === group.id)); onSnapshot(next); if (created) openAlbum(created.id); }
-      else await prepareGroup(groupForm.id, values);
+      else await saveAlbumInfo(groupForm.id, values);
       setGroupForm(null);
     }} />}
     {addToGroup && <Modal title="加入相簿" onClose={() => setAddToGroup(null)}><div className="group-list">{snapshot.groups.filter((group) => addToGroup.every((id) => snapshot.photos.find((photo) => photo.id === id)?.library === group.library)).map((group) => <button type="button" key={group.id} disabled={busy} onClick={() => void prepareGroup(group.id, { photoIds: addToGroup }).then(() => setAddToGroup(null)).catch(() => {})}>{group.name}<ArrowUpRight size={14} /></button>)}</div>{!snapshot.groups.some((group) => addToGroup.every((id) => snapshot.photos.find((photo) => photo.id === id)?.library === group.library)) && <p className="muted">没有可加入的同图库相簿。请先新建相簿；收藏与作品分别组织。</p>}</Modal>}

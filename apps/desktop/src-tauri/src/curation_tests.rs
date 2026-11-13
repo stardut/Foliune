@@ -1,5 +1,5 @@
 use crate::{
-    curation::{self, CurationStore},
+    curation::{self, CurationStore, GroupInfoResult},
     db::{snapshot, Store},
     groups,
     models::GroupInput,
@@ -363,6 +363,58 @@ fn forged_keep_id_from_another_candidate_pool_is_rejected() {
 }
 
 #[test]
+fn album_info_saves_directly_when_all_active_photos_fit() {
+    let (root, store, drafts, group) = setup();
+    let ids = photos::import(
+        &store,
+        vec![
+            fixture(&root, "a.png"),
+            fixture(&root, "b.png"),
+            fixture(&root, "c.png"),
+        ],
+        "collection",
+        Some(&group),
+    )
+    .unwrap()
+    .imported_ids;
+    let mut conn = store.connection.lock().unwrap();
+    let initial = groups::set_status(&mut conn, &group, &ids[2], "discarded").unwrap();
+    for (name, description, capacity) in [
+        ("改名", "", Some(30)),
+        ("改名", "新简介", Some(30)),
+        ("改名", "新简介", Some(40)),
+        ("改名", "新简介", Some(3)),
+        ("改名", "新简介", Some(2)),
+        ("改名", "新简介", None),
+    ] {
+        let info = serde_json::from_value(json!({
+            "name": name, "description": description, "capacity": capacity
+        }))
+        .unwrap();
+        let GroupInfoResult::Saved { snapshot: saved } =
+            curation::save_group_info(&mut conn, &drafts, &group, info).unwrap()
+        else {
+            panic!("全部有效照片放得下时，应直接保存");
+        };
+        assert_eq!(saved.groups[0].name, name);
+        assert_eq!(saved.groups[0].description, description);
+        assert_eq!(saved.groups[0].capacity, capacity);
+        assert_eq!(
+            serde_json::to_value(&saved.memberships).unwrap(),
+            serde_json::to_value(&initial.memberships).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&saved.photos).unwrap(),
+            serde_json::to_value(&initial.photos).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(saved).unwrap(),
+            serde_json::to_value(snapshot(&conn).unwrap()).unwrap()
+        );
+    }
+}
+
+#[test]
 fn restore_and_lower_capacity_share_the_same_atomic_plan() {
     let (root, store, drafts, group) = setup();
     let ids = photos::import(
@@ -373,8 +425,34 @@ fn restore_and_lower_capacity_share_the_same_atomic_plan() {
     )
     .unwrap()
     .imported_ids;
-    let draft = curation::prepare_group(&store, &drafts, &group, json!({"capacity":1})).unwrap();
+    let prepare_edit = || {
+        let mut conn = store.connection.lock().unwrap();
+        let info = serde_json::from_value(json!({
+            "name": "已调整", "description": "新简介", "capacity": 1
+        }))
+        .unwrap();
+        let GroupInfoResult::NeedsCuration { draft } =
+            curation::save_group_info(&mut conn, &drafts, &group, info).unwrap()
+        else {
+            panic!("上限不足时应进入取舍");
+        };
+        assert_eq!(draft.group_name, "已调整");
+        assert_eq!(draft.capacity, Some(1));
+        assert_eq!(draft.active_ids, ids);
+        assert!(draft.pending_ids.is_empty());
+        draft
+    };
+    let read_snapshot =
+        || serde_json::to_value(snapshot(&store.connection.lock().unwrap()).unwrap()).unwrap();
+    let initial = read_snapshot();
+    let draft = prepare_edit();
+    assert_eq!(read_snapshot(), initial);
+    curation::cancel(&store, &drafts, &draft.id).unwrap();
+    assert_eq!(read_snapshot(), initial);
+    let draft = prepare_edit();
     let state = curation::commit(&store, &drafts, &draft.id, vec![ids[0].clone()]).unwrap();
+    assert_eq!(state.groups[0].name, "已调整");
+    assert_eq!(state.groups[0].description, "新简介");
     assert_eq!(state.groups[0].capacity, Some(1));
     let draft = curation::prepare_group(
         &store,

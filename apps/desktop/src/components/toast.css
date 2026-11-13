@@ -12,6 +12,11 @@
 .toast-close { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 26px; height: 26px; margin: -4px -6px -4px 0; padding: 0; border-radius: 6px; color: var(--muted); }
 .toast-close:hover { color: var(--ink); background: var(--control-hover); }
 .toast-close:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.toast-with-action { align-items: center; gap: 12px; padding: 10px 12px; border-color: var(--floating-line); }
+.toast-with-action .toast-content { align-items: center; font-size: 13px; font-weight: 500; }
+.toast-with-action .toast-icon { margin-top: 0; }
+.toast-with-action .toast-close { margin-left: -6px; }
+.toast-action.button { min-height: 30px; padding: 4px 10px; font-size: 12px; white-space: nowrap; }
 @keyframes toast-enter { from { transform: translateY(5px); } to { transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .toast-item { animation: none; } }
 

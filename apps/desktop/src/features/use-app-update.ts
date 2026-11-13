@@ -1,18 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { isDesktop } from '../lib/api';
-import { appUpdateInfo, checkAppUpdate, downloadAppUpdate, installAppUpdate, type AppUpdateInfo, type UpdateProgress } from '../lib/app-update-api';
+import { appUpdateInfo, checkAppUpdate, installAppUpdate, type AppUpdateInfo, type UpdateProgress } from '../lib/app-update-api';
 
-type Status =
+type FailureStage = 'check' | 'busy' | 'download' | 'install' | 'restart';
+export type UpdateAttempt =
+  | { type: 'updating'; version: string; progress: UpdateProgress }
+  | { type: 'updateError'; version: string; stage: FailureStage; error: string };
+
+type Status = UpdateAttempt
   | { type: 'idle' | 'checking' | 'current' }
   | { type: 'checkError'; error: string }
-  | { type: 'available' | 'downloaded' | 'restart'; version: string; error?: string }
-  | { type: 'downloading'; version: string; progress: UpdateProgress }
-  | { type: 'installing'; version: string };
+  | { type: 'available'; version: string; checkError?: string };
+
+export const retryUpdateLabel: Record<FailureStage, string> = {
+  check: '重新检查', busy: '重试更新', download: '重试下载', install: '重试安装', restart: '重试启动',
+};
 
 export function useAppUpdate() {
   const [info, setInfo] = useState<AppUpdateInfo | null>(null);
   const [status, setStatus] = useState<Status>({ type: 'idle' });
+  const [dialogOpen, setDialogOpen] = useState(false);
   const current = useRef<Status>(status);
   const initial = useRef<Promise<AppUpdateInfo> | null>(null);
   const change = useCallback((next: Status) => {
@@ -21,13 +29,15 @@ export function useAppUpdate() {
   }, []);
 
   const check = useCallback(async () => {
-    if (!['idle', 'current', 'checkError', 'available'].includes(current.current.type)) return;
+    const previous = current.current;
+    if (!['idle', 'current', 'checkError', 'available'].includes(previous.type)) return;
     change({ type: 'checking' });
     try {
       const version = await checkAppUpdate();
       change(version ? { type: 'available', version } : { type: 'current' });
     } catch (cause) {
-      change({ type: 'checkError', error: errorMessage(cause) });
+      const error = errorMessage(cause);
+      change(previous.type === 'available' ? { ...previous, checkError: error } : { type: 'checkError', error });
     }
   }, [change]);
 
@@ -43,49 +53,54 @@ export function useAppUpdate() {
     return () => { active = false; };
   }, [check]);
 
-  async function download() {
+  async function start() {
     const previous = current.current;
-    if (previous.type !== 'available') return;
+    if (previous.type !== 'available' && previous.type !== 'updateError') return;
+    if (previous.type === 'updateError' && previous.stage === 'check') {
+      setDialogOpen(false);
+      change({ type: 'idle' });
+      void check();
+      return;
+    }
     const { version } = previous;
-    change({ type: 'downloading', version, progress: { downloaded: 0, total: null } });
+    const initialProgress: UpdateProgress = previous.type === 'updateError' && previous.stage === 'restart' ? { stage: 'restarting' }
+      : previous.type === 'updateError' && previous.stage === 'install' ? { stage: 'installing' }
+      : { stage: 'downloading', downloaded: 0, total: null };
+    // Commit the modal and close guard before invoking the native updater.
+    flushSync(() => {
+      setDialogOpen(true);
+      change({ type: 'updating', version, progress: initialProgress });
+    });
+    let active = true;
     try {
-      await downloadAppUpdate(version, (progress) => {
-        if (current.current.type === 'downloading') change({ type: 'downloading', version, progress });
+      await installAppUpdate(version, (progress) => {
+        if (active) change({ type: 'updating', version, progress });
       });
-      change({ type: 'downloaded', version });
     } catch (cause) {
-      change({ type: 'available', version, error: errorMessage(cause) });
+      const failure = updateFailure(cause);
+      change({ type: 'updateError', version, stage: failure.stage, error: failure.message });
+    } finally {
+      active = false;
     }
   }
 
-  async function install() {
-    const previous = current.current;
-    if (previous.type !== 'downloaded' && previous.type !== 'restart') return;
-    const { version } = previous;
-    // Make the modal and close guard effective before issuing the restart IPC.
-    flushSync(() => change({ type: 'installing', version }));
-    try {
-      await installAppUpdate(version);
-    } catch (cause) {
-      const failure = installFailure(cause);
-      change({
-        type: previous.type === 'restart' || failure.stage === 'restart' ? 'restart' : 'downloaded',
-        version,
-        error: failure.message,
-      });
-    }
+  function closeDialog() {
+    if (current.current.type === 'updateError') setDialogOpen(false);
   }
 
-  return { info, status, check, download, install };
+  return { info, status, check, start, dialogOpen, closeDialog };
 }
 
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-function installFailure(cause: unknown): { stage: unknown; message: string } {
+function updateFailure(cause: unknown): { stage: FailureStage; message: string } {
   if (cause && typeof cause === 'object' && 'stage' in cause && 'message' in cause && typeof cause.message === 'string') {
-    return { stage: cause.stage, message: cause.message };
+    const stage = cause.stage;
+    if (stage === 'check' || stage === 'busy' || stage === 'download' || stage === 'install' || stage === 'restart') {
+      return { stage, message: cause.message };
+    }
   }
   return { stage: 'install', message: errorMessage(cause) };
 }

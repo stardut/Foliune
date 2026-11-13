@@ -41,7 +41,7 @@ pub fn prepare_import_files(
         cleanup(store, &draft)?;
         return Err("图库已切换，本次候选已取消。".into());
     }
-    register(drafts, draft)
+    drafts.register(draft)
 }
 
 fn expand_import_paths(paths: Vec<String>) -> Result<Vec<String>, String> {
@@ -116,7 +116,7 @@ pub(crate) struct PreparedLinkImport(Draft);
 
 impl PreparedLinkImport {
     pub(crate) fn register(self, drafts: &CurationStore) -> Result<CurationDraft, String> {
-        register(drafts, self.0)
+        drafts.register(self.0)
     }
 }
 
@@ -141,14 +141,4 @@ pub(crate) fn prepare_link_import_draft(
         draft.view.candidates.push(photo);
     }
     Ok(PreparedLinkImport(draft))
-}
-
-fn register(drafts: &CurationStore, draft: Draft) -> Result<CurationDraft, String> {
-    let view = draft.view.clone();
-    drafts
-        .0
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(view.id.clone(), draft);
-    Ok(view)
 }

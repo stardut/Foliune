@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 use tauri::{ipc::Invoke, Manager, Wry};
 
-const INSTALLING: &str = "正在安装更新。";
+const UPDATING: &str = "正在更新应用。";
 
 #[derive(Clone, Default)]
 pub(crate) struct RestartGate(Arc<Mutex<State>>);
@@ -35,7 +35,7 @@ impl RestartGate {
     }
 
     pub(crate) fn require_work(&self) -> Result<ActiveWork<'_>, String> {
-        self.active_work().ok_or_else(|| INSTALLING.into())
+        self.active_work().ok_or_else(|| UPDATING.into())
     }
 
     pub(crate) fn begin_install(&self) -> Option<Installation<'_>> {
@@ -68,7 +68,7 @@ pub(crate) fn protect_invocations(
             return dispatch(invoke);
         };
         let Some(_active) = store.restart_gate.active_work() else {
-            invoke.resolver.reject(INSTALLING);
+            invoke.resolver.reject(UPDATING);
             return true;
         };
         dispatch(invoke)

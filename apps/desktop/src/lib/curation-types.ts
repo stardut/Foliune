@@ -1,4 +1,4 @@
-import type { Photo } from './types';
+import type { LibrarySnapshot, Photo } from './types';
 
 export interface CurationDraft {
   id: string;
@@ -17,3 +17,13 @@ export interface GroupCurationPatch {
   description?: string;
   capacity?: number | null;
 }
+
+export interface GroupInfoInput {
+  name: string;
+  description: string;
+  capacity: number | null;
+}
+
+export type GroupInfoResult =
+  | { status: 'saved'; snapshot: LibrarySnapshot }
+  | { status: 'needsCuration'; draft: CurationDraft };

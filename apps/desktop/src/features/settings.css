@@ -5,10 +5,21 @@
 .settings-update-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .settings-update-row p { margin: 5px 0 0; }
 .settings-update > p { margin: 10px 0 0; }
-.settings-update-progress { display: flex; align-items: center; gap: 10px; max-width: 360px; margin-top: 10px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.settings-update-progress progress { min-width: 0; width: 100%; accent-color: var(--accent); }
+.settings-update .button[aria-disabled=true] { color: var(--disabled); border-color: var(--line); background: var(--soft); box-shadow: none; cursor: not-allowed; }
 .settings-update-notice { position: relative; }
 .settings-update-notice::after { content: ''; position: absolute; top: 7px; right: 6px; width: 5px; height: 5px; border-radius: 50%; background: currentColor; pointer-events: none; }
+.app-update-status { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.app-update-status p { margin: 0; font-size: 13px; line-height: 1.5; outline: none; }
+.app-update-progress { display: grid; grid-template-columns: minmax(0, 1fr) 4ch; align-items: center; gap: 12px; min-height: 18px; margin-top: 13px; color: var(--muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+.app-update-progress-track { height: 4px; border-radius: 999px; overflow: hidden; background: var(--control-fill); box-shadow: inset 0 1px 2px #0004; }
+.app-update-progress-track > span { display: block; height: 100%; border-radius: inherit; background: #d9dcdf; box-shadow: inset 0 1px 0 #fff5; transition: width .18s ease-out; }
+.app-update-progress-track .app-update-progress-indeterminate { width: 28%; animation: app-update-progress-sweep 1.6s ease-in-out infinite alternate; }
+.app-update-error { margin: 10px 0 0; }
+@keyframes app-update-progress-sweep { from { transform: translateX(-40%); } to { transform: translateX(295%); } }
+@media (prefers-reduced-motion: reduce) {
+  .app-update-progress-track > span { transition: none; }
+  .app-update-progress-track .app-update-progress-indeterminate { animation: none; }
+}
 .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .settings-visibility-options { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 8px; }
 .settings-visibility-options label { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; min-height: 32px; font-size: 13px; cursor: pointer; }

@@ -27,7 +27,7 @@ export async function call<T>(command: string, args?: Record<string, unknown>): 
   catch (error) { throw new Error(typeof error === 'string' ? error : String(error)); }
 }
 
-export { prepareImport, prepareImportFiles, prepareGroupCuration, commitCuration, cancelCuration } from './curation-api';
+export { prepareImport, prepareImportFiles, prepareGroupCuration, saveAlbumInfo, commitCuration, cancelCuration } from './curation-api';
 
 async function mutate(command: string, args: Record<string, unknown>): Promise<LibrarySnapshot> {
   return withImageUrls(await call<LibrarySnapshot>(command, args));

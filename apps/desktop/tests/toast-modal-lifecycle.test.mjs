@@ -82,6 +82,45 @@ test('普通保存使用body宿主，未关闭的Modal内保存使用dialog宿�
   await scenario({ close: false });
 });
 
+test('可操作的更新通知在其他模态中隐藏，返回后仍可点击', async () => {
+  const module = { exports: {} };
+  new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(require, module, module.exports);
+  const { ToastProvider, useToast, Modal } = module.exports;
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  let starts = 0;
+  function Flow() {
+    const toast = useToast();
+    const [open, setOpen] = useState(false);
+    return h('main', null,
+      h('button', { onClick() {
+        toast({ title: 'Foliune 0.2.0 可更新', status: 'info', duration: null,
+          action: { label: '立即更新', onClick: () => { starts++; } } });
+      } }, '显示更新提醒'),
+      h('button', { onClick() { setOpen(true); } }, '打开其他弹窗'),
+      open && h(Modal, { title: '正在编辑' }, h('button', { onClick() { setOpen(false); } }, '继续浏览')));
+  }
+  const click = (label) => act(async () => {
+    const button = [...document.querySelectorAll('button')].find((item) => item.textContent === label);
+    assert(button);
+    button.click();
+  });
+  try {
+    await act(async () => root.render(h(ToastProvider, null, h(Flow))));
+    await click('显示更新提醒');
+    assert(document.querySelector('.toast-action'));
+    await click('打开其他弹窗');
+    assert.equal(document.querySelector('.toast-action'), null);
+    await click('继续浏览');
+    await click('立即更新');
+    assert.equal(starts, 1);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test('拼图先关闭应用弹窗再请求系统目录，取消及失败保留导出设置', async () => {
   const bundle = await build({
     stdin: { contents: `export { CollageWorkspace } from './src/features/collage/CollageWorkspace'; export { currentModalHost } from './src/lib/modal-stack';`, resolveDir: resolve('apps/desktop') },

@@ -137,7 +137,6 @@ pub fn run() {
         .invoke_handler(restart_gate::protect_invocations(tauri::generate_handler![
             app_updates::app_update_info,
             app_updates::check_app_update,
-            app_updates::download_app_update,
             app_updates::install_app_update,
             context_menu::popup_context_menu,
             load_snapshot,
@@ -155,6 +154,7 @@ pub fn run() {
             curation::prepare_import,
             link_import::prepare_link_import,
             link_import::cancel_link_import,
+            curation::save_album_info,
             curation::prepare_group_curation,
             curation::commit_curation,
             curation::cancel_curation,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useToast } from '../components/ToastProvider';
 import { isDesktop, loadSnapshot, withPhotoUrls } from '../lib/api';
@@ -23,9 +23,16 @@ export function useWorkDirectory(
   ready: boolean,
   onSynced: (commit: WorkDirectoryCommit) => void,
   onAvailability: (snapshot: LibrarySnapshot) => void,
+  updating: boolean,
 ) {
   const toast = useToast();
   const [session] = useState(createSession);
+  const refreshPause = useRef({ updating });
+  useLayoutEffect(() => {
+    if (refreshPause.current.updating === updating) return;
+    refreshPause.current = { updating };
+    if (!updating) session.refresh();
+  }, [session, updating]);
 
   const [state, setState] = useState<WorkDirectoryState | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -61,7 +68,8 @@ export function useWorkDirectory(
     let pending = false;
     let snapshotPending = false;
     async function refresh() {
-      if (!active || reading || session.locked || !pending) return;
+      const pause = refreshPause.current;
+      if (!active || reading || session.locked || pause.updating || !pending) return;
       reading = true;
       pending = false;
       const refreshSnapshot = snapshotPending;
@@ -69,16 +77,17 @@ export function useWorkDirectory(
       const started = session.operation;
       try {
         const next = await getWorkDirectory();
-        if (!active || started !== session.operation) return;
+        if (!active || started !== session.operation || pause !== refreshPause.current) return;
         if (!receiveState(next)) return;
         if (refreshSnapshot) {
           const fresh = await loadSnapshot();
-          if (active && started === session.operation) onAvailability(fresh);
+          if (active && started === session.operation && pause === refreshPause.current) onAvailability(fresh);
         }
       } catch (cause) {
-        if (active && started === session.operation) toast({ title: `无法读取作品目录：${message(cause)}`, status: 'error' });
+        if (active && started === session.operation && pause === refreshPause.current) toast({ title: `无法读取作品目录：${message(cause)}`, status: 'error' });
       } finally {
         reading = false;
+        if (active && pause !== refreshPause.current) { pending = true; snapshotPending ||= refreshSnapshot; }
         if (active && started !== session.operation && refreshSnapshot) { pending = true; snapshotPending = true; }
         if (pending) void refresh();
       }

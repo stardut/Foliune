@@ -2,7 +2,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { call, withImageUrls } from './api';
 import { isLocalPhoto } from './photo-availability';
 import type { LibraryKind, LibrarySnapshot } from './types';
-import type { CurationDraft, GroupCurationPatch } from './curation-types';
+import type { CurationDraft, GroupCurationPatch, GroupInfoInput, GroupInfoResult } from './curation-types';
 
 function draftImages(draft: CurationDraft, localImport = false): CurationDraft {
   const photos = withImageUrls({ photos: draft.candidates, groups: [], memberships: [] }).photos;
@@ -30,6 +30,13 @@ export async function prepareImportFiles(paths: string[], library: LibraryKind, 
 
 export async function prepareGroupCuration(groupId: string, patch: GroupCurationPatch): Promise<CurationDraft> {
   return draftImages(await call<CurationDraft>('prepare_group_curation', { groupId, patch }));
+}
+
+export async function saveAlbumInfo(groupId: string, info: GroupInfoInput): Promise<GroupInfoResult> {
+  const result = await call<GroupInfoResult>('save_album_info', { groupId, info });
+  return result.status === 'saved'
+    ? { ...result, snapshot: withImageUrls(result.snapshot) }
+    : { ...result, draft: draftImages(result.draft) };
 }
 
 export async function commitCuration(draftId: string, keepIds: string[]): Promise<LibrarySnapshot> {

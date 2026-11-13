@@ -20,7 +20,9 @@ import { ModelWorkspace } from './features/models/ModelWorkspace';
 import { PlanningWorkspace } from './features/planning/PlanningWorkspace';
 import { SearchWorkspace, type SearchSession } from './features/search/SearchWorkspace';
 import { SettingsWorkspace } from './features/SettingsWorkspace';
+import { AppUpdateDialog } from './features/AppUpdateDialog';
 import { rememberUpdateNotice, useAppUpdate } from './features/use-app-update';
+import { isContextMenuTracking } from './features/use-context-menu';
 import { PhotoPlayer } from './features/PhotoPlayer';
 import { WorkDirectoryDiscovery } from './features/WorkDirectory';
 import { useWorkDirectory } from './features/use-work-directory';
@@ -39,6 +41,7 @@ const initialSearchSession: SearchSession = { query: '', category: 'all', scroll
 
 export default function App() {
   const mainRef = useRef<HTMLElement>(null);
+  const settingsButton = useRef<HTMLButtonElement>(null);
   const [{ snapshot }, setLibraryView] = useState<LibraryView>({ snapshot: empty, pendingCommits: [], observedPhotos: [] });
   const setSnapshot = useCallback((next: LibrarySnapshot) => setLibraryView((view) => replaceLibrarySnapshot(view, next)), []);
   const [loading, setLoading] = useState(true);
@@ -78,31 +81,55 @@ export default function App() {
       return next === view.snapshot ? view : { ...view, snapshot: next };
     });
   }, []);
-  const workDirectory = useWorkDirectory(ready, onDirectorySynced, onDirectoryAvailability);
   const appUpdate = useAppUpdate();
-  const installingUpdate = appUpdate.status.type === 'installing';
+  const updating = appUpdate.status.type === 'updating';
+  const workDirectory = useWorkDirectory(ready, onDirectorySynced, onDirectoryAvailability, updating);
   const updateVersion = 'version' in appUpdate.status ? appUpdate.status.version : null;
   const modalHost = useSyncExternalStore(subscribeModalStack, currentModalHost);
-  const noticedVersion = useRef<string | null>(null);
+  const noticedVersions = useRef(new Set<string>());
+  const updateNotice = useRef<{ version: string; dismiss: () => void } | null>(null);
+  const startFromNotice = useRef(() => {});
   const workspaceDirty = bookDirty || photoDirty || modelDirty || planningDirty;
-  const workspaceBusy = bookBusy || modelBusy || photoBusy || planningBusy || settingsBusy || relinkBusy || workDirectory.blocking || installingUpdate;
-  const installBlocked = workspaceDirty || workspaceBusy || workDirectory.busy || !!workDirectory.retrying?.size
+  const workspaceBusy = bookBusy || modelBusy || photoBusy || planningBusy || settingsBusy || relinkBusy || workDirectory.blocking || updating;
+  const updateBlocked = !ready || loading || workspaceDirty || workspaceBusy || workDirectory.busy || !!workDirectory.retrying?.size
     || workDirectory.jobs.some((job) => job.status === 'running' || (job.status === 'queued' && workDirectory.state?.status === 'connected'))
     || !!(pendingSpace || pendingClose || relinkConfirmation || playingIds || closing);
-  const discoveryIdle = ready && !loading && (space === 'settings' || (photoBrowsingIdle && (space === 'collection' || space === 'work')))
-    && !workspaceDirty && !workspaceBusy && !pendingSpace && !pendingClose && !relinkConfirmation && !playingIds;
+  const gallery = space === 'collection' || space === 'work';
+  // Simulated layouts keep unsaved input locally without reporting workspace dirtiness.
+  const noticeSafe = !gallery || photoBrowsingIdle;
+  const discoveryIdle = ready && !loading && (space === 'settings' || (gallery && photoBrowsingIdle))
+    && !workspaceDirty && !workspaceBusy && !pendingSpace && !pendingClose && !relinkConfirmation && !playingIds && !appUpdate.dialogOpen;
   closeState.current = { dirty: workspaceDirty, busy: workspaceBusy };
-  useEffect(() => {
-    if (!ready || !updateVersion || noticedVersion.current === updateVersion || modalHost !== document.body || playingIds || workspaceDirty || workspaceBusy) return;
-    noticedVersion.current = updateVersion;
-    if (rememberUpdateNotice(updateVersion) && space !== 'settings') {
-      toast({ title: `Foliune ${updateVersion} 可更新，请在设置中查看`, status: 'info', duration: 6000 });
-    }
-  }, [ready, updateVersion, modalHost, playingIds, workspaceDirty, workspaceBusy, space, toast]);
+  startFromNotice.current = () => startUpdate('notice');
 
-  function installUpdate() {
-    if (installBlocked || space !== 'settings' || document.querySelector('dialog[open]')) return;
-    void appUpdate.install();
+  useEffect(() => {
+    if (updateNotice.current && (appUpdate.status.type === 'current' || (updateVersion && updateNotice.current.version !== updateVersion))) {
+      updateNotice.current.dismiss();
+      updateNotice.current = null;
+    }
+    if (!updateVersion || noticedVersions.current.has(updateVersion) || updateBlocked || !noticeSafe || modalHost !== document.body) return;
+    noticedVersions.current.add(updateVersion);
+    if (rememberUpdateNotice(updateVersion) && space !== 'settings') {
+      const dismiss = toast({ title: `Foliune ${updateVersion} 可更新`, status: 'info', duration: null,
+        action: { label: '立即更新', onClick: () => startFromNotice.current() } });
+      updateNotice.current = { version: updateVersion, dismiss };
+    }
+  }, [appUpdate.status.type, updateVersion, updateBlocked, noticeSafe, modalHost, space, toast]);
+
+  function startUpdate(source: 'notice' | 'settings' | 'retry') {
+    if (appUpdate.status.type === 'checking') {
+      toast({ title: '正在检查更新，请稍候。', status: 'info' });
+      return;
+    }
+    if (updateBlocked || (source === 'notice' && !noticeSafe) || isContextMenuTracking()
+      || (source !== 'retry' && (appUpdate.dialogOpen || document.querySelector('dialog[open]')))) {
+      toast({ title: '请先完成当前编辑或图库操作。', status: 'info' });
+      return;
+    }
+    if (source === 'notice') settingsButton.current?.focus({ preventScroll: true });
+    void appUpdate.start();
+    updateNotice.current?.dismiss();
+    updateNotice.current = null;
   }
 
   async function reload() {
@@ -242,9 +269,9 @@ export default function App() {
       initialPlan={result?.space === 'planning' ? result.plan : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
     return <SettingsWorkspace snapshot={snapshot} directory={workDirectory} onRestored={setSnapshot} onBusyChange={setSettingsBusy}
       workspaceVisibility={workspaceVisibility} onWorkspaceVisibilityChange={changeWorkspaceVisibility}
-      update={appUpdate} installBlocked={installBlocked} onInstall={installUpdate} />;
+      update={appUpdate} updateBlocked={updateBlocked} onUpdate={() => startUpdate('settings')} />;
   }
-  return <div className={`app-shell ${space === 'collection' || space === 'work' || space === 'search' ? 'gallery-shell' : ''}`} aria-busy={loading || workspaceBusy}>
+  return <div className={`app-shell ${gallery || space === 'search' ? 'gallery-shell' : ''}`}>
     <header className="app-header" data-tauri-drag-region>
       <div className="header-left">
         <span className="wordmark">Foliune<span>.</span></span>
@@ -252,19 +279,20 @@ export default function App() {
       <PrimaryNavigation items={navigationSpaces} value={space} durationMs={primaryNavigationDurationMs} onChange={navigate} />
       <nav className="header-actions" aria-label="工具">
         <button type="button" className={`icon-button ${space === 'search' ? 'is-active' : ''}`} aria-label="全局搜索 · ⌘K / Ctrl K" title="全局搜索 · ⌘K / Ctrl K" aria-current={space === 'search' ? 'page' : undefined} onClick={openSearch}><Search size={19} /></button>
-        <button type="button" className={`icon-button ${space === 'settings' ? 'is-active' : ''} ${updateVersion && space !== 'settings' ? 'settings-update-notice' : ''}`}
+        <button ref={settingsButton} type="button" className={`icon-button ${space === 'settings' ? 'is-active' : ''} ${updateVersion && space !== 'settings' ? 'settings-update-notice' : ''}`}
           aria-label={updateVersion ? '设置，有可用更新' : '设置'} title={updateVersion ? '设置 · 有可用更新' : '设置'}
           aria-current={space === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} /></button>
       </nav>
     </header>
     {!api.isDesktop() && <div className="desktop-hint">当前为浏览器预览 · 请在 Foliune 桌面应用中导入和管理本地照片</div>}
     {error && <div className="recovery-banner" role="alert"><span>{error}</span>{!ready && api.isDesktop() && <button type="button" onClick={() => void reload()}>重新读取</button>}</div>}
-    <main ref={mainRef}>{loading ? <Busy /> : !ready ? <><WorkspaceHeader title={spaces.find((item) => item.id === space)?.label} /><EmptyState title={api.isDesktop() ? '暂时无法读取图库' : '请在桌面应用中使用'} description={api.isDesktop() ? '读取失败，请检查提示后重试。现有照片未作更改。' : '浏览器仅预览界面。本地照片、存储与编辑需在 Foliune 桌面应用中使用。'} action={api.isDesktop() ? <button type="button" className="button" onClick={() => void reload()}>重新读取</button> : undefined} /></> : searchTarget ? <SearchResultLoader key={`${searchTarget.space}:${searchTarget.id}`} target={searchTarget} onBack={returnToSearch}>{renderWorkspace}</SearchResultLoader> : renderWorkspace()}</main>
+    <main ref={mainRef} aria-busy={loading || workspaceBusy}>{loading ? <Busy /> : !ready ? <><WorkspaceHeader title={spaces.find((item) => item.id === space)?.label} /><EmptyState title={api.isDesktop() ? '暂时无法读取图库' : '请在桌面应用中使用'} description={api.isDesktop() ? '读取失败，请检查提示后重试。现有照片未作更改。' : '浏览器仅预览界面。本地照片、存储与编辑需在 Foliune 桌面应用中使用。'} action={api.isDesktop() ? <button type="button" className="button" onClick={() => void reload()}>重新读取</button> : undefined} /></> : searchTarget ? <SearchResultLoader key={`${searchTarget.space}:${searchTarget.id}`} target={searchTarget} onBack={returnToSearch}>{renderWorkspace}</SearchResultLoader> : renderWorkspace()}</main>
     {relinkConfirmation && <Modal title="确认替换照片" onClose={() => confirmRelink(false)}><p className="replacement-copy">将用所选文件替换此照片；所有相簿和画册中的引用都会使用该文件</p><p className="replacement-path">{relinkConfirmation.path}</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => confirmRelink(false)}>取消</button><button type="button" className="button button-primary" onClick={() => confirmRelink(true)}>确认替换</button></div></Modal>}
     {pendingClose && <Modal title="放弃修改并关闭窗口？" onClose={() => { if (!closing) setPendingClose(false); }}><p className="replacement-copy">当前修改尚未保存，关闭窗口将放弃这些修改。</p><div className="form-actions"><button type="button" className="button" autoFocus disabled={closing} onClick={() => setPendingClose(false)}>继续编辑</button><button type="button" className="button" disabled={closing || workspaceBusy} onClick={() => void discardAndClose()}>{closing ? '正在关闭…' : '放弃并关闭'}</button></div></Modal>}
     {pendingSpace && <Modal title="离开未保存的修改？" onClose={() => setPendingSpace(null)}><p className="replacement-copy">当前修改尚未保存。离开将放弃这些修改。</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setPendingSpace(null)}>继续编辑</button><button type="button" className="button" disabled={workspaceBusy} onClick={() => { if (workspaceBusy) return; setBookDirty(false); setPhotoDirty(false); setModelDirty(false); setPlanningDirty(false); changeSpace(pendingSpace.space, pendingSpace.target); }}>放弃并离开</button></div></Modal>}
     {playingIds && <PhotoPlayer photos={snapshot.photos} photoIds={playingIds} onClose={() => setPlayingIds(null)} onRelink={relinkPhoto} onFeedback={feedback} />}
-    {installingUpdate && <Modal title="安装更新"><Busy label="正在安装并重启 Foliune…" /></Modal>}
+    {appUpdate.dialogOpen && (appUpdate.status.type === 'updating' || appUpdate.status.type === 'updateError') &&
+      <AppUpdateDialog status={appUpdate.status} retryBlocked={updateBlocked} onRetry={() => startUpdate('retry')} onClose={appUpdate.closeDialog} />}
     <WorkDirectoryDiscovery directory={workDirectory} idle={discoveryIdle} />
   </div>;
 }

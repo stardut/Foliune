@@ -14,18 +14,21 @@ pub(crate) struct UpdateInfo {
 }
 
 #[derive(Serialize)]
-pub(crate) struct DownloadProgress {
-    downloaded: u64,
-    total: Option<u64>,
+#[serde(tag = "stage", rename_all = "camelCase")]
+pub(crate) enum UpdateProgress {
+    Downloading { downloaded: u64, total: Option<u64> },
+    Verifying,
+    Installing,
+    Restarting,
 }
 
 #[derive(Serialize)]
-pub(crate) struct InstallError {
+pub(crate) struct UpdateError {
     stage: &'static str,
     message: String,
 }
 
-impl InstallError {
+impl UpdateError {
     fn new(stage: &'static str, message: impl Into<String>) -> Self {
         Self {
             stage,
@@ -75,38 +78,18 @@ pub(crate) async fn check_app_update(
 }
 
 #[tauri::command]
-pub(crate) async fn download_app_update(
-    app: AppHandle,
-    webview: Webview,
-    version: String,
-    progress: tauri::ipc::Channel<DownloadProgress>,
-) -> Result<(), String> {
-    require_main(&webview)?;
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    return macos::download(&app, &version, progress).await;
-    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-    {
-        let _ = (app, version, progress);
-        Err(DISABLED.into())
-    }
-}
-
-#[tauri::command]
 pub(crate) async fn install_app_update(
     app: AppHandle,
     webview: Webview,
     version: String,
-) -> Result<(), InstallError> {
-    require_main(&webview).map_err(|error| InstallError::new("install", error))?;
+    progress: tauri::ipc::Channel<UpdateProgress>,
+) -> Result<(), UpdateError> {
+    require_main(&webview).map_err(|error| UpdateError::new("install", error))?;
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    return tauri::async_runtime::spawn_blocking(move || {
-        macos::install_and_restart(&app, &version)
-    })
-    .await
-    .map_err(|error| InstallError::new("install", error.to_string()))?;
+    return macos::install_and_restart(&app, &version, progress).await;
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     {
-        let _ = (app, version);
-        Err(InstallError::new("install", DISABLED))
+        let _ = (app, version, progress);
+        Err(UpdateError::new("install", DISABLED))
     }
 }

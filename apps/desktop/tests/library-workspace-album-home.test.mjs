@@ -85,13 +85,17 @@ const bundle = await build({
       if (name === 'PhotoReview') return { contents: `import { createElement as h } from 'react';
         export const PhotoReview = ({ photos, initialPhotoId, onClose, fullscreen }) => h('div', { 'data-testid': 'photo-review', 'data-review-ids': photos.map(photo => photo.id).join(), 'data-initial-id': initialPhotoId, 'data-fullscreen-entry': fullscreen }, h('button', { onClick: (event) => onClose(event.currentTarget.parentElement.dataset.visibleId ?? initialPhotoId) }, '关闭'));` };
       if (name === 'ToastProvider') return { contents: 'export const useToast = () => () => {};' };
+      if (name === 'CurationWorkspace') return { contents: `import { createElement as h } from 'react';
+        export const CurationWorkspace = ({ draft, onCancel }) => h('button', { 'data-draft-id': draft.id, onClick: onCancel }, '取消取舍');` };
       if (name === 'use-context-menu') return { contents: 'export const isContextMenuTracking = () => false; export const useContextMenu = (scope) => (actions, at, trigger) => globalThis.captureAlbumTestMenu?.({ scope, actions, at, trigger });' };
       if (name === 'api') return { contents: [
         'export const isDesktop = () => !!globalThis.albumAirDropTest;',
         'export const shareAlbumAirDrop = (...args) => globalThis.albumAirDropTest(...args);',
         'export const updateGroup = (...args) => globalThis.albumCoverTest(...args);',
+        'export const saveAlbumInfo = (...args) => globalThis.albumInfoSaveTest(...args);',
+        'export const cancelCuration = (...args) => globalThis.albumInfoCancelTest(...args);',
         'export const readAlbumCover = () => { throw new Error("Unexpected album cover read"); };',
-        ...['cancelCuration', 'prepareGroupCuration', 'setMembershipStatuses', 'updatePhoto', 'createGroup', 'commitCuration', 'deleteGroup'].map(name => `export const ${name} = () => { throw new Error('Unexpected native mutation: ${name}'); };`),
+        ...['prepareGroupCuration', 'setMembershipStatuses', 'updatePhoto', 'createGroup', 'commitCuration', 'deleteGroup'].map(name => `export const ${name} = () => { throw new Error('Unexpected native mutation: ${name}'); };`),
       ].join('\n') };
       if (name === 'book-api') return { contents: 'export const listBooks = async () => globalThis.searchFixture?.books?.() ?? [];' };
       if (name === 'model-api') return { contents: 'export const listModels = async () => globalThis.searchFixture?.models?.() ?? [];' };
@@ -309,6 +313,70 @@ test('隔空投送区分整本相簿、选片和未选照片，取消后保留�
 function pressKey(target, key) {
   return act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
 }
+
+test('相簿信息在保存后关闭，只有后端返回超限候选时才进入取舍', async (t) => {
+  const groupId = 'collection-album';
+  const saved = { ...mixed, groups: mixed.groups.map((group) => group.id === groupId ? { ...group, name: '新相簿名' } : group) };
+  const draft = { id: 'capacity-draft', groupId, groupName: '新相簿名', capacity: 1 };
+  const feedback = [];
+  let actions, finishSave;
+  globalThis.captureAlbumTestMenu = (menu) => { actions = menu.actions; };
+  const save = t.mock.fn(() => new Promise((resolve) => { finishSave = resolve; }));
+  const cancel = t.mock.fn(async () => {});
+  globalThis.albumInfoSaveTest = save;
+  globalThis.albumInfoCancelTest = cancel;
+  try {
+    await scenario('collection', mixed, async ({ container, renderSnapshot }) => {
+      const dialog = () => container.querySelector('dialog');
+      const picker = () => container.querySelector('[data-draft-id]');
+      const openInfo = async () => {
+        await act(async () => container.querySelector('.album-open').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+        const action = actions.find((item) => item.id === 'info');
+        assert.equal(action.allowed(), true);
+        await act(async () => action.run());
+        assert.equal(dialog().querySelector('h2').textContent, '相簿信息');
+      };
+      const input = (selector, value) => act(async () => {
+        const field = dialog().querySelector(selector);
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(field, value);
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const submit = () => act(async () => dialog().querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+
+      await openInfo();
+      await input('input:not([type])', '新相簿名');
+      await submit();
+      assert.deepEqual(save.mock.calls[0].arguments, [groupId, { name: '新相簿名', description: '', capacity: null }]);
+      assert.equal(dialog().querySelector('[aria-label="关闭"]').disabled, true);
+      assert.equal(dialog().querySelector('.form-actions [type="button"]').disabled, true);
+      await submit();
+      assert.equal(save.mock.callCount(), 1);
+      await act(async () => finishSave({ status: 'saved', snapshot: saved }));
+      assert.equal(dialog(), null);
+      assert.equal(picker(), null);
+      assert.deepEqual(feedback, ['已保存相簿信息']);
+      await renderSnapshot(saved);
+      assert.equal(container.querySelector('.album-open h2').textContent, '新相簿名');
+
+      await openInfo();
+      await input('input[type="number"]', '1');
+      await submit();
+      assert.deepEqual(save.mock.calls[1].arguments, [groupId, { name: '新相簿名', description: '', capacity: 1 }]);
+      // The work directory can add a photo after the UI counted one active photo.
+      await act(async () => finishSave({ status: 'needsCuration', draft }));
+      assert.equal(dialog(), null);
+      assert.equal(picker().dataset.draftId, draft.id);
+      await act(async () => picker().click());
+      assert.equal(picker(), null);
+      assert.deepEqual(cancel.mock.calls[0].arguments, [draft.id]);
+      assert.deepEqual(feedback, ['已保存相簿信息']);
+    }, { expectedSnapshots: [saved], onFeedback: (message) => feedback.push(message) });
+  } finally {
+    delete globalThis.captureAlbumTestMenu;
+    delete globalThis.albumInfoSaveTest;
+    delete globalThis.albumInfoCancelTest;
+  }
+});
 
 test('相簿封面以右击照片取景，取消保留旧封面，保存后卡片与弹窗一致', async (t) => {
   const groupId = 'collection-album';

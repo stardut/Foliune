@@ -40,19 +40,22 @@ pub fn group_library(conn: &Connection, id: &str) -> Result<String, String> {
         .ok_or_else(|| "分组不存在".into())
 }
 
+pub(crate) fn active_count(conn: &Connection, id: &str) -> Result<u32, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM memberships WHERE group_id=?1 AND status='active'",
+        [id],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
 pub fn ensure_capacity(conn: &Connection, id: &str, additional: usize) -> Result<(), String> {
     let capacity: Option<u32> = conn
         .query_row("SELECT capacity FROM groups WHERE id=?1", [id], |r| {
             r.get(0)
         })
         .map_err(|e| e.to_string())?;
-    let active: u32 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM memberships WHERE group_id=?1 AND status='active'",
-            [id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    let active = active_count(conn, id)?;
     if capacity.is_some_and(|cap| active as usize + additional > cap as usize) {
         return Err("分组容量不足，请先调整容量或废弃组内照片；此次操作尚未保存。".into());
     }
@@ -88,15 +91,10 @@ pub fn update(conn: &mut Connection, id: &str, patch: Value) -> Result<Snapshot,
                         .ok_or("分组容量必须为正整数或无限制")?;
                     Some(count as u32)
                 };
-                let active: u32 = tx
-                    .query_row(
-                        "SELECT COUNT(*) FROM memberships WHERE group_id=?1 AND status='active'",
-                        [id],
-                        |r| r.get(0),
-                    )
-                    .map_err(|e| e.to_string())?;
-                if capacity.is_some_and(|cap| cap < active) {
-                    return Err("新容量不能小于当前有效照片数".into());
+                if let Some(cap) = capacity {
+                    if cap < active_count(&tx, id)? {
+                        return Err("新容量不能小于当前有效照片数".into());
+                    }
                 }
                 tx.execute(
                     "UPDATE groups SET capacity=?1 WHERE id=?2",

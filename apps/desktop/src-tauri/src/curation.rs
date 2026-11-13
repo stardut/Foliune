@@ -1,11 +1,12 @@
 use crate::{
-    db::{snapshot, Store},
+    db::{self, snapshot, Store},
+    groups,
     models::{self, Group, Photo, Snapshot},
     photos::{self, ImportFailure},
 };
 use rusqlite::{params, Connection};
-use serde::Serialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet},
     fs, io,
@@ -32,6 +33,21 @@ pub struct CurationDraft {
     pub failures: Vec<ImportFailure>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupInfoInput {
+    name: String,
+    description: String,
+    capacity: Option<u32>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum GroupInfoResult {
+    Saved { snapshot: Snapshot },
+    NeedsCuration { draft: CurationDraft },
+}
+
 struct Draft {
     view: CurationDraft,
     target: Option<Group>,
@@ -48,6 +64,17 @@ enum StagedOriginal {
 
 #[derive(Default)]
 pub struct CurationStore(Mutex<HashMap<String, Draft>>);
+
+impl CurationStore {
+    fn register(&self, draft: Draft) -> Result<CurationDraft, String> {
+        let view = draft.view.clone();
+        self.0
+            .lock()
+            .map_err(|e| e.to_string())?
+            .insert(view.id.clone(), draft);
+        Ok(view)
+    }
+}
 
 impl Drop for CurationStore {
     fn drop(&mut self) {
@@ -176,14 +203,26 @@ pub fn prepare_group(
     patch: Value,
 ) -> Result<CurationDraft, String> {
     let conn = store.connection.lock().map_err(|e| e.to_string())?;
-    let draft = group_draft(&conn, group_id, patch)?;
-    let view = draft.view.clone();
-    drafts
-        .0
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(view.id.clone(), draft);
-    Ok(view)
+    drafts.register(group_draft(&conn, group_id, patch)?)
+}
+
+pub(crate) fn save_group_info(
+    conn: &mut Connection,
+    drafts: &CurationStore,
+    group_id: &str,
+    info: GroupInfoInput,
+) -> Result<GroupInfoResult, String> {
+    let patch =
+        json!({ "name": info.name, "description": info.description, "capacity": info.capacity });
+    // The store connection stays locked from the count through saving or registering the draft.
+    if let Some(capacity) = info.capacity {
+        if capacity < groups::active_count(conn, group_id)? {
+            let draft = drafts.register(group_draft(conn, group_id, patch)?)?;
+            return Ok(GroupInfoResult::NeedsCuration { draft });
+        }
+    }
+    let snapshot = groups::update(conn, group_id, patch)?;
+    Ok(GroupInfoResult::Saved { snapshot })
 }
 
 fn cleanup(store: &Store, draft: &Draft) -> Result<(), String> {
@@ -409,6 +448,18 @@ pub async fn prepare_import(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn save_album_info(
+    app: tauri::AppHandle,
+    group_id: String,
+    info: GroupInfoInput,
+) -> Result<GroupInfoResult, String> {
+    db::with_connection(app.clone(), move |conn| {
+        save_group_info(conn, &app.state::<CurationStore>(), &group_id, info)
+    })
+    .await
 }
 
 #[tauri::command]

@@ -8,13 +8,15 @@ import type { LibrarySnapshot } from '../lib/types';
 import type { OptionalWorkspace, WorkspaceVisibility } from '../lib/workspace-visibility';
 import { WorkDirectorySettings } from './WorkDirectory';
 import { AppUpdateSettings } from './AppUpdateSettings';
+import { CliInstallSettings } from './CliInstallSettings';
 import type { useAppUpdate } from './use-app-update';
+import type { useCliInstall } from './use-cli-install';
 import type { useWorkDirectory } from './use-work-directory';
 import './settings.css';
 
 type BackupOperation = 'export' | 'choose' | 'restore';
 
-export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChange, workspaceVisibility, onWorkspaceVisibilityChange, update, updateBlocked, onUpdate }: {
+export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChange, workspaceVisibility, onWorkspaceVisibilityChange, update, updateBlocked, onUpdate, cli, cliBlocked, onInstallCli }: {
   snapshot: LibrarySnapshot;
   directory: ReturnType<typeof useWorkDirectory>;
   onRestored: (snapshot: LibrarySnapshot) => void;
@@ -24,6 +26,9 @@ export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChang
   update: ReturnType<typeof useAppUpdate>;
   updateBlocked: boolean;
   onUpdate: () => void;
+  cli: ReturnType<typeof useCliInstall>;
+  cliBlocked: boolean;
+  onInstallCli: () => void;
 }) {
   const [operation, setOperation] = useState<BackupOperation | null>(null);
   const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
@@ -34,9 +39,10 @@ export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChang
   const toast = useToast();
   const directoryBusy = directory.busy || !!directory.retrying?.size;
   const backupBusy = operation !== null || exportOptionsOpen || restorePath !== null;
+  const installingCli = cli.state.type === 'installing';
 
   async function run(next: BackupOperation, task: () => Promise<void>) {
-    if (locked.current || directoryBusy) return;
+    if (locked.current || directoryBusy || installingCli) return;
     locked.current = true;
     setOperation(next);
     onBusyChange(true);
@@ -56,7 +62,7 @@ export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChang
   }
 
   function openExportOptions() {
-    if (backupBusy || directoryBusy) return;
+    if (backupBusy || directoryBusy || installingCli) return;
     setExportError('');
     setExportOptionsOpen(true);
   }
@@ -103,7 +109,8 @@ export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChang
   return <section>
     <WorkspaceHeader title="设置" count={`${snapshot.photos.length} 张照片 · ${snapshot.groups.length} 个相簿`} />
     <AppUpdateSettings update={update} updateBlocked={updateBlocked || backupBusy || directoryBusy} onUpdate={onUpdate} />
-    <WorkDirectorySettings directory={directory} disabled={backupBusy} />
+    <CliInstallSettings cli={cli} blocked={cliBlocked || backupBusy || directoryBusy} onInstall={onInstallCli} />
+    <WorkDirectorySettings directory={directory} disabled={backupBusy || installingCli} />
     <section className="settings-content" aria-labelledby="settings-workspace-title">
       <h2 id="settings-workspace-title">工作区</h2>
       <div className="settings-visibility-options">
@@ -115,12 +122,12 @@ export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChang
       <h2 id="settings-backup-title">备份与恢复</h2>
       <p className="muted">导出 ZIP 备份时，可仅保存图库资料与缩略图，也可一并保存全部原片。</p>
       <div className="settings-actions">
-        <button type="button" className="button" disabled={directoryBusy || restorePath !== null || operation === 'choose' || operation === 'restore'}
+        <button type="button" className="button" disabled={installingCli || directoryBusy || restorePath !== null || operation === 'choose' || operation === 'restore'}
           aria-haspopup="dialog" aria-disabled={exportOptionsOpen || operation === 'export'} onClick={openExportOptions}>
           {operation === 'export' ? <LoaderCircle size={14} className="spin" /> : <Download size={14} />}
           {operation === 'export' ? <span role="status">正在导出…</span> : '导出备份'}
         </button>
-        <button type="button" className="button" disabled={directoryBusy || (backupBusy && operation !== 'choose')} aria-disabled={operation === 'choose'} onClick={chooseBackup}>
+        <button type="button" className="button" disabled={installingCli || directoryBusy || (backupBusy && operation !== 'choose')} aria-disabled={operation === 'choose'} onClick={chooseBackup}>
           {operation === 'choose' ? <LoaderCircle size={14} className="spin" /> : <ArchiveRestore size={14} />}
           {operation === 'choose' ? <span role="status">正在选择…</span> : '恢复备份'}
         </button>

@@ -9,7 +9,7 @@ import { ModelOverviewRow } from './ModelOverviewRow';
 import { modelViewReducer, type ModelWorkspaceProps } from './model-workspace-state';
 import './models.css';
 
-export function ModelWorkspace({ initialModel, onBackToSearch, ...props }: ModelWorkspaceProps & { initialModel?: ModelProfile; onBackToSearch?: () => void }) {
+export function ModelWorkspace({ initialModel, onBackToSearch, externalRevision = 0, ...props }: ModelWorkspaceProps & { initialModel?: ModelProfile; onBackToSearch?: () => void; externalRevision?: number }) {
   const [models, setModels] = useState<ModelProfile[]>([]);
   const [view, navigate] = useReducer(modelViewReducer, initialModel ? { page: 'detail', model: initialModel } : { page: 'home' });
   const [query, setQuery] = useState('');
@@ -23,6 +23,7 @@ export function ModelWorkspace({ initialModel, onBackToSearch, ...props }: Model
   const deletingNow = useRef(false);
   const viewRoot = useRef<HTMLDivElement>(null);
   const previousPage = useRef(view.page);
+  const loadedExternalRevision = useRef(externalRevision);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
     if (!deleteBusy) return;
@@ -48,6 +49,24 @@ export function ModelWorkspace({ initialModel, onBackToSearch, ...props }: Model
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
   }, [initialModel, revision]);
+  useEffect(() => {
+    if (loadedExternalRevision.current === externalRevision || view.page === 'edit') return;
+    let active = true;
+    void modelsApi.listModels().then((items) => {
+      if (!active) return;
+      setModels(items);
+      if (view.page === 'detail') {
+        const current = items.find((item) => item.id === view.model.id);
+        if (current && current.updatedAt !== view.model.updatedAt) navigate({ type: 'open', model: current });
+        else if (!current) {
+          setDeleteError('模特档案已删除');
+          navigate({ type: 'deleted' });
+        }
+      }
+      loadedExternalRevision.current = externalRevision;
+    }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { active = false; };
+  }, [externalRevision, view]);
   const filtered = useMemo(() => {
     const term = query.trim().toLocaleLowerCase();
     return models.filter((model) => [model.name, model.city, model.contact, model.notes, ...model.tags].join(' ').toLocaleLowerCase().includes(term));
@@ -60,7 +79,7 @@ export function ModelWorkspace({ initialModel, onBackToSearch, ...props }: Model
     const id = deleting.id;
     deletingNow.current = true; setDeleteBusy(true); setDeleteError('');
     try {
-      const next = await modelsApi.deleteModel(id);
+      const next = await modelsApi.deleteModel(id, deleting.updatedAt);
       if (!mounted.current) return;
       props.onSnapshot(next);
       setModels((items) => items.filter((item) => item.id !== id));

@@ -46,7 +46,7 @@ pub struct PlanShot {
     pub references: Vec<PlanReference>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PlanPart {
     pub id: String,
@@ -65,7 +65,7 @@ pub struct PlanPart {
     pub shots: Vec<PlanShot>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShootPlanInput {
     pub title: String,
@@ -369,36 +369,48 @@ fn validate(conn: &Connection, input: &ShootPlanInput) -> Result<(), String> {
     content_refs::validate_photos(conn, &photo_union(input))
 }
 
+type PlanRow = (String, String, String, String);
+
+fn read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PlanRow> {
+    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+}
+
+fn read_plan(conn: &Connection, row: PlanRow) -> Result<ShootPlan, String> {
+    let (id, created_at, updated_at, json) = row;
+    let input = decode(&json)?;
+    content_refs::timestamps(&id, &created_at, &updated_at)?;
+    validate(conn, &input)?;
+    if read_photo_union(conn, &id)? != photo_union(&input) {
+        return Err("拍摄策划文档与照片引用不一致".into());
+    }
+    Ok(ShootPlan {
+        id,
+        created_at,
+        updated_at,
+        input,
+    })
+}
+
+pub fn get(conn: &Connection, id: &str) -> Result<ShootPlan, String> {
+    let row = conn
+        .query_row(
+            "SELECT id,created_at,updated_at,document_json FROM shoot_plans WHERE id=?1",
+            [id],
+            read_row,
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or("拍摄策划不存在")?;
+    read_plan(conn, row)
+}
+
 pub fn list(conn: &Connection) -> Result<Vec<ShootPlan>, String> {
     let mut statement = conn.prepare("SELECT id,created_at,updated_at,document_json FROM shoot_plans ORDER BY updated_at DESC,id").map_err(|e| e.to_string())?;
-    let records = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
+    let rows = statement
+        .query_map([], read_row)
         .map_err(|e| e.to_string())?;
-    let mut plans = Vec::new();
-    for (id, created_at, updated_at, json) in records {
-        let input = decode(&json)?;
-        content_refs::timestamps(&id, &created_at, &updated_at)?;
-        validate(conn, &input)?;
-        if read_photo_union(conn, &id)? != photo_union(&input) {
-            return Err("拍摄策划文档与照片引用不一致".into());
-        }
-        plans.push(ShootPlan {
-            id,
-            created_at,
-            updated_at,
-            input,
-        });
-    }
-    Ok(plans)
+    rows.map(|row| read_plan(conn, row.map_err(|e| e.to_string())?))
+        .collect()
 }
 
 pub fn validate_all(conn: &Connection) -> Result<(), String> {
@@ -413,13 +425,47 @@ pub fn validate_all(conn: &Connection) -> Result<(), String> {
 pub fn save(
     conn: &mut Connection,
     id: Option<&str>,
+    input: ShootPlanInput,
+) -> Result<ShootPlan, String> {
+    save_inner(conn, id, None, input)
+}
+
+pub fn update(
+    conn: &mut Connection,
+    id: &str,
+    expected_revision: &str,
+    input: ShootPlanInput,
+) -> Result<ShootPlan, String> {
+    save_inner(conn, Some(id), Some(expected_revision), input)
+}
+
+fn save_inner(
+    conn: &mut Connection,
+    id: Option<&str>,
+    expected_revision: Option<&str>,
     mut input: ShootPlanInput,
 ) -> Result<ShootPlan, String> {
+    let tx = conn.savepoint().map_err(|e| e.to_string())?;
+    let existing = id
+        .map(|id| {
+            tx.query_row(
+                "SELECT created_at,updated_at FROM shoot_plans WHERE id=?1",
+                [id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "拍摄策划不存在".to_string())
+        })
+        .transpose()?;
+    let previous = existing.as_ref().map(|(_, updated)| updated.as_str());
+    if expected_revision.is_some() && expected_revision != previous {
+        return Err(db::REVISION_CONFLICT.into());
+    }
     input.title = content_refs::name(&input.title)?;
     if input.execution_date.is_empty() {
         return Err("请选择执行日期".into());
     }
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
     validate(&tx, &input)?;
     for (index, part) in input.parts.iter().enumerate() {
         if part.references.len() > MAX_SCENE_REFERENCES {
@@ -434,22 +480,13 @@ pub fn save(
             ));
         }
     }
-    let now = chrono::Utc::now().to_rfc3339();
-    let (id, created_at) = match id {
-        Some(id) => {
-            let created = tx
-                .query_row(
-                    "SELECT created_at FROM shoot_plans WHERE id=?1",
-                    [id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()
-                .map_err(|e| e.to_string())?
-                .ok_or("拍摄策划不存在")?;
-            (id.to_string(), created)
-        }
-        None => (uuid::Uuid::new_v4().to_string(), now.clone()),
-    };
+    let now = db::next_revision(previous);
+    let id = id
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let created_at = existing
+        .map(|(created, _)| created)
+        .unwrap_or_else(|| now.clone());
     tx.execute("INSERT INTO shoot_plans (id,title,concept,shoot_date,location,team,styling,lighting,shot_list,notes,created_at,updated_at,document_json)
         VALUES (?1,?2,?3,?4,?5,?6,'','','','',?7,?8,?9)
         ON CONFLICT(id) DO UPDATE SET title=excluded.title,concept=excluded.concept,shoot_date=excluded.shoot_date,
@@ -474,22 +511,27 @@ pub fn save(
 }
 
 pub fn delete(conn: &mut Connection, id: &str) -> Result<Snapshot, String> {
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = conn.savepoint().map_err(|e| e.to_string())?;
+    delete_record(&tx, id)?;
+    let snapshot = db::snapshot(&tx)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(snapshot)
+}
+
+pub(crate) fn delete_record(conn: &Connection, id: &str) -> Result<(), String> {
     let candidates = content_refs::deletion_candidates(
-        &tx,
+        conn,
         "SELECT photo_id FROM shoot_plan_photos WHERE plan_id=?1",
         id,
     )?;
-    if tx
+    if conn
         .execute("DELETE FROM shoot_plans WHERE id=?1", [id])
         .map_err(|e| e.to_string())?
         == 0
     {
         return Err("拍摄策划不存在".into());
     }
-    let snapshot = content_refs::snapshot_after_deletion(&tx, candidates)?;
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(snapshot)
+    content_refs::hide_unreferenced_photos(conn, candidates)
 }
 
 #[tauri::command]
@@ -497,18 +539,36 @@ pub fn plans_list(store: State<'_, Store>) -> Result<Vec<ShootPlan>, String> {
     list(&*store.connection.lock().map_err(|e| e.to_string())?)
 }
 #[tauri::command]
-pub fn plans_save(
-    store: State<'_, Store>,
+pub async fn plans_save(
+    app: AppHandle,
     id: Option<String>,
     input: ShootPlanInput,
+    expected_revision: Option<String>,
 ) -> Result<ShootPlan, String> {
-    save(
-        &mut *store.connection.lock().map_err(|e| e.to_string())?,
-        id.as_deref(),
-        input,
-    )
+    db::with_connection(app, move |conn| {
+        db::write(conn, |conn| match id.as_deref() {
+            Some(id) => update(
+                conn,
+                id,
+                expected_revision.as_deref().ok_or(db::REVISION_CONFLICT)?,
+                input,
+            ),
+            None => save(conn, None, input),
+        })
+    })
+    .await
 }
 #[tauri::command]
-pub async fn plans_delete(app: AppHandle, id: String) -> Result<Snapshot, String> {
-    db::with_connection(app, move |conn| delete(conn, &id)).await
+pub async fn plans_delete(
+    app: AppHandle,
+    id: String,
+    expected_revision: String,
+) -> Result<Snapshot, String> {
+    db::with_connection(app, move |conn| {
+        db::write(conn, |conn| {
+            db::check_revision(&get(conn, &id)?.updated_at, &expected_revision)?;
+            delete(conn, &id)
+        })
+    })
+    .await
 }

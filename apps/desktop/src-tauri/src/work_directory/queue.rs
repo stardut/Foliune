@@ -5,7 +5,10 @@ use super::{
 };
 use rusqlite::{params, Connection, Transaction};
 use serde::Serialize;
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::{HashSet, VecDeque},
+    sync::Arc,
+};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -175,6 +178,29 @@ impl Queue {
         self.0.retain(|job| job.state.album_id != id);
     }
 
+    pub fn remove_deleted_failures(&mut self, conn: &Connection) -> Result<bool, String> {
+        if !self
+            .0
+            .iter()
+            .any(|job| job.state.status == JobStatus::Failed)
+        {
+            return Ok(false);
+        }
+        let mut statement = conn
+            .prepare_cached("SELECT id FROM work_directory_jobs WHERE error IS NOT NULL")
+            .map_err(|error| error.to_string())?;
+        let failures = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?
+            .collect::<Result<HashSet<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        let old_count = self.0.len();
+        self.0.retain(|job| {
+            job.state.status != JobStatus::Failed || failures.contains(&job.state.id)
+        });
+        Ok(old_count != self.0.len())
+    }
+
     pub fn enqueue(
         &mut self,
         conn: &mut Connection,
@@ -333,8 +359,18 @@ pub(super) fn retain_same_source(
     Ok(())
 }
 
-pub(super) fn remove_album(tx: &Transaction<'_>, id: &str) -> Result<(), String> {
-    tx.execute("DELETE FROM work_directory_jobs WHERE album_id=?1", [id])
+pub(super) fn remove_album(conn: &Connection, id: &str) -> Result<(), String> {
+    let active: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM work_directory_jobs WHERE album_id=?1 AND error IS NULL)",
+            [id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if active {
+        return Err("请等待该相簿同步完成后再删除".into());
+    }
+    conn.execute("DELETE FROM work_directory_jobs WHERE album_id=?1", [id])
         .map_err(|e| e.to_string())?;
     Ok(())
 }

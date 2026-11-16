@@ -316,6 +316,8 @@ function pressKey(target, key) {
 
 test('相簿信息在保存后关闭，只有后端返回超限候选时才进入取舍', async (t) => {
   const groupId = 'collection-album';
+  const { name, description, capacity } = mixed.groups.find((group) => group.id === groupId);
+  const initial = { name, description, capacity };
   const saved = { ...mixed, groups: mixed.groups.map((group) => group.id === groupId ? { ...group, name: '新相簿名' } : group) };
   const draft = { id: 'capacity-draft', groupId, groupName: '新相簿名', capacity: 1 };
   const feedback = [];
@@ -346,7 +348,7 @@ test('相簿信息在保存后关闭，只有后端返回超限候选时才进�
       await openInfo();
       await input('input:not([type])', '新相簿名');
       await submit();
-      assert.deepEqual(save.mock.calls[0].arguments, [groupId, { name: '新相簿名', description: '', capacity: null }]);
+      assert.deepEqual(save.mock.calls[0].arguments, [groupId, { name: '新相簿名', description: '', capacity: null }, initial]);
       assert.equal(dialog().querySelector('[aria-label="关闭"]').disabled, true);
       assert.equal(dialog().querySelector('.form-actions [type="button"]').disabled, true);
       await submit();
@@ -361,7 +363,7 @@ test('相簿信息在保存后关闭，只有后端返回超限候选时才进�
       await openInfo();
       await input('input[type="number"]', '1');
       await submit();
-      assert.deepEqual(save.mock.calls[1].arguments, [groupId, { name: '新相簿名', description: '', capacity: 1 }]);
+      assert.deepEqual(save.mock.calls[1].arguments, [groupId, { name: '新相簿名', description: '', capacity: 1 }, { ...initial, name: '新相簿名' }]);
       // The work directory can add a photo after the UI counted one active photo.
       await act(async () => finishSave({ status: 'needsCuration', draft }));
       assert.equal(dialog(), null);
@@ -451,7 +453,7 @@ test('相簿封面以右击照片取景，取消保留旧封面，保存后卡�
       assert.equal(frame().querySelector('.album-cover-thirds'), null);
       assert.equal(frame().style.getPropertyValue('--album-cover-position'), '50% 100%');
       await click(save());
-      assert.deepEqual(update.mock.calls[0].arguments, [groupId, { cover }]);
+      assert.deepEqual(update.mock.calls[0].arguments, [groupId, { cover }, null]);
       assert.equal(cancel().disabled, true);
       const dialog = container.querySelector('dialog');
       assert.equal(dialog.open, true);

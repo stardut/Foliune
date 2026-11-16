@@ -91,6 +91,13 @@
 .book-create-footer > .book-create-selection { flex-wrap: wrap; column-gap: 4px; row-gap: 0; }
 .book-create-selection > * { white-space: nowrap; }
 
+@media (max-height: 700px) {
+  .modal:has(.book-choose-photos) > .modal-header { margin-bottom: 12px; }
+  .book-create:has(.book-choose-photos) { gap: 12px; }
+  .book-choose-photos .book-source-tools, .book-choose-photos .photo-picker-navigation, .book-choose-photos .photo-picker-tools { margin-bottom: 10px; }
+  .book-choose-photos .photo-picker > .page-controls, .book-choose-photos .photo-picker-footer { margin-top: 10px; }
+}
+
 /* Let the existing app shell allocate the editor's actual remaining height. */
 .app-shell:has(.book-editor) { height: 100dvh; min-height: 0; }
 .app-shell:has(.book-editor) > .app-footer { display: none; }

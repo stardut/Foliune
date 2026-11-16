@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { cancelCuration, commitCuration, prepareImport } from '../lib/curation-api';
+import { cancelCuration, chooseLocalPhotoSources, commitCuration, prepareImportFiles } from '../lib/curation-api';
 import { cancelLinkImport, prepareLinkImport } from '../lib/photo-import-api';
 import type { CurationDraft } from '../lib/curation-types';
 import type { LibraryKind, LibrarySnapshot, Photo } from '../lib/types';
@@ -12,6 +12,7 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
   library: LibraryKind; groupId?: string; onBusyChange?: (busy: boolean) => void;
 }) {
   const [draft, setDraft] = useState<CurationDraft | null>(null);
+  const [choosing, setChoosing] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [linkProgress, setLinkProgress] = useState<{ total: number | null; photos: Photo[] } | null>(null);
   const [committing, setCommitting] = useState(false);
@@ -24,7 +25,7 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
   const committingRef = useRef(false);
   const busyCallback = useRef(onBusyChange);
   busyCallback.current = onBusyChange;
-  const busy = preparing || committing || cleaning;
+  const busy = choosing || preparing || committing || cleaning;
   useEffect(() => { busyCallback.current?.(busy); }, [busy]);
   useEffect(() => {
     mounted.current = true;
@@ -48,6 +49,7 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
     const pendingDraft = currentDraft.current;
     request.current = null;
     // Keep ownership until cancellation succeeds, so a failed cleanup can be retried.
+    setChoosing(false);
     setPreparing(false);
     setLinkProgress(null);
     setCleaning(true);
@@ -69,12 +71,31 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
     }
   }
 
-  async function prepare(source: 'local' | 'folder' | 'link', input = '') {
+  async function chooseLocalPaths() {
+    const ownGeneration = generation.current;
+    setChoosing(true);
+    setError('');
+    try {
+      const paths = await chooseLocalPhotoSources();
+      if (mounted.current && generation.current === ownGeneration) return paths;
+    } catch (cause) {
+      if (mounted.current && generation.current === ownGeneration) setError(messageOf(cause));
+    } finally {
+      if (mounted.current && generation.current === ownGeneration) setChoosing(false);
+    }
+    return [];
+  }
+
+  async function prepare(source: 'local' | 'link', input: string, onPreparing: () => void) {
+    // Leaving the system picker empty does not start a new import attempt.
+    const paths = source === 'local' ? await chooseLocalPaths() : [];
+    if (source === 'local' && paths.length === 0) return;
     if (!await clear() || !mounted.current) return;
     const ownGeneration = ++generation.current;
     const requestId = source === 'link' ? crypto.randomUUID() : null;
     request.current = requestId;
     setPreparing(true);
+    onPreparing();
     if (requestId) setLinkProgress({ total: null, photos: [] });
     setError('');
     try {
@@ -83,7 +104,7 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
           if (!mounted.current || generation.current !== ownGeneration || request.current !== requestId) return;
           setLinkProgress((current) => current && { total, photos: photo ? [...current.photos, photo] : current.photos });
         })
-        : await prepareImport(library, groupId, source === 'folder');
+        : await prepareImportFiles(paths, library, groupId);
       if (!mounted.current || generation.current !== ownGeneration) {
         if (next) await cancelCuration(next.id);
         return;
@@ -105,16 +126,17 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
     }
   }
 
-  async function commit(keepIds: string[]): Promise<LibrarySnapshot | null> {
-    const committingDraft = currentDraft.current;
-    if (!committingDraft || committingRef.current) return null;
+  async function commit(draftId: string, keepIds: string[]): Promise<LibrarySnapshot | null> {
+    if (currentDraft.current?.id !== draftId || committingRef.current) return null;
     committingRef.current = true;
     setCommitting(true);
     setError('');
     // commit_curation consumes the session on both success and failure.
     currentDraft.current = null;
     try {
-      return await commitCuration(committingDraft.id, keepIds);
+      const snapshot = await commitCuration(draftId, keepIds);
+      if (mounted.current) setDraft(null);
+      return snapshot;
     } catch (cause) {
       if (mounted.current) {
         setDraft(null);

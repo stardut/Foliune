@@ -108,7 +108,8 @@ pub(super) fn run(app: AppHandle, receiver: Receiver<()>, signal: SyncSender<()>
                 }
                 let old = cache.state.clone();
                 let old_scan = cache.scan.clone();
-                if from_signal || observed.is_some() {
+                let queue_changed = cache.queue.remove_deleted_failures(&conn)?;
+                if from_signal || observed.is_some() || queue_changed {
                     cache.update(&store, &conn, library, root, observed)?;
                 }
                 let source_changed = old_scan != cache.scan
@@ -117,7 +118,8 @@ pub(super) fn run(app: AppHandle, receiver: Receiver<()>, signal: SyncSender<()>
                     || detached_changed;
                 let observed_change =
                     from_files && (cache.scan.connected || !detached_folders.is_empty());
-                let changed = old != cache.state || source_changed || observed_change;
+                let changed =
+                    queue_changed || old != cache.state || source_changed || observed_change;
                 if cache.scan.connected && cache.queue.has_waiting() {
                     let _ = manager.work.try_send(());
                 }

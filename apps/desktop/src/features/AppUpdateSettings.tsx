@@ -20,7 +20,7 @@ export function AppUpdateSettings({ update, updateBlocked, onUpdate }: {
     : status.type === 'checkError' ? '重试检查' : '检查更新';
 
   return <section className="settings-content settings-update" aria-labelledby="settings-update-title">
-    <div className="settings-update-row">
+    <div className="settings-row">
       <div>
         <h2 id="settings-update-title">应用更新</h2>
         <p className="muted">当前版本 {info.currentVersion}</p>

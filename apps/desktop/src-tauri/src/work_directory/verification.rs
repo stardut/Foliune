@@ -17,7 +17,7 @@ use std::{
 
 const AVAILABILITY_INTERVAL: Duration = Duration::from_millis(500);
 
-pub(super) fn init_availability(conn: &Connection) -> Result<(), String> {
+pub(crate) fn init_availability(conn: &Connection) -> Result<(), String> {
     // This cache belongs to the open connection. Backups carry the verified signature only.
     conn.execute_batch(
         "CREATE TEMP TABLE IF NOT EXISTS work_directory_unavailable (

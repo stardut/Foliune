@@ -137,6 +137,60 @@ fn only_confirmed_direct_photos_get_stable_ids_and_no_original_copy() {
 }
 
 #[test]
+fn headless_bound_status_checks_indexed_signature_and_file_availability() {
+    let fixture = Fixture::new();
+    let source = fixture.works.join("海岸/光线.png");
+    photo(&source, 10);
+    let mut conn = fixture.store.connection.lock().unwrap();
+    let root = fixture.binding(&conn);
+    let candidates = fixture.pending(&conn, &root);
+    sync_now(&mut conn, &root, &candidates).unwrap();
+    let photo = db::snapshot(&conn).unwrap().photos.remove(0);
+    let headless = db::open_existing(&fixture.store.root, false).unwrap();
+    let status = || probe_original_status(&headless, &photo.id, &photo.original_path).unwrap();
+    assert_eq!(status(), (Some(true), Some(BoundAvailability::Available)));
+    conn.execute("UPDATE work_directory_photos SET stat_signature=NULL", [])
+        .unwrap();
+    assert_eq!(status(), (None, None));
+    fs::remove_file(source).unwrap();
+    assert_eq!(status(), (Some(false), Some(BoundAvailability::Missing)));
+    fs::remove_dir_all(&fixture.works).unwrap();
+    assert_eq!(status(), (Some(false), Some(BoundAvailability::Offline)));
+}
+
+#[test]
+fn album_deletion_across_connections_protects_sync_and_prunes_failed_jobs() {
+    let fixture = Fixture::new();
+    let mut conn = fixture.store.connection.lock().unwrap();
+    photo(&fixture.works.join("海岸/首张.png"), 10);
+    let root = fixture.binding(&conn);
+    let candidates = fixture.pending(&conn, &root);
+    sync_now(&mut conn, &root, &candidates).unwrap();
+    let album = db::snapshot(&conn).unwrap().groups.remove(0).id;
+    photo(&fixture.works.join("海岸/续张.png"), 20);
+    let mut jobs = queue::Queue::default();
+    let candidates = fixture.pending(&conn, &root);
+    jobs.enqueue(&mut conn, &root, candidates, None).unwrap();
+    let mut external = db::open_existing(&fixture.store.root, true).unwrap();
+    let delete = |conn: &mut Connection| runtime::delete_album_records(conn, &album);
+    assert!(db::write(&mut external, delete).is_err());
+    assert!(db::find_group(&conn, &album).unwrap().is_some());
+    assert!(!jobs.remove_deleted_failures(&conn).unwrap());
+    let running = jobs.take_next().unwrap();
+    assert!(db::write(&mut external, delete).is_err());
+    jobs.fail(&conn, &running.state.id, "测试失败".into())
+        .unwrap();
+    db::write(&mut external, delete).unwrap();
+    assert!(jobs.remove_deleted_failures(&conn).unwrap());
+    assert!(jobs.states().is_empty());
+    assert!(fixture.pending(&conn, &root).is_empty());
+    let snapshot = db::snapshot(&conn).unwrap();
+    assert!(snapshot.groups.is_empty());
+    assert_eq!(snapshot.hidden_photo_ids.len(), 1);
+    assert!(fixture.works.join("海岸/首张.png").is_file());
+}
+
+#[test]
 fn thumbnail_pipeline_uses_the_detected_format_for_supported_extensions() {
     let fixture = Fixture::new();
     let album = fixture.works.join("混合格式");

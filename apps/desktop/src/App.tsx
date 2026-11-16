@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Search, Settings2 } from 'lucide-react';
+import { TauriEvent } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import * as api from './lib/api';
 import { getBook } from './lib/book-api';
@@ -22,7 +23,8 @@ import { SearchWorkspace, type SearchSession } from './features/search/SearchWor
 import { SettingsWorkspace } from './features/SettingsWorkspace';
 import { AppUpdateDialog } from './features/AppUpdateDialog';
 import { rememberUpdateNotice, useAppUpdate } from './features/use-app-update';
-import { isContextMenuTracking } from './features/use-context-menu';
+import { useCliInstall, useCliInstallNotice } from './features/use-cli-install';
+import { isContextMenuTracking, subscribeContextMenu } from './features/use-context-menu';
 import { PhotoPlayer } from './features/PhotoPlayer';
 import { WorkDirectoryDiscovery } from './features/WorkDirectory';
 import { useWorkDirectory } from './features/use-work-directory';
@@ -45,6 +47,8 @@ export default function App() {
   const [{ snapshot }, setLibraryView] = useState<LibraryView>({ snapshot: empty, pendingCommits: [], observedPhotos: [] });
   const setSnapshot = useCallback((next: LibrarySnapshot) => setLibraryView((view) => replaceLibrarySnapshot(view, next)), []);
   const [loading, setLoading] = useState(true);
+  const libraryVersion = useRef<number | null>(null);
+  const [externalRevision, setExternalRevision] = useState(0);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const toast = useToast();
@@ -82,15 +86,18 @@ export default function App() {
     });
   }, []);
   const appUpdate = useAppUpdate();
+  const cliInstall = useCliInstall(ready);
+  const installingCli = cliInstall.state.type === 'installing';
   const updating = appUpdate.status.type === 'updating';
   const workDirectory = useWorkDirectory(ready, onDirectorySynced, onDirectoryAvailability, updating);
   const updateVersion = 'version' in appUpdate.status ? appUpdate.status.version : null;
   const modalHost = useSyncExternalStore(subscribeModalStack, currentModalHost);
+  const menuOpen = useSyncExternalStore(subscribeContextMenu, isContextMenuTracking);
   const noticedVersions = useRef(new Set<string>());
   const updateNotice = useRef<{ version: string; dismiss: () => void } | null>(null);
   const startFromNotice = useRef(() => {});
   const workspaceDirty = bookDirty || photoDirty || modelDirty || planningDirty;
-  const workspaceBusy = bookBusy || modelBusy || photoBusy || planningBusy || settingsBusy || relinkBusy || workDirectory.blocking || updating;
+  const workspaceBusy = bookBusy || modelBusy || photoBusy || planningBusy || settingsBusy || relinkBusy || workDirectory.blocking || updating || installingCli;
   const updateBlocked = !ready || loading || workspaceDirty || workspaceBusy || workDirectory.busy || !!workDirectory.retrying?.size
     || workDirectory.jobs.some((job) => job.status === 'running' || (job.status === 'queued' && workDirectory.state?.status === 'connected'))
     || !!(pendingSpace || pendingClose || relinkConfirmation || playingIds || closing);
@@ -101,6 +108,11 @@ export default function App() {
     && !workspaceDirty && !workspaceBusy && !pendingSpace && !pendingClose && !relinkConfirmation && !playingIds && !appUpdate.dialogOpen;
   closeState.current = { dirty: workspaceDirty, busy: workspaceBusy };
   startFromNotice.current = () => startUpdate('notice');
+
+  const cliBlocked = updateBlocked || appUpdate.dialogOpen || modalHost !== document.body || menuOpen;
+  const cliNoticeAllowed = cliInstall.state.type === 'available' && space !== 'settings';
+  const directoryDiscoveryPending = workDirectory.state?.status === 'connected' && !!workDirectory.state.candidates.length && !workDirectory.retryPending;
+  useCliInstallNotice(cliNoticeAllowed && !cliBlocked && noticeSafe && !directoryDiscoveryPending, cliNoticeAllowed, () => startCliInstall(true));
 
   useEffect(() => {
     if (updateNotice.current && (appUpdate.status.type === 'current' || (updateVersion && updateNotice.current.version !== updateVersion))) {
@@ -132,14 +144,55 @@ export default function App() {
     updateNotice.current = null;
   }
 
+  function startCliInstall(fromNotice: boolean) {
+    if (cliBlocked || (fromNotice && !noticeSafe) || isContextMenuTracking() || document.querySelector('dialog[open]')) {
+      toast({ title: '请先完成当前编辑或图库操作。', status: 'info' });
+      return;
+    }
+    if (fromNotice) settingsButton.current?.focus({ preventScroll: true });
+    void cliInstall.start(fromNotice);
+  }
+
   async function reload() {
     setLoading(true); setError('');
     if (!api.isDesktop()) { setLoading(false); return; }
-    try { setSnapshot(await api.loadSnapshot()); setReady(true); }
+    try {
+      const fresh = await api.snapshotAfterExternalEdit(null);
+      if (fresh.snapshot) setSnapshot(fresh.snapshot);
+      libraryVersion.current = fresh.version;
+      setReady(true);
+    }
     catch (cause) { setError(message(cause)); }
     finally { setLoading(false); }
   }
   useEffect(() => { void reload(); }, []);
+  useEffect(() => {
+    if (!ready || loading || workspaceDirty || workspaceBusy) return;
+    let active = true;
+    let reading = false;
+    let unlisten: (() => void) | undefined;
+    const refresh = async () => {
+      if (reading) return;
+      reading = true;
+      try {
+        const fresh = await api.snapshotAfterExternalEdit(libraryVersion.current);
+        if (!active || closeState.current.dirty || closeState.current.busy) return;
+        if (fresh.snapshot) {
+          setSnapshot(fresh.snapshot);
+          setExternalRevision((current) => current + 1);
+        }
+        libraryVersion.current = fresh.version;
+      } catch (cause) {
+        if (active) toast({ title: message(cause), status: 'error' });
+      } finally { reading = false; }
+    };
+    void getCurrentWindow().listen(TauriEvent.WINDOW_FOCUS, refresh).then((stop) => {
+      if (!active) { stop(); return; }
+      unlisten = stop;
+      void refresh();
+    }).catch((cause: unknown) => { if (active) toast({ title: message(cause), status: 'error' }); });
+    return () => { active = false; unlisten?.(); };
+  }, [ready, loading, workspaceDirty, workspaceBusy, setSnapshot, toast]);
   useLayoutEffect(() => {
     const previous = previousSpace.current;
     if (previous === space) return;
@@ -253,7 +306,7 @@ export default function App() {
   }
   function renderWorkspace(result?: SearchDetail) {
     const libraryProps = { snapshot, onSnapshot: setSnapshot, onFeedback: feedback, importDisabled: relinkBusy, onRelink: relinkPhoto, onPlay: openPlayer, onDirtyChange: setPhotoDirty, onBusyChange: setPhotoBusy };
-    if (space === 'search') return <SearchWorkspace {...libraryProps} session={searchSession.current} workspaceVisibility={workspaceVisibility}
+    if (space === 'search') return <SearchWorkspace {...libraryProps} externalRevision={externalRevision} session={searchSession.current} workspaceVisibility={workspaceVisibility}
       onOpenBook={(id) => navigate('books', { space: 'books', id })}
       onOpenModel={(model) => navigate('models', { space: 'models', id: model.id })}
       onOpenPlan={(plan) => navigate('planning', { space: 'planning', id: plan.id })} />;
@@ -261,15 +314,16 @@ export default function App() {
       onBrowsingIdleChange={setPhotoBrowsingIdle}
       workDirectory={space === 'work' ? workDirectory : undefined}
       onOpenWorkDirectorySettings={space === 'work' ? () => navigate('settings') : undefined} />;
-    if (space === 'books') return <BookWorkspace snapshot={snapshot} photos={snapshot.photos} onSnapshot={setSnapshot} onPlay={openPlayer} onDirtyChange={setBookDirty} onBusyChange={setBookBusy} onRelink={relinkPhoto}
+    if (space === 'books') return <BookWorkspace externalRevision={externalRevision} snapshot={snapshot} photos={snapshot.photos} onSnapshot={setSnapshot} onPlay={openPlayer} onDirtyChange={setBookDirty} onBusyChange={setBookBusy} onRelink={relinkPhoto}
       initialBook={result?.space === 'books' ? result.book : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
-    if (space === 'models') return <ModelWorkspace snapshot={snapshot} photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setModelDirty} onBusyChange={setModelBusy} onRelink={relinkPhoto}
+    if (space === 'models') return <ModelWorkspace externalRevision={externalRevision} snapshot={snapshot} photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setModelDirty} onBusyChange={setModelBusy} onRelink={relinkPhoto}
       initialModel={result?.space === 'models' ? result.model : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
     if (space === 'planning') return <PlanningWorkspace snapshot={snapshot} photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setPlanningDirty} onBusyChange={setPlanningBusy}
       initialPlan={result?.space === 'planning' ? result.plan : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
     return <SettingsWorkspace snapshot={snapshot} directory={workDirectory} onRestored={setSnapshot} onBusyChange={setSettingsBusy}
       workspaceVisibility={workspaceVisibility} onWorkspaceVisibilityChange={changeWorkspaceVisibility}
-      update={appUpdate} updateBlocked={updateBlocked} onUpdate={() => startUpdate('settings')} />;
+      update={appUpdate} updateBlocked={updateBlocked} onUpdate={() => startUpdate('settings')}
+      cli={cliInstall} cliBlocked={cliBlocked} onInstallCli={() => startCliInstall(false)} />;
   }
   return <div className={`app-shell ${gallery || space === 'search' ? 'gallery-shell' : ''}`}>
     <header className="app-header" data-tauri-drag-region>

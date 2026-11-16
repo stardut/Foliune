@@ -10,8 +10,12 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 }
 
 export const listPlans = (): Promise<ShootPlan[]> => call('plans_list');
-export const savePlan = (id: string | null, input: ShootPlanInput): Promise<ShootPlan> => call('plans_save', { id, input });
-export const deletePlan = async (id: string) => withImageUrls(await call<LibrarySnapshot>('plans_delete', { id }));
+export const planRevisionConflict = '记录已被修改，请重新读取后再保存';
+export const planMissing = '拍摄策划不存在';
+export const savePlan = (id: string | null, input: ShootPlanInput, expectedRevision: string | null): Promise<ShootPlan> =>
+  call('plans_save', { id, input, expectedRevision });
+export const deletePlan = async (id: string, expectedRevision: string) =>
+  withImageUrls(await call<LibrarySnapshot>('plans_delete', { id, expectedRevision }));
 
 export async function exportPlanPng(directory: string, title: string, png: Uint8Array): Promise<string> {
   if (!png.length || png.length > PLAN_PNG_MAX_BYTES) throw new Error('策划长图不能为空，且不能超过 64 MiB。');

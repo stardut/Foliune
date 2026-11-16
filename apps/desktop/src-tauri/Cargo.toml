@@ -2,6 +2,7 @@
 name = "foliune"
 version = "0.1.0"
 edition = "2021"
+default-run = "foliune"
 
 [lib]
 name = "foliune_lib"
@@ -12,6 +13,8 @@ cc = "1"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
+dirs = "7"
 tauri = { version = "~2.12.0", features = ["protocol-asset", "macos-private-api"] }
 tauri-plugin-dialog = "~2.7.0"
 serde = { version = "1", features = ["derive"] }

@@ -27,7 +27,7 @@ export async function call<T>(command: string, args?: Record<string, unknown>): 
   catch (error) { throw new Error(typeof error === 'string' ? error : String(error)); }
 }
 
-export { prepareImport, prepareImportFiles, prepareGroupCuration, saveAlbumInfo, commitCuration, cancelCuration } from './curation-api';
+export { prepareImportFiles, prepareGroupCuration, saveAlbumInfo, commitCuration, cancelCuration } from './curation-api';
 
 async function mutate(command: string, args: Record<string, unknown>): Promise<LibrarySnapshot> {
   return withImageUrls(await call<LibrarySnapshot>(command, args));
@@ -35,6 +35,11 @@ async function mutate(command: string, args: Record<string, unknown>): Promise<L
 
 export async function loadSnapshot(): Promise<LibrarySnapshot> {
   return withImageUrls(await call<LibrarySnapshot>('load_snapshot'));
+}
+
+export async function snapshotAfterExternalEdit(knownVersion: number | null) {
+  const [version, snapshot] = await call<[number, LibrarySnapshot | null]>('snapshot_after_external_edit', { knownVersion });
+  return { version, snapshot: snapshot && withImageUrls(snapshot) };
 }
 
 export async function importPhotoFiles(paths: string[], library: LibraryKind, groupId?: string): Promise<ImportResult> {
@@ -52,7 +57,8 @@ export async function importPhotos(library: LibraryKind, groupId?: string): Prom
 }
 
 export const createGroup = (input: GroupInput) => mutate('create_group', { input });
-export const updateGroup = (id: string, patch: GroupPatch) => mutate('update_group', { id, patch });
+export const updateGroup = (id: string, patch: Pick<GroupPatch, 'cover'>, expectedCover: GroupPatch['cover'] | null) =>
+  mutate('update_group', { id, patch, expectedCover: expectedCover ?? null });
 export async function readAlbumCover(groupId: string, photoId: string, expectedOriginalPath: string, expectedThumbnailPath: string, expectedCover: AlbumCover | null): Promise<ArrayBuffer> {
   const bytes = await call<ArrayBuffer | number[]>('read_album_cover', { groupId, photoId, expectedOriginalPath, expectedThumbnailPath, expectedCover });
   // Tauri's macOS postMessage transport serializes raw IPC responses as arrays.
@@ -61,7 +67,8 @@ export async function readAlbumCover(groupId: string, photoId: string, expectedO
 export const deleteGroup = (id: string) => mutate('delete_group', { id });
 export const shareAlbumAirDrop = (groupId: string, photoIds?: string[]) =>
   call<void>('share_album_airdrop', { groupId, photoIds: photoIds ?? null });
-export const updatePhoto = (id: string, patch: PhotoPatch) => mutate('update_photo', { id, patch });
+export const updatePhoto = (id: string, patch: PhotoPatch, expected: PhotoPatch) =>
+  mutate('update_photo', { id, patch, expected });
 export const readPhotoMetadata = (photoId: string, expectedOriginalPath: string) =>
   call<PhotoMetadata>('read_photo_metadata', { photoId, expectedOriginalPath });
 export const addPhotosToGroup = (groupId: string, photoIds: string[]) => mutate('add_photos_to_group', { groupId, photoIds });

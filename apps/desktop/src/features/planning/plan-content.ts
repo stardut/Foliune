@@ -1,4 +1,4 @@
-import { PLAN_MAX_SCENE_REFERENCES, type PlanPart, type PlanShot, type ShootPlan, type ShootPlanInput } from '../../lib/planning-types.ts';
+import { PLAN_MAX_SCENE_REFERENCES, type PlanPart, type PlanReference, type PlanShot, type ShootPlan, type ShootPlanInput } from '../../lib/planning-types.ts';
 
 export const partFields = [['lighting', '光影'], ['focalLength', '镜头焦段'], ['scene', '场地'], ['styling', '场景补充'], ['mood', '情绪']] as const;
 export const sharedFields = [['styling', '妆造'], ['props', '道具'], ['equipment', '器材']] as const;
@@ -15,6 +15,14 @@ export function inputOf(plan?: ShootPlan): ShootPlanInput {
 export function newPart(): PlanPart { return { id: crypto.randomUUID(), title: '', description: '', shotList: '', scene: '', styling: '', lighting: '', focalLength: '', mood: '', timeWindow: '', references: [], shots: [] }; }
 export function newShot(): PlanShot { return { id: crypto.randomUUID(), title: '', description: '', pose: '', composition: '', lighting: '', mood: '', priority: 'normal', references: [] }; }
 export function referenceCount(plan: ShootPlanInput) { return plan.references.length + plan.parts.reduce((sum, part) => sum + part.references.length + part.shots.reduce((count, shot) => count + shot.references.length, 0), 0); }
+export function referencesFromSelection(references: PlanReference[], photoIds: string[]): PlanReference[] {
+  const selected = new Set(photoIds);
+  const retained = references.filter((reference) => selected.has(reference.photoId));
+  const existing = new Set(retained.map((reference) => reference.photoId));
+  const added = [...selected].filter((photoId) => !existing.has(photoId))
+    .map((photoId) => ({ id: crypto.randomUUID(), photoId, intent: '' }));
+  return [...retained, ...added];
+}
 export function shotCount(plan: ShootPlanInput) { return plan.parts.reduce((sum, part) => sum + part.shots.length, 0); }
 export function hasContent(item: PlanPart | PlanShot): boolean { return Object.entries(item).some(([key, value]) => key !== 'id' && key !== 'priority' && (typeof value === 'string' ? !!value.trim() : Array.isArray(value) && value.length > 0)) || ('priority' in item && item.priority !== 'normal'); }
 export function moved<T>(items: T[], index: number, offset: number): T[] { const next = [...items]; const target = index + offset; if (target >= 0 && target < next.length) [next[index], next[target]] = [next[target], next[index]]; return next; }
@@ -27,7 +35,7 @@ export function planSearchFields(plan: ShootPlanInput): [label: string, value: s
   ];
   for (const [key, label] of sharedFields) fields.push([label, plan[key]]);
   fields.push(['执行准备', plan.preparation]);
-  for (const reference of plan.references) fields.push(['整体视觉 · 参考意图', reference.intent]);
+  for (const reference of plan.references) fields.push(['全案参考图 · 参考意图', reference.intent]);
   plan.parts.forEach((part, index) => {
     const scene = partName(part, index);
     fields.push(['场景', part.title], [`${scene} · 拍摄时段`, part.timeWindow], [scene, part.description]);

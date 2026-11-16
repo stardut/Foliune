@@ -23,7 +23,9 @@
   .photo-source .photo-picker-placeholder > span { animation: none; opacity: .5; }
 }
 .photo-source-empty, .photo-source-wait { display: flex; flex: 1; min-height: 180px; align-items: center; justify-content: center; }
+.photo-source-empty { flex-direction: column; gap: 10px; }
 .photo-source-empty .empty-state { min-height: 180px; }
+.photo-source-limit { margin: 0; }
 .photo-source-wait { flex-direction: column; gap: 14px; }
 .photo-source-wait .busy { min-height: 0; padding: 0; }
 .photo-source-failures { flex-shrink: 0; max-height: 118px; overflow: auto; margin-top: 18px; color: var(--danger); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }

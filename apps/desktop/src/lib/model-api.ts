@@ -10,5 +10,7 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 }
 
 export const listModels = (): Promise<ModelProfile[]> => call('models_list');
-export const saveModel = (id: string | null, input: ModelInput): Promise<ModelProfile> => call('models_save', { id, input });
-export const deleteModel = async (id: string) => withImageUrls(await call<LibrarySnapshot>('models_delete', { id }));
+export const saveModel = (id: string | null, input: ModelInput, expectedRevision: string | null): Promise<ModelProfile> =>
+  call('models_save', { id, input, expectedRevision });
+export const deleteModel = async (id: string, expectedRevision: string) =>
+  withImageUrls(await call<LibrarySnapshot>('models_delete', { id, expectedRevision }));

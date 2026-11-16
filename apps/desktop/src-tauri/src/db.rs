@@ -1,5 +1,5 @@
 use crate::models::{AlbumCover, Group, Membership, Photo, Snapshot};
-use rusqlite::{Connection, Row};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Row};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -93,6 +93,62 @@ fn installed_library(root: &Path) -> Result<PathBuf, String> {
     Ok(library)
 }
 
+pub(crate) fn open_existing(root: &Path, writable: bool) -> Result<Connection, String> {
+    let root = root.canonicalize().map_err(|error| error.to_string())?;
+    let database = installed_library(&root)?.join("library.sqlite");
+    let flags = if writable {
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+    } else {
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+    };
+    let conn = Connection::open_with_flags(database, flags).map_err(|error| error.to_string())?;
+    conn.pragma_update(None, "foreign_keys", true)
+        .map_err(|error| error.to_string())?;
+    crate::work_directory::init_availability(&conn)?;
+    Ok(conn)
+}
+
+pub(crate) const REVISION_CONFLICT: &str = "记录已被修改，请重新读取后再保存";
+
+pub(crate) fn check_revision(current: &str, expected: &str) -> Result<(), String> {
+    if current == expected {
+        Ok(())
+    } else {
+        Err(REVISION_CONFLICT.into())
+    }
+}
+
+pub(crate) fn next_revision(previous: Option<&str>) -> String {
+    let now = chrono::Utc::now();
+    previous
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .and_then(|value| {
+            value
+                .to_utc()
+                .checked_add_signed(chrono::Duration::nanoseconds(1))
+        })
+        .map_or(now, |value| value.max(now))
+        .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+}
+
+pub(crate) fn write<T>(
+    conn: &mut Connection,
+    operation: impl FnOnce(&mut Connection) -> Result<T, String>,
+) -> Result<T, String> {
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|error| error.to_string())?;
+    let result = operation(conn).and_then(|value| {
+        conn.execute_batch("COMMIT")
+            .map_err(|error| error.to_string())?;
+        Ok(value)
+    });
+    if result.is_err() {
+        conn.execute_batch("ROLLBACK")
+            .map_err(|error| error.to_string())?;
+    }
+    result
+}
+
 pub(crate) fn migrate_photos(conn: &Connection) -> Result<(), String> {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -145,13 +201,13 @@ pub(crate) fn snapshot_with_hidden(conn: &Connection) -> Result<Snapshot, String
     read_snapshot(conn, true)
 }
 
-const GROUP_SELECT: &str =
+pub(crate) const GROUP_SELECT: &str =
     "SELECT g.id,g.library,g.name,g.description,g.capacity,g.created_at,f.folder,
             c.photo_id,c.offset_x,c.offset_y,c.zoom
      FROM groups g LEFT JOIN work_directory_folders f ON f.album_id=g.id
      LEFT JOIN album_covers c ON c.group_id=g.id";
 
-fn group_from_row(row: &Row<'_>) -> rusqlite::Result<Group> {
+pub(crate) fn group_from_row(row: &Row<'_>) -> rusqlite::Result<Group> {
     let cover = match row.get(7)? {
         Some(photo_id) => Some(AlbumCover {
             photo_id,
@@ -174,62 +230,82 @@ fn group_from_row(row: &Row<'_>) -> rusqlite::Result<Group> {
 }
 
 pub(crate) fn read_group(conn: &Connection, id: &str) -> Result<Group, String> {
+    find_group(conn, id)?.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.to_string())
+}
+
+pub(crate) fn find_group(conn: &Connection, id: &str) -> Result<Option<Group>, String> {
     conn.query_row(
         &format!("{GROUP_SELECT} WHERE g.id=?1"),
         [id],
         group_from_row,
     )
+    .optional()
     .map_err(|error| error.to_string())
 }
 
+pub(crate) const PHOTO_SELECT: &str =
+    "SELECT p.id,p.library,p.title,p.original_name,p.original_path,p.thumbnail_path,p.width,p.height,
+            p.tags,p.annotation,p.source,p.captured_at,p.location,p.project,p.imported_at,p.regions
+     FROM photos p";
+
+pub(crate) fn photo_from_row(row: &Row<'_>) -> rusqlite::Result<Photo> {
+    let tags: String = row.get(8)?;
+    let tags = serde_json::from_str(&tags).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    let original_path: String = row.get(4)?;
+    let thumbnail_path: String = row.get(5)?;
+    let id: String = row.get(0)?;
+    let regions: String = row.get(15)?;
+    let regions = serde_json::from_str(&regions).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(15, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    Ok(Photo {
+        id,
+        library: row.get(1)?,
+        title: row.get(2)?,
+        original_name: row.get(3)?,
+        original_path,
+        thumbnail_path,
+        original_available: false,
+        thumbnail_available: false,
+        availability: None,
+        width: row.get(6)?,
+        height: row.get(7)?,
+        tags,
+        regions,
+        annotation: row.get(9)?,
+        source: row.get(10)?,
+        captured_at: row.get(11)?,
+        location: row.get(12)?,
+        project: row.get(13)?,
+        imported_at: row.get(14)?,
+    })
+}
+
+pub(crate) fn membership_from_row(row: &Row<'_>) -> rusqlite::Result<Membership> {
+    Ok(Membership {
+        group_id: row.get(0)?,
+        photo_id: row.get(1)?,
+        status: row.get(2)?,
+        position: row.get(3)?,
+    })
+}
+
 fn read_snapshot(conn: &Connection, include_hidden: bool) -> Result<Snapshot, String> {
-    let mut statement = conn.prepare("SELECT id,library,title,original_name,original_path,thumbnail_path,width,height,tags,annotation,source,captured_at,location,project,imported_at,regions FROM photos WHERE ?1 OR hidden_after_album_delete=0 ORDER BY imported_at DESC,id").map_err(|e| e.to_string())?;
+    let mut statement = conn
+        .prepare(&format!(
+            "{PHOTO_SELECT} WHERE ?1 OR p.hidden_after_album_delete=0 ORDER BY p.imported_at DESC,p.id"
+        ))
+        .map_err(|e| e.to_string())?;
     let photos = statement
         .query_map([include_hidden], |row| {
-            let tags: String = row.get(8)?;
-            let tags = serde_json::from_str(&tags).map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    8,
-                    rusqlite::types::Type::Text,
-                    Box::new(error),
-                )
-            })?;
-            let original_path: String = row.get(4)?;
-            let thumbnail_path: String = row.get(5)?;
-            let id: String = row.get(0)?;
-            let (original_available, availability) =
-                crate::work_directory::original_status(conn, &id, &original_path)
+            let mut photo = photo_from_row(row)?;
+            (photo.original_available, photo.availability) =
+                crate::work_directory::original_status(conn, &photo.id, &photo.original_path)
                     .map_err(rusqlite::Error::InvalidParameterName)?;
-            let thumbnail_available = std::path::Path::new(&thumbnail_path).is_file();
-            let regions: String = row.get(15)?;
-            let regions = serde_json::from_str(&regions).map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    15,
-                    rusqlite::types::Type::Text,
-                    Box::new(error),
-                )
-            })?;
-            Ok(Photo {
-                id,
-                library: row.get(1)?,
-                title: row.get(2)?,
-                original_name: row.get(3)?,
-                original_path,
-                thumbnail_path,
-                original_available,
-                thumbnail_available,
-                availability,
-                width: row.get(6)?,
-                height: row.get(7)?,
-                tags,
-                regions,
-                annotation: row.get(9)?,
-                source: row.get(10)?,
-                captured_at: row.get(11)?,
-                location: row.get(12)?,
-                project: row.get(13)?,
-                imported_at: row.get(14)?,
-            })
+            photo.thumbnail_available = Path::new(&photo.thumbnail_path).is_file();
+            Ok(photo)
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
@@ -248,14 +324,7 @@ fn read_snapshot(conn: &Connection, include_hidden: bool) -> Result<Snapshot, St
         )
         .map_err(|e| e.to_string())?;
     let memberships = statement
-        .query_map([], |row| {
-            Ok(Membership {
-                group_id: row.get(0)?,
-                photo_id: row.get(1)?,
-                status: row.get(2)?,
-                position: row.get(3)?,
-            })
-        })
+        .query_map([], membership_from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;

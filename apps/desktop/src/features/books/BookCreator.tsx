@@ -66,7 +66,7 @@ export function BookCreator({ snapshot, photos, busy, onSnapshot, onBusyChange, 
     try { await onCreate({ title, template, pageWidth: width, pageHeight: height, chapters: orderedChapters }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
-  return <Modal title="创建画册" wide onClose={() => { if (!blocked) onClose(); }}>
+  return <Modal title="创建画册" wide glass onClose={() => { if (!blocked) onClose(); }}>
     <form className="book-create" onSubmit={(event) => void submit(event)}>
       <nav className="book-create-steps" aria-label="创建步骤">
         {['选照片', '设置画册'].map((label, index) => <button key={label} type="button" disabled={blocked || (index === 1 && !selected.length)} className={step === index ? 'active' : ''} aria-current={step === index ? 'step' : undefined} onClick={() => { if (index === 0 || selected.length) setStep(index); }}><span>{index + 1}</span>{label}</button>)}
@@ -74,7 +74,10 @@ export function BookCreator({ snapshot, photos, busy, onSnapshot, onBusyChange, 
       <fieldset className="book-create-body" disabled={blocked}>
         {step === 0 ? <section className="book-choose-photos" aria-label="选择画册照片">
           <div className="book-source-tools"><button type="button" className="button" onClick={() => setPickingSource(true)}><Plus size={14} />添加照片</button></div>
-          <PhotoLibraryPicker snapshot={snapshot} selectedIds={selected} onChange={choosePhotos} />
+          <PhotoLibraryPicker snapshot={snapshot} selectedIds={selected} onChange={choosePhotos} actions={<>
+            <button className="button button-quiet" type="button" disabled={blocked} onClick={onClose}>取消</button>
+            <button className="button button-primary" type="submit" disabled={blocked || !selected.length}>{busy ? '创建中…' : <>设置画册<ChevronRight size={15} /></>}</button>
+          </>} />
         </section> : <div className="book-create-arrange">
           <section className="book-create-preview" aria-label="版式示意"><div className="book-create-paper" style={{ '--book-page-ratio': width / height } as CSSProperties}><BookPageView page={sample} pageWidth={width} pageHeight={height} photos={photos} number={1} /></div><p>版式示意 · {width} × {height}</p></section>
           <section className="book-create-options" aria-label="画册设置">
@@ -94,12 +97,13 @@ export function BookCreator({ snapshot, photos, busy, onSnapshot, onBusyChange, 
         </div>}
       </fieldset>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <div className="book-create-footer">
-        <div className="book-create-selection">
-          {step === 1 && <span aria-live="polite">已选 {selected.length} 张照片</span>}
+      {step === 1 && <div className="book-create-footer">
+        <div className="book-create-selection"><span aria-live="polite">已选 {selected.length} 张照片</span></div>
+        <div>
+          <button className="button button-quiet" type="button" disabled={blocked} onClick={() => setStep(0)}><ChevronLeft size={15} />返回选片</button>
+          <button className="button button-primary" type="submit" disabled={blocked || !selected.length}>{busy ? '创建中…' : '创建并排版'}</button>
         </div>
-        <div>{step === 1 ? <button className="button button-quiet" type="button" disabled={blocked} onClick={() => setStep(0)}><ChevronLeft size={15} />返回选片</button> : <button className="button button-quiet" type="button" disabled={blocked} onClick={onClose}>取消</button>}<button className="button button-primary" type="submit" disabled={blocked || !selected.length}>{busy ? '创建中…' : step === 0 ? <>设置画册<ChevronRight size={15} /></> : '创建并排版'}</button></div>
-      </div>
+      </div>}
     </form>
     {pickingSource && <PhotoSourceDialog snapshot={snapshot} selectedIds={selected} library="collection" title="选择画册照片" onBusyChange={setSourceBusy} onClose={() => setPickingSource(false)} onConfirm={({ photoIds, snapshot }) => {
       if (snapshot) onSnapshot(snapshot);

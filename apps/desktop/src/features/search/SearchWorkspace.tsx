@@ -36,13 +36,14 @@ export interface SearchSession {
 
 interface SearchWorkspaceProps extends LibraryWorkspaceProps {
   session: SearchSession;
+  externalRevision?: number;
   workspaceVisibility?: WorkspaceVisibility;
   onOpenBook: (id: string) => void;
   onOpenModel: (model: ModelProfile) => void;
   onOpenPlan: (plan: ShootPlan) => void;
 }
 
-function useSearchSource<T>(read: () => Promise<T[]>, enabled: boolean) {
+function useSearchSource<T>(read: () => Promise<T[]>, enabled: boolean, externalRevision: number) {
   const [state, setState] = useState<Source<T>>({ status: 'loading' });
   const [revision, setRevision] = useState(0);
   useEffect(() => {
@@ -54,7 +55,7 @@ function useSearchSource<T>(read: () => Promise<T[]>, enabled: boolean) {
       if (active) setState({ status: 'error', message: errorMessage(cause) });
     });
     return () => { active = false; };
-  }, [read, enabled, revision]);
+  }, [read, enabled, revision, externalRevision]);
   const retry = useCallback(() => {
     setState({ status: 'loading' });
     setRevision((value) => value + 1);
@@ -67,7 +68,7 @@ function useSearchMatches<T>(source: Source<T>, textOf: (item: T) => string, ter
   return useMemo(() => findSearchItems(index, term), [index, term]);
 }
 
-export function SearchWorkspace({ session, workspaceVisibility = defaultWorkspaceVisibility, onOpenBook, onOpenModel, onOpenPlan, ...library }: SearchWorkspaceProps) {
+export function SearchWorkspace({ session, externalRevision = 0, workspaceVisibility = defaultWorkspaceVisibility, onOpenBook, onOpenModel, onOpenPlan, ...library }: SearchWorkspaceProps) {
   const rootRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState(session.query);
@@ -77,9 +78,9 @@ export function SearchWorkspace({ session, workspaceVisibility = defaultWorkspac
   const [category, setCategory] = useState(session.category);
   const term = searchTerm(query);
   const [started, setStarted] = useState(!!term);
-  const [books, reloadBooks] = useSearchSource(listBooks, started);
-  const [models, reloadModels] = useSearchSource(listModels, started && workspaceVisibility.models);
-  const [plans, reloadPlans] = useSearchSource(readPlans, started && workspaceVisibility.planning);
+  const [books, reloadBooks] = useSearchSource(listBooks, started, externalRevision);
+  const [models, reloadModels] = useSearchSource(listModels, started && workspaceVisibility.models, externalRevision);
+  const [plans, reloadPlans] = useSearchSource(readPlans, started && workspaceVisibility.planning, externalRevision);
   const photoIndex = useMemo(() => started ? indexSearchItems(library.snapshot.photos, photoSearchText) : [], [library.snapshot.photos, started]);
   const photoById = useMemo(() => new Map(library.snapshot.photos.map((photo) => [photo.id, photo])), [library.snapshot.photos]);
   const photoMatches = useMemo(() => findSearchItems(photoIndex, term), [photoIndex, term]);

@@ -46,7 +46,7 @@ export function ModelEditor({ model, snapshot, photos, onSnapshot, onDirtyChange
     if (draft.tagOptions && draft.tagOptions.length > 100) { setError('可选风格标签最多 100 个，请在管理风格标签中删除不需要的标签。'); setLeaving(false); return; }
     setBusy(true); setError('');
     try {
-      const saved = await modelsApi.saveModel(model?.id ?? null, { ...draft, heightCm, weightKg, name: draft.name.trim(), tags: [...new Set(draft.tags.map((tag) => tag.trim()).filter(Boolean))], tagOptions: draft.tagOptions ? [...new Set(draft.tagOptions.map((tag) => tag.trim()).filter(Boolean))] : null });
+      const saved = await modelsApi.saveModel(model?.id ?? null, { ...draft, heightCm, weightKg, name: draft.name.trim(), tags: [...new Set(draft.tags.map((tag) => tag.trim()).filter(Boolean))], tagOptions: draft.tagOptions ? [...new Set(draft.tagOptions.map((tag) => tag.trim()).filter(Boolean))] : null }, model?.updatedAt ?? null);
       if (!mounted.current) return;
       setBaseline(draftOf(saved)); setDraft(draftOf(saved)); setLeaving(false); onSaved(saved);
       toast({ title: '已保存模特档案' });

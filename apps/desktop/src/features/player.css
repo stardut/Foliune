@@ -30,8 +30,9 @@
 .player-awake :is(.player-top, .player-controls) { opacity: 1; }
 .player-counter { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); min-width: 55px; text-align: center; }
 .player-divider { height: 18px; border-left: 1px solid var(--line); margin: 0 2px; }
-.player-settings { position: absolute; right: 24px; bottom: 90px; z-index: 4; width: 260px; background: var(--floating); border: 1px solid var(--floating-line); border-radius: 14px; box-shadow: var(--shadow-floating); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); padding: 16px; display: flex; flex-direction: column; gap: 15px; }
+.player-settings { position: absolute; right: 24px; bottom: 90px; z-index: 4; width: 260px; background: var(--glass); border: 1px solid var(--glass-line); border-radius: 14px; box-shadow: var(--glass-shadow); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); padding: 16px; display: flex; flex-direction: column; gap: 15px; }
 .player-settings-title { display: flex; justify-content: space-between; align-items: center; }
+.player-settings { --muted: var(--glass-muted); }
 .player-settings-title h2 { font-size: 12px; font-weight: 500; margin: 0; }
 .player-music-name { font-size: 12px; line-height: 1.6; color: var(--muted); margin: 0; overflow-wrap: anywhere; }
 .volume-label { flex-direction: row; align-items: center; gap: 10px; }

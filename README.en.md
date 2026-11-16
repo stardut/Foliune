@@ -62,6 +62,8 @@ Everyday organization, photobook creation, and viewing require no cloud account.
 - **Originals preserved**: local imports store the source path and a thumbnail. Full-size viewing reads the source file and shows a missing-file message if the file is gone. Existing managed copies remain in the library. Discarding a photograph affects only its membership in that album.
 - **Backups you control**: backups include library data, managed photographs, thumbnails, and photobooks. Keep a separate backup of external originals.
 
+Use the [CLI](docs/cli.md) to search and edit shoot plans, photos, albums, photobooks, and model profiles. Select reference photos in a shoot plan on the desktop, then retrieve their previews from the command line.
+
 ## Get started
 
 See [Releases](https://github.com/stardut/Foliune/releases) for versions and installation notes. Foliune is still in development, with the following platform and format limits:
@@ -84,10 +86,6 @@ Connect to a model API of your choice to analyze light and shadow, color, and co
 ### A map of your work
 
 Browse your work by shooting location. See photographs from Xinjiang, Beijing, and elsewhere on the map, then select a place to revisit the work you made there.
-
-### Command line & personal assistants
-
-Use a command-line interface (CLI) to let external agents help organize photographs, edit photobooks, update model profiles, and draft or review shoot plans. Connect a personal assistant to get a reminder at a time you set before a shoot.
 
 ## About the project
 

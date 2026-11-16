@@ -6,7 +6,7 @@ use crate::{
 };
 use exif::{In, Tag};
 use image::{imageops::FilterType, GenericImageView, ImageFormat};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use serde_json::Value;
 use std::{
@@ -430,7 +430,48 @@ fn gps_location(data: &exif::Exif) -> Option<String> {
     ))
 }
 
+#[cfg(test)]
 pub fn update(conn: &mut Connection, id: &str, patch: Value) -> Result<Snapshot, String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    apply_patch(&tx, id, patch)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    snapshot(conn)
+}
+
+pub(crate) fn update_from_baseline(
+    conn: &mut Connection,
+    id: &str,
+    patch: Value,
+    expected: Value,
+) -> Result<Snapshot, String> {
+    crate::db::write(conn, |conn| {
+        let fields = patch.as_object().ok_or("无效照片修改")?;
+        let expected = expected.as_object().ok_or("无效照片修改基准")?;
+        let photo = conn
+            .query_row(
+                &format!(
+                    "{} WHERE p.id=?1 AND p.hidden_after_album_delete=0",
+                    crate::db::PHOTO_SELECT
+                ),
+                [id],
+                crate::db::photo_from_row,
+            )
+            .optional()
+            .map_err(|error| error.to_string())?
+            .ok_or("照片不存在")?;
+        let current = serde_json::to_value(photo).map_err(|error| error.to_string())?;
+        for key in fields.keys() {
+            let baseline = expected.get(key).ok_or("无效照片修改基准")?;
+            if current.get(key) != Some(baseline) {
+                return Err(crate::db::REVISION_CONFLICT.into());
+            }
+        }
+        apply_patch(conn, id, patch)?;
+        snapshot(conn)
+    })
+}
+
+pub(crate) fn apply_patch(conn: &Connection, id: &str, patch: Value) -> Result<(), String> {
     let exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM photos WHERE id=?1)",
@@ -442,7 +483,6 @@ pub fn update(conn: &mut Connection, id: &str, patch: Value) -> Result<Snapshot,
         return Err("照片不存在".into());
     }
     let object = patch.as_object().ok_or("无效照片修改")?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
     for (key, value) in object {
         let column = match key.as_str() {
             "title" => "title",
@@ -508,12 +548,11 @@ pub fn update(conn: &mut Connection, id: &str, patch: Value) -> Result<Snapshot,
                 Some(text.to_string())
             }
         };
-        tx.execute(
+        conn.execute(
             &format!("UPDATE photos SET {column}=?1 WHERE id=?2"),
             params![stored, id],
         )
         .map_err(|e| e.to_string())?;
     }
-    tx.commit().map_err(|e| e.to_string())?;
-    snapshot(conn)
+    Ok(())
 }

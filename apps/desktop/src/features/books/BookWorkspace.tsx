@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Busy, EmptyState, Modal, WorkspaceHeader } from '../../components/ui';
 import * as api from '../../lib/book-api';
 import type { BookDetail, BookSummary, CreateBookInput } from '../../lib/book-types';
@@ -9,9 +9,9 @@ import { BookCreator } from './BookCreator';
 import { BookEditor } from './BookEditor';
 import './books.css';
 
-export function BookWorkspace({ snapshot, photos, onSnapshot, onPlay, onDirtyChange, onRelink, onBusyChange, initialBook, onBackToSearch }: {
+export function BookWorkspace({ snapshot, photos, onSnapshot, onPlay, onDirtyChange, onRelink, onBusyChange, initialBook, onBackToSearch, externalRevision = 0 }: {
   snapshot: LibrarySnapshot; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onPlay?: (photoIds: string[]) => void; onDirtyChange?: (dirty: boolean) => void;
-  onBusyChange?: (busy: boolean) => void; onRelink?: (photo: Photo) => Promise<void>; initialBook?: BookDetail; onBackToSearch?: () => void;
+  onBusyChange?: (busy: boolean) => void; onRelink?: (photo: Photo) => Promise<void>; initialBook?: BookDetail; onBackToSearch?: () => void; externalRevision?: number;
 }) {
   const [books, setBooks] = useState<BookSummary[]>([]); const [detail, setDetail] = useState<BookDetail | null>(initialBook ?? null);
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
@@ -24,6 +24,12 @@ export function BookWorkspace({ snapshot, photos, onSnapshot, onPlay, onDirtyCha
     .map((photo) => [photo.id, photo.availability, photo.thumbnailAvailable])), [photos]);
   const loadedCoverAvailability = useRef(workCoverAvailability);
   const mounted = useRef(true);
+  const editorDirty = useRef(false);
+  const reportEditorDirty = useCallback((dirty: boolean) => {
+    editorDirty.current = dirty;
+    onDirtyChange?.(dirty);
+  }, [onDirtyChange]);
+  const loadedExternalRevision = useRef(externalRevision);
   const menuContext = JSON.stringify([detail?.book.id, creating, renaming?.id, deleting?.id]);
   const blocked = loading || busy || !!detail || creating || !!renaming || !!deleting;
   const menuState = useRef({ context: menuContext, blocked, books });
@@ -36,6 +42,23 @@ export function BookWorkspace({ snapshot, photos, onSnapshot, onPlay, onDirtyCha
     finally { if (mounted.current) setLoading(false); }
   }
   useEffect(() => { mounted.current = true; if (!initialBook) void reload(); return () => { mounted.current = false; }; }, [initialBook]);
+  useEffect(() => {
+    if (loadedExternalRevision.current === externalRevision) return;
+    let active = true;
+    void api.listBooks().then(async (next) => {
+      if (!active) return;
+      setBooks(next);
+      const current = detail && next.find((book) => book.id === detail.book.id);
+      if (detail && !editorDirty.current && current?.updatedAt !== detail.book.updatedAt) {
+        const fresh = current ? await api.getBook(current.id) : null;
+        if (!active || editorDirty.current) return;
+        setDetail((previous) => previous === detail ? fresh : previous);
+        if (!fresh) setError('画册已删除');
+      }
+      loadedExternalRevision.current = externalRevision;
+    }).catch((cause: unknown) => { if (active) setError(message(cause)); });
+    return () => { active = false; };
+  }, [externalRevision, detail]);
   useEffect(() => {
     if (blocked || loadedCoverAvailability.current === workCoverAvailability) return;
     let active = true;
@@ -61,7 +84,7 @@ export function BookWorkspace({ snapshot, photos, onSnapshot, onPlay, onDirtyCha
     event.preventDefault(); if (!renaming || busy) return;
     const id = renaming.id;
     await perform(async () => {
-      const next = await api.renameBook(id, name);
+      const next = await api.renameBook(id, name, renaming.updatedAt);
       if (!mounted.current) return;
       setBooks((previous) => previous.map((b) => b.id === next.book.id ? next.book : b)); setRenaming(null);
     });
@@ -70,7 +93,7 @@ export function BookWorkspace({ snapshot, photos, onSnapshot, onPlay, onDirtyCha
     if (!deleting || busy) return;
     const id = deleting.id;
     await perform(async () => {
-      const next = await api.deleteBook(id);
+      const next = await api.deleteBook(id, deleting.updatedAt);
       if (!mounted.current) return;
       onSnapshot(next);
       setBooks((previous) => previous.filter((book) => book.id !== id));
@@ -94,7 +117,7 @@ export function BookWorkspace({ snapshot, photos, onSnapshot, onPlay, onDirtyCha
       if (mounted.current && menuState.current.context === context) setDetail(next);
     });
   }
-  if (detail) return <BookEditor snapshot={snapshot} onSnapshot={onSnapshot} detail={detail} photos={photos} onChange={changed} onPlay={onPlay} onDirtyChange={onDirtyChange} onBusyChange={onBusyChange} onRelink={onRelink}
+  if (detail) return <BookEditor snapshot={snapshot} onSnapshot={onSnapshot} detail={detail} photos={photos} onChange={changed} onPlay={onPlay} onDirtyChange={reportEditorDirty} onBusyChange={onBusyChange} onRelink={onRelink}
     fromSearch={!!onBackToSearch} onBack={onBackToSearch ?? (() => { setDetail(null); void reload(); })} />;
   return <section className="book-workspace" aria-label="画册">
     <WorkspaceHeader title="画册" count={`${books.length} 本画册`}>

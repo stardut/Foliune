@@ -131,18 +131,7 @@ fn group_draft(conn: &Connection, group_id: &str, patch: Value) -> Result<Draft,
             "description" => {
                 group.description = value.as_str().ok_or("分组描述必须是文本")?.trim().into()
             }
-            "capacity" => {
-                group.capacity = if value.is_null() {
-                    None
-                } else {
-                    Some(
-                        value
-                            .as_u64()
-                            .filter(|n| *n > 0 && *n <= u32::MAX as u64)
-                            .ok_or("分组容量必须为正整数或无限制")? as u32,
-                    )
-                }
-            }
+            "capacity" => group.capacity = groups::parse_capacity(value)?,
             _ => return Err(format!("未知取舍字段：{key}")),
         }
     }
@@ -211,18 +200,61 @@ pub(crate) fn save_group_info(
     drafts: &CurationStore,
     group_id: &str,
     info: GroupInfoInput,
+    expected: GroupInfoInput,
 ) -> Result<GroupInfoResult, String> {
-    let patch =
-        json!({ "name": info.name, "description": info.description, "capacity": info.capacity });
-    // The store connection stays locked from the count through saving or registering the draft.
-    if let Some(capacity) = info.capacity {
-        if capacity < groups::active_count(conn, group_id)? {
-            let draft = drafts.register(group_draft(conn, group_id, patch)?)?;
-            return Ok(GroupInfoResult::NeedsCuration { draft });
-        }
+    enum PendingSave {
+        Saved(Snapshot),
+        NeedsCuration(Box<Draft>),
     }
-    let snapshot = groups::update(conn, group_id, patch)?;
-    Ok(GroupInfoResult::Saved { snapshot })
+    let pending = db::write(conn, |conn| {
+        let current = db::find_group(conn, group_id)?.ok_or("分组不存在")?;
+        let mut patch = serde_json::Map::new();
+        for (field, original, edited, saved) in [
+            (
+                "name",
+                json!(expected.name),
+                json!(info.name),
+                json!(current.name),
+            ),
+            (
+                "description",
+                json!(expected.description),
+                json!(info.description),
+                json!(current.description),
+            ),
+            (
+                "capacity",
+                json!(expected.capacity),
+                json!(info.capacity),
+                json!(current.capacity),
+            ),
+        ] {
+            if edited == original {
+                continue;
+            }
+            if saved != original {
+                return Err(db::REVISION_CONFLICT.into());
+            }
+            patch.insert(field.to_string(), edited);
+        }
+        let changed_capacity = patch.contains_key("capacity");
+        let patch = Value::Object(patch);
+        if let Some(capacity) = info.capacity.filter(|_| changed_capacity) {
+            if capacity < groups::active_count(conn, group_id)? {
+                return Ok(PendingSave::NeedsCuration(Box::new(group_draft(
+                    conn, group_id, patch,
+                )?)));
+            }
+        }
+        groups::apply_patch(conn, group_id, patch)?;
+        Ok(PendingSave::Saved(snapshot(conn)?))
+    })?;
+    match pending {
+        PendingSave::Saved(snapshot) => Ok(GroupInfoResult::Saved { snapshot }),
+        PendingSave::NeedsCuration(draft) => Ok(GroupInfoResult::NeedsCuration {
+            draft: drafts.register(*draft)?,
+        }),
+    }
 }
 
 fn cleanup(store: &Store, draft: &Draft) -> Result<(), String> {
@@ -455,9 +487,16 @@ pub async fn save_album_info(
     app: tauri::AppHandle,
     group_id: String,
     info: GroupInfoInput,
+    expected: GroupInfoInput,
 ) -> Result<GroupInfoResult, String> {
     db::with_connection(app.clone(), move |conn| {
-        save_group_info(conn, &app.state::<CurationStore>(), &group_id, info)
+        save_group_info(
+            conn,
+            &app.state::<CurationStore>(),
+            &group_id,
+            info,
+            expected,
+        )
     })
     .await
 }

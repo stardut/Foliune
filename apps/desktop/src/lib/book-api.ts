@@ -13,8 +13,10 @@ export const listBooks = () => call<BookSummary[]>('books_list');
 export const getBook = (id: string) => call<BookDetail>('books_get', { id });
 export const createBook = (input: CreateBookInput) => call<BookDetail>('books_create', { input });
 export const saveVersion = (bookId: string, versionId: string, input: VersionInput) => call<BookDetail>('books_save_version', { bookId, versionId, input });
-export const renameBook = (id: string, title: string) => call<BookDetail>('books_rename', { id, title });
-export const deleteBook = async (id: string) => withImageUrls(await call<LibrarySnapshot>('books_delete', { id }));
+export const renameBook = (id: string, title: string, expectedRevision: string) =>
+  call<BookDetail>('books_rename', { id, title, expectedRevision });
+export const deleteBook = async (id: string, expectedRevision: string) =>
+  withImageUrls(await call<LibrarySnapshot>('books_delete', { id, expectedRevision }));
 export const appendPhotosToBook = (bookId: string, photoIds: string[]) => call<BookDetail>('books_append_photos', { bookId, photoIds });
 export async function exportBook(book: BookDetail, versionId: string): Promise<string | null> {
   if (!isTauri()) throw new Error('请在 Foliune 桌面应用中导出画册。');

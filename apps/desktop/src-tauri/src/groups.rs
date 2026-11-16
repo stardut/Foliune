@@ -3,7 +3,7 @@ use crate::{
     db::snapshot,
     models::{self, AlbumCover, GroupInput, Snapshot},
 };
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -23,14 +23,20 @@ pub(crate) fn init_covers(conn: &Connection) -> Result<(), String> {
 }
 
 pub fn create(conn: &Connection, input: GroupInput) -> Result<Snapshot, String> {
+    insert(conn, input)?;
+    snapshot(conn)
+}
+
+pub(crate) fn insert(conn: &Connection, input: GroupInput) -> Result<String, String> {
     models::library(&input.library)?;
     let name = models::name(&input.name)?;
     if input.capacity == Some(0) {
         return Err("分组容量必须大于 0".into());
     }
+    let id = uuid::Uuid::new_v4().to_string();
     conn.execute("INSERT INTO groups(id,library,name,description,capacity,created_at) VALUES(?1,?2,?3,?4,?5,?6)",
-        params![uuid::Uuid::new_v4().to_string(), input.library, name, input.description.trim(), input.capacity, chrono::Utc::now().to_rfc3339()]).map_err(|e| e.to_string())?;
-    snapshot(conn)
+        params![id, input.library, name, input.description.trim(), input.capacity, chrono::Utc::now().to_rfc3339()]).map_err(|e| e.to_string())?;
+    Ok(id)
 }
 
 pub fn group_library(conn: &Connection, id: &str) -> Result<String, String> {
@@ -62,56 +68,82 @@ pub fn ensure_capacity(conn: &Connection, id: &str, additional: usize) -> Result
     Ok(())
 }
 
+#[cfg(test)]
 pub fn update(conn: &mut Connection, id: &str, patch: Value) -> Result<Snapshot, String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    apply_patch(&tx, id, patch)?;
+    let updated = snapshot(&tx)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(updated)
+}
+
+pub(crate) fn save_cover(
+    conn: &mut Connection,
+    id: &str,
+    cover: &Value,
+    expected: Option<&AlbumCover>,
+) -> Result<Snapshot, String> {
+    crate::db::write(conn, |conn| {
+        let group = crate::db::find_group(conn, id)?.ok_or("分组不存在")?;
+        if !crate::album_cover::matches_cover(group.cover.as_ref(), expected) {
+            return Err(crate::db::REVISION_CONFLICT.into());
+        }
+        update_cover(conn, id, cover)?;
+        snapshot(conn)
+    })
+}
+
+pub(crate) fn apply_patch(conn: &Connection, id: &str, patch: Value) -> Result<(), String> {
     group_library(conn, id)?;
     let object = patch.as_object().ok_or("无效分组修改")?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
     for (key, value) in object {
         match key.as_str() {
             "name" => {
                 let name = models::name(value.as_str().ok_or("分组名称必须是文本")?)?;
-                tx.execute("UPDATE groups SET name=?1 WHERE id=?2", params![name, id])
+                conn.execute("UPDATE groups SET name=?1 WHERE id=?2", params![name, id])
                     .map_err(|e| e.to_string())?;
             }
             "description" => {
                 let description = value.as_str().ok_or("分组描述必须是文本")?;
-                tx.execute(
+                conn.execute(
                     "UPDATE groups SET description=?1 WHERE id=?2",
                     params![description.trim(), id],
                 )
                 .map_err(|e| e.to_string())?;
             }
             "capacity" => {
-                let capacity = if value.is_null() {
-                    None
-                } else {
-                    let count = value
-                        .as_u64()
-                        .filter(|n| *n > 0 && *n <= u32::MAX as u64)
-                        .ok_or("分组容量必须为正整数或无限制")?;
-                    Some(count as u32)
-                };
+                let capacity = parse_capacity(value)?;
                 if let Some(cap) = capacity {
-                    if cap < active_count(&tx, id)? {
+                    if cap < active_count(conn, id)? {
                         return Err("新容量不能小于当前有效照片数".into());
                     }
                 }
-                tx.execute(
+                conn.execute(
                     "UPDATE groups SET capacity=?1 WHERE id=?2",
                     params![capacity, id],
                 )
                 .map_err(|e| e.to_string())?;
             }
-            "cover" => update_cover(&tx, id, value)?,
+            "cover" => update_cover(conn, id, value)?,
             _ => return Err(format!("不支持修改分组字段：{key}")),
         }
     }
-    let updated = snapshot(&tx)?;
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(updated)
+    Ok(())
 }
 
-fn update_cover(tx: &Transaction<'_>, group_id: &str, value: &Value) -> Result<(), String> {
+pub(crate) fn parse_capacity(value: &Value) -> Result<Option<u32>, String> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    let count = value
+        .as_u64()
+        .and_then(|count| u32::try_from(count).ok())
+        .filter(|count| *count > 0)
+        .ok_or("分组容量必须为正整数或无限制")?;
+    Ok(Some(count))
+}
+
+fn update_cover(conn: &Connection, group_id: &str, value: &Value) -> Result<(), String> {
     let cover = AlbumCover::deserialize(value).map_err(|_| "相簿封面参数无效")?;
     if !(0.0..=1.0).contains(&cover.offset_x)
         || !(0.0..=1.0).contains(&cover.offset_y)
@@ -119,7 +151,7 @@ fn update_cover(tx: &Transaction<'_>, group_id: &str, value: &Value) -> Result<(
     {
         return Err("相簿封面的取景范围无效".into());
     }
-    let active = tx
+    let active = conn
         .query_row(
             "SELECT EXISTS (
                SELECT 1 FROM memberships m JOIN photos p ON p.id=m.photo_id
@@ -133,7 +165,7 @@ fn update_cover(tx: &Transaction<'_>, group_id: &str, value: &Value) -> Result<(
     if !active {
         return Err("请选择当前相簿中未废弃的照片作为封面".into());
     }
-    tx.execute(
+    conn.execute(
         "INSERT INTO album_covers(group_id,photo_id,offset_x,offset_y,zoom) VALUES(?1,?2,?3,?4,?5)
          ON CONFLICT(group_id) DO UPDATE SET
            photo_id=excluded.photo_id,offset_x=excluded.offset_x,offset_y=excluded.offset_y,zoom=excluded.zoom",
@@ -143,20 +175,20 @@ fn update_cover(tx: &Transaction<'_>, group_id: &str, value: &Value) -> Result<(
     Ok(())
 }
 
-pub fn delete(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, String> {
+pub(crate) fn delete(conn: &Connection, id: &str) -> Result<(), String> {
     let candidates = content_refs::deletion_candidates(
-        tx,
+        conn,
         "SELECT photo_id FROM memberships WHERE group_id=?1",
         id,
     )?;
-    if tx
+    if conn
         .execute("DELETE FROM groups WHERE id=?1", [id])
         .map_err(|e| e.to_string())?
         == 0
     {
         return Err("分组不存在".into());
     }
-    content_refs::snapshot_after_deletion(tx, candidates)
+    content_refs::hide_unreferenced_photos(conn, candidates)
 }
 
 pub fn add(
@@ -165,14 +197,24 @@ pub fn add(
     photo_ids: &[String],
 ) -> Result<Snapshot, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let library = group_library(&tx, group_id)?;
+    add_members(&tx, group_id, photo_ids)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    snapshot(conn)
+}
+
+pub(crate) fn add_members(
+    conn: &Connection,
+    group_id: &str,
+    photo_ids: &[String],
+) -> Result<(), String> {
+    let library = group_library(conn, group_id)?;
     let mut ids = Vec::new();
     let mut seen = HashSet::new();
     for id in photo_ids {
         if !seen.insert(id) {
             continue;
         }
-        let photo_library: Option<String> = tx
+        let photo_library: Option<String> = conn
             .query_row(
                 "SELECT library FROM photos WHERE id=?1 AND hidden_after_album_delete=0",
                 [id],
@@ -183,13 +225,13 @@ pub fn add(
         if photo_library.as_deref() != Some(&library) {
             return Err("只能加入同一图库中存在的照片".into());
         }
-        let active: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM memberships WHERE group_id=?1 AND photo_id=?2 AND status='active')", params![group_id,id], |r| r.get(0)).map_err(|e| e.to_string())?;
+        let active: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM memberships WHERE group_id=?1 AND photo_id=?2 AND status='active')", params![group_id,id], |r| r.get(0)).map_err(|e| e.to_string())?;
         if !active {
             ids.push(id);
         }
     }
-    ensure_capacity(&tx, group_id, ids.len())?;
-    let position: i64 = tx
+    ensure_capacity(conn, group_id, ids.len())?;
+    let position: i64 = conn
         .query_row(
             "SELECT COALESCE(MAX(position),-1)+1 FROM memberships WHERE group_id=?1",
             [group_id],
@@ -197,10 +239,9 @@ pub fn add(
         )
         .map_err(|e| e.to_string())?;
     for (index, id) in ids.iter().enumerate() {
-        tx.execute("INSERT INTO memberships(group_id,photo_id,status,position) VALUES(?1,?2,'active',?3) ON CONFLICT(group_id,photo_id) DO UPDATE SET status='active'", params![group_id,id,position + index as i64]).map_err(|e| e.to_string())?;
+        conn.execute("INSERT INTO memberships(group_id,photo_id,status,position) VALUES(?1,?2,'active',?3) ON CONFLICT(group_id,photo_id) DO UPDATE SET status='active'", params![group_id,id,position + index as i64]).map_err(|e| e.to_string())?;
     }
-    tx.commit().map_err(|e| e.to_string())?;
-    snapshot(conn)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -219,15 +260,26 @@ pub fn set_statuses(
     photo_ids: &[String],
     status: &str,
 ) -> Result<Snapshot, String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    set_member_statuses(&tx, group_id, photo_ids, status)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    snapshot(conn)
+}
+
+pub(crate) fn set_member_statuses(
+    conn: &Connection,
+    group_id: &str,
+    photo_ids: &[String],
+    status: &str,
+) -> Result<(), String> {
     if status != "active" && status != "discarded" {
         return Err("未知分组成员状态".into());
     }
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    group_library(&tx, group_id)?;
+    group_library(conn, group_id)?;
     let ids: HashSet<&String> = photo_ids.iter().collect();
     let mut restoring = 0;
     for photo_id in &ids {
-        let current: Option<String> = tx
+        let current: Option<String> = conn
             .query_row(
                 "SELECT status FROM memberships WHERE group_id=?1 AND photo_id=?2",
                 params![group_id, photo_id],
@@ -241,15 +293,14 @@ pub fn set_statuses(
         }
     }
     if restoring > 0 {
-        ensure_capacity(&tx, group_id, restoring)?;
+        ensure_capacity(conn, group_id, restoring)?;
     }
     for photo_id in ids {
-        tx.execute(
+        conn.execute(
             "UPDATE memberships SET status=?1 WHERE group_id=?2 AND photo_id=?3",
             params![status, group_id, photo_id],
         )
         .map_err(|e| e.to_string())?;
     }
-    tx.commit().map_err(|e| e.to_string())?;
-    snapshot(conn)
+    Ok(())
 }

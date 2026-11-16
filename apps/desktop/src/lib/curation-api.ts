@@ -1,4 +1,3 @@
-import { open } from '@tauri-apps/plugin-dialog';
 import { call, withImageUrls } from './api';
 import { isLocalPhoto } from './photo-availability';
 import type { LibraryKind, LibrarySnapshot } from './types';
@@ -12,16 +11,8 @@ function draftImages(draft: CurationDraft, localImport = false): CurationDraft {
     : photo) };
 }
 
-export async function prepareImport(library: LibraryKind, groupId?: string, directory = false): Promise<CurationDraft | null> {
-  const { isDesktop } = await import('./api');
-  if (!isDesktop()) throw new Error('请在 Foliune 桌面应用中导入照片。');
-  const paths = await open(directory
-    ? { multiple: false, directory: true, title: '选择照片文件夹' }
-    : { multiple: true, directory: false, title: '导入照片',
-      filters: [{ name: '照片（JPEG / PNG / WebP）', extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
-    });
-  if (!paths || paths.length === 0) return null;
-  return prepareImportFiles(Array.isArray(paths) ? paths : [paths], library, groupId);
+export function chooseLocalPhotoSources(): Promise<string[]> {
+  return call<string[]>('choose_local_photo_sources');
 }
 
 export async function prepareImportFiles(paths: string[], library: LibraryKind, groupId?: string): Promise<CurationDraft> {
@@ -32,8 +23,8 @@ export async function prepareGroupCuration(groupId: string, patch: GroupCuration
   return draftImages(await call<CurationDraft>('prepare_group_curation', { groupId, patch }));
 }
 
-export async function saveAlbumInfo(groupId: string, info: GroupInfoInput): Promise<GroupInfoResult> {
-  const result = await call<GroupInfoResult>('save_album_info', { groupId, info });
+export async function saveAlbumInfo(groupId: string, info: GroupInfoInput, expected: GroupInfoInput): Promise<GroupInfoResult> {
+  const result = await call<GroupInfoResult>('save_album_info', { groupId, info, expected });
   return result.status === 'saved'
     ? { ...result, snapshot: withImageUrls(result.snapshot) }
     : { ...result, draft: draftImages(result.draft) };

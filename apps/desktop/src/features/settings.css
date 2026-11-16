@@ -2,10 +2,14 @@
 .settings-content + .settings-content { margin-top: 16px; }
 .settings-content h2 { font-size: 16px; font-weight: 500; margin: 0; }
 .settings-content > p { margin: 8px 0 16px; }
-.settings-update-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-.settings-update-row p { margin: 5px 0 0; }
-.settings-update > p { margin: 10px 0 0; }
-.settings-update .button[aria-disabled=true] { color: var(--disabled); border-color: var(--line); background: var(--soft); box-shadow: none; cursor: not-allowed; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.settings-row p { margin: 5px 0 0; }
+.settings-update > p, .settings-cli > p { margin: 10px 0 0; }
+.settings-cli .settings-row > div { flex: 1 1 270px; }
+.settings-cli-example { margin-top: 12px; }
+.settings-cli-example p { margin: 4px 0 0; }
+.settings-cli-copy { -webkit-user-select: text; user-select: text; overflow-wrap: anywhere; }
+.settings-row .button[aria-disabled=true] { color: var(--disabled); border-color: var(--line); background: var(--soft); box-shadow: none; cursor: not-allowed; }
 .settings-update-notice { position: relative; }
 .settings-update-notice::after { content: ''; position: absolute; top: 7px; right: 6px; width: 5px; height: 5px; border-radius: 50%; background: currentColor; pointer-events: none; }
 .app-update-status { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }

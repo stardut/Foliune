@@ -116,7 +116,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
   const [albumToolsOpen, setAlbumToolsOpen] = useState(false);
   const [albumSortOpen, setAlbumSortOpen] = useState(false);
   const [groupForm, setGroupForm] = useState<'new' | Group | null>(null);
-  const [coverTarget, setCoverTarget] = useState<{ groupId: string; photoId: string } | null>(null);
+  const [coverTarget, setCoverTarget] = useState<{ groupId: string; photoId: string; initialCover: AlbumCover | null } | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ id: string; scrollTop: number; trigger?: HTMLElement; entrySource?: ReviewEntrySource; directFullscreen?: boolean } | null>(null);
@@ -428,10 +428,10 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     catch (cause) { onFeedback(errorMessage(cause), true); throw cause; }
     finally { setBusy(false); }
   }
-  async function saveCover(id: string, cover: AlbumCover) {
+  async function saveCover(id: string, cover: AlbumCover, expected: AlbumCover | null) {
     setBusy(true);
     try {
-      onSnapshot(await api.updateGroup(id, { cover }));
+      onSnapshot(await api.updateGroup(id, { cover }, expected));
       setCoverTarget(null);
       onFeedback('已设置相簿封面');
     } finally { setBusy(false); }
@@ -447,8 +447,10 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
   async function prepareGroup(id: string, patch: GroupCurationPatch) {
     await showCuration(await run(() => api.prepareGroupCuration(id, patch)));
   }
-  async function saveAlbumInfo(id: string, info: GroupInfoInput) {
-    const result = await run(() => api.saveAlbumInfo(id, info));
+  async function saveAlbumInfo(group: Group, info: GroupInfoInput) {
+    const expected = { name: group.name, description: group.description, capacity: group.capacity };
+    if (info.name === expected.name && info.description === expected.description && info.capacity === expected.capacity) return;
+    const result = await run(() => api.saveAlbumInfo(group.id, info, expected));
     if (result.status === 'needsCuration') await showCuration(result.draft);
     else {
       onSnapshot(result.snapshot);
@@ -492,7 +494,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
       allowed: () => allowed() && actionState.current.ids === photoIds,
     });
     if (photo && currentGroup && status === 'active') {
-      actions.push(action('cover', '设为封面…', () => setCoverTarget({ groupId: currentGroup.id, photoId: photo.id })));
+      actions.push(action('cover', '设为封面…', () => setCoverTarget({ groupId: currentGroup.id, photoId: photo.id, initialCover: currentGroup.cover ?? null })));
     }
     if (ids.length >= 2 && groupId && space !== 'search') actions.push(action('collage', `拼图${countSuffix}`, () => openCollage(ids)));
     if (ids.length === 2) actions.push(action('compare', `并排比较${countSuffix}`, () => setComparing(ids)));
@@ -545,14 +547,20 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
       </>} /> : !photos.length && status === 'discarded' ? <EmptyState title="没有已废弃的照片" description="从当前相簿废弃的照片会保留在这里。" /> : !photos.length && currentGroup ? <EmptyState title="相簿为空" description={discardedCount ? '可在“已废弃”中恢复照片。' : undefined} action={importButton} /> : canvas()}
     <SelectionBar count={albumHome ? 0 : currentSelection.length} busy={busy || importDisabled} onClear={clearSelectionFromBar} onBook={() => setAddingToBook(selectedInPhotoOrder())} onMore={(at, trigger) => showPhotoMenu(null, at, trigger)} onCollage={currentGroup && space !== 'search' && currentSelection.length >= 2 ? () => openCollage(selectedInPhotoOrder()) : undefined} onSocial={currentGroup && space !== 'search' ? () => openSocial(selectedInPhotoOrder()) : undefined} />
     {preview && <PhotoReview photos={photos} initialPhotoId={preview.id} entrySource={preview.entrySource} fullscreen={preview.directFullscreen ? 'direct' : 'available'} context={space === 'search' ? '搜索结果' : currentGroup?.name || albumHomeTitle} busy={busy || importDisabled} onClose={closePreview} onRelink={onRelink} onPhotoMenu={showPhotoMenu} returnLabel={singleAlbum ? '返回相簿' : undefined} />}
-    {currentGroup && coverPhoto && <AlbumCoverDialog photo={coverPhoto} albumName={currentGroup.name} photoCount={currentAlbum?.photos.length ?? 0} initialCover={currentGroup.cover} busy={busy || importDisabled}
-      onClose={() => setCoverTarget(null)} onSave={(cover) => saveCover(currentGroup.id, cover)} />}
-    {detail && <PhotoDetail key={detail.id} photo={detail} busy={busy} onClose={() => setDetailId(null)} onRelink={onRelink} onDirtyChange={onDirtyChange} extension={detailExtension?.(detail)} onSave={async (patch) => { onSnapshot(await run(() => api.updatePhoto(detail.id, patch))); setDetailId(null); onFeedback('已保存照片信息'); }} />}
+    {currentGroup && coverTarget && coverPhoto && <AlbumCoverDialog photo={coverPhoto} albumName={currentGroup.name} photoCount={currentAlbum?.photos.length ?? 0} initialCover={coverTarget.initialCover} busy={busy || importDisabled}
+      onClose={() => setCoverTarget(null)} onSave={(cover) => saveCover(currentGroup.id, cover, coverTarget.initialCover)} />}
+    {detail && <PhotoDetail key={detail.id} photo={detail} busy={busy} onClose={() => setDetailId(null)} onRelink={onRelink} onDirtyChange={onDirtyChange} extension={detailExtension?.(detail)} onSave={async (patch, expected) => {
+      if (Object.keys(patch).length) {
+        onSnapshot(await run(() => api.updatePhoto(detail.id, patch, expected)));
+        onFeedback('已保存照片信息');
+      }
+      setDetailId(null);
+    }} />}
     {groupForm && <GroupForm group={groupForm === 'new' ? undefined : groupForm}
       defaultCapacity={groupForm === 'new' && library === 'collection' ? 50 : undefined}
       counts={groupForm === 'new' ? undefined : groupCounts(groupForm.id)} busy={busy} onClose={() => setGroupForm(null)} onSave={async (values) => {
       if (groupForm === 'new') { const next = await run(() => api.createGroup({ library, ...values })); const created = next.groups.find((group) => group.library === library && !group.boundFolder && !snapshot.groups.some((old) => old.id === group.id)); onSnapshot(next); if (created) openAlbum(created.id); }
-      else await saveAlbumInfo(groupForm.id, values);
+      else await saveAlbumInfo(groupForm, values);
       setGroupForm(null);
     }} />}
     {addToGroup && <Modal title="加入相簿" onClose={() => setAddToGroup(null)}><div className="group-list">{snapshot.groups.filter((group) => addToGroup.every((id) => snapshot.photos.find((photo) => photo.id === id)?.library === group.library)).map((group) => <button type="button" key={group.id} disabled={busy} onClick={() => void prepareGroup(group.id, { photoIds: addToGroup }).then(() => setAddToGroup(null)).catch(() => {})}>{group.name}<ArrowUpRight size={14} /></button>)}</div>{!snapshot.groups.some((group) => addToGroup.every((id) => snapshot.photos.find((photo) => photo.id === id)?.library === group.library)) && <p className="muted">没有可加入的同图库相簿。请先新建相簿；收藏与作品分别组织。</p>}</Modal>}

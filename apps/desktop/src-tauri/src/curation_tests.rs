@@ -36,6 +36,13 @@ fn fixture(root: &tempfile::TempDir, name: &str) -> String {
     path.to_str().unwrap().into()
 }
 
+fn group_info(group: &crate::models::Group) -> curation::GroupInfoInput {
+    serde_json::from_value(json!({
+        "name": group.name, "description": group.description, "capacity": group.capacity
+    }))
+    .unwrap()
+}
+
 #[test]
 fn album_deletion_rejects_stale_selection_and_leaves_unrelated_photos_visible() {
     let (root, store, drafts, target) = setup();
@@ -74,8 +81,8 @@ fn album_deletion_rejects_stale_selection_and_leaves_unrelated_photos_visible() 
     let standalone = import("standalone.png", None);
     let source = make_album("待删除相簿");
     let orphan = import("source.png", Some(&source));
-    let draft = curation::prepare_group(&store, &drafts, &target, json!({"photoIds":[orphan]}))
-        .unwrap();
+    let draft =
+        curation::prepare_group(&store, &drafts, &target, json!({"photoIds":[orphan]})).unwrap();
     {
         let mut conn = store.connection.lock().unwrap();
         let state = crate::work_directory::runtime::delete_album(&mut conn, &source).unwrap();
@@ -146,6 +153,61 @@ fn local_curation_keeps_only_selected_thumbnail_and_original_reference() {
     assert!(!state.photos[0].original_available);
     assert!(state.photos[0].thumbnail_available);
     assert_eq!(&state.photos[0].id, id);
+}
+
+#[test]
+fn local_curation_prepares_mixed_files_and_folders_once_in_source_order() {
+    let (root, store, drafts, group) = setup();
+    for folder in ["photos", "photos/nested", "empty"] {
+        fs::create_dir(root.path().join(folder)).unwrap();
+    }
+    let standalone = fixture(&root, "单独.png");
+    let repeated = fixture(&root, "photos/a.png");
+    fixture(&root, "photos/b.webp");
+    fixture(&root, "photos/nested/nested.png");
+    fs::write(root.path().join("photos/readme.txt"), b"unsupported").unwrap();
+    let corrupt = root.path().join("photos/c.png");
+    fs::write(&corrupt, b"not actually a PNG").unwrap();
+    let empty = root.path().join("empty");
+    let draft = curation::prepare_import_files(
+        &store,
+        &drafts,
+        vec![
+            standalone,
+            root.path().join("photos").to_str().unwrap().into(),
+            repeated,
+            empty.to_str().unwrap().into(),
+        ],
+        "collection",
+        Some(&group),
+    )
+    .unwrap();
+    let names: Vec<_> = draft
+        .pending_ids
+        .iter()
+        .map(|id| {
+            draft
+                .candidates
+                .iter()
+                .find(|photo| &photo.id == id)
+                .unwrap()
+                .original_name
+                .as_str()
+        })
+        .collect();
+    assert_eq!(names, ["单独.png", "a.png", "b.webp"]);
+    assert_eq!(draft.failures.len(), 2);
+    assert!(draft.failures.iter().any(|failure| {
+        Path::new(&failure.path) == empty && failure.message.contains("当前层级没有")
+    }));
+    assert!(draft
+        .failures
+        .iter()
+        .any(|failure| Path::new(&failure.path) == corrupt));
+    assert!(snapshot(&store.connection.lock().unwrap())
+        .unwrap()
+        .photos
+        .is_empty());
 }
 
 #[test]
@@ -223,11 +285,13 @@ fn thirty_plus_three_can_keep_twenty_nine_old_and_one_new() {
         &[old[0].clone()],
     )
     .unwrap();
-    let new = fixture(&root, "new.webp");
+    let new = (0..3)
+        .map(|index| fixture(&root, &format!("new-{index}.webp")))
+        .collect::<Vec<_>>();
     let draft = curation::prepare_import_files(
         &store,
         &drafts,
-        vec![new.clone(); 3],
+        new.clone(),
         "collection",
         Some(&group),
     )
@@ -273,7 +337,7 @@ fn thirty_plus_three_can_keep_twenty_nine_old_and_one_new() {
     );
     assert!(state.photos.iter().all(|photo| photo.original_available));
     assert!(!store.root.join("staging").join(draft.id).exists());
-    assert!(std::path::Path::new(&source).exists() && std::path::Path::new(&new).exists());
+    assert!(Path::new(&source).exists() && new.iter().all(|path| Path::new(path).exists()));
 }
 
 #[test]
@@ -391,8 +455,9 @@ fn album_info_saves_directly_when_all_active_photos_fit() {
             "name": name, "description": description, "capacity": capacity
         }))
         .unwrap();
+        let expected = group_info(&crate::db::read_group(&conn, &group).unwrap());
         let GroupInfoResult::Saved { snapshot: saved } =
-            curation::save_group_info(&mut conn, &drafts, &group, info).unwrap()
+            curation::save_group_info(&mut conn, &drafts, &group, info, expected).unwrap()
         else {
             panic!("全部有效照片放得下时，应直接保存");
         };
@@ -415,6 +480,40 @@ fn album_info_saves_directly_when_all_active_photos_fit() {
 }
 
 #[test]
+fn album_info_preserves_external_changes_and_rejects_stale_changed_fields() {
+    let (_root, store, drafts, group) = setup();
+    let mut conn = store.connection.lock().unwrap();
+    let baseline = crate::db::read_group(&conn, &group).unwrap();
+    let mut external = crate::db::open_existing(&store.root, true).unwrap();
+    crate::db::write(&mut external, |conn| {
+        groups::apply_patch(conn, &group, json!({"name":"CLI 新名称", "capacity":40}))
+    })
+    .unwrap();
+    let info = serde_json::from_value(json!({
+        "name":baseline.name,"description":"桌面新简介","capacity":baseline.capacity
+    }))
+    .unwrap();
+    let GroupInfoResult::Saved { snapshot } =
+        curation::save_group_info(&mut conn, &drafts, &group, info, group_info(&baseline)).unwrap()
+    else {
+        panic!("修改简介无需取舍");
+    };
+    assert_eq!(snapshot.groups[0].name, "CLI 新名称");
+    assert_eq!(snapshot.groups[0].capacity, Some(40));
+    assert_eq!(snapshot.groups[0].description, "桌面新简介");
+
+    let info = serde_json::from_value(json!({
+        "name":"旧表单改名","description":"不得覆盖","capacity":baseline.capacity
+    }))
+    .unwrap();
+    let result = curation::save_group_info(&mut conn, &drafts, &group, info, group_info(&baseline));
+    assert!(matches!(result, Err(error) if error == crate::db::REVISION_CONFLICT));
+    let saved = crate::db::read_group(&conn, &group).unwrap();
+    assert_eq!(saved.name, "CLI 新名称");
+    assert_eq!(saved.description, "桌面新简介");
+}
+
+#[test]
 fn restore_and_lower_capacity_share_the_same_atomic_plan() {
     let (root, store, drafts, group) = setup();
     let ids = photos::import(
@@ -431,8 +530,9 @@ fn restore_and_lower_capacity_share_the_same_atomic_plan() {
             "name": "已调整", "description": "新简介", "capacity": 1
         }))
         .unwrap();
+        let expected = group_info(&crate::db::read_group(&conn, &group).unwrap());
         let GroupInfoResult::NeedsCuration { draft } =
-            curation::save_group_info(&mut conn, &drafts, &group, info).unwrap()
+            curation::save_group_info(&mut conn, &drafts, &group, info, expected).unwrap()
         else {
             panic!("上限不足时应进入取舍");
         };

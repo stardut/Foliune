@@ -42,10 +42,32 @@
   --danger: #e5b1a0;
   --floating: #24282ef5;
   --floating-line: #e5e9f02b;
+  --glass-tint: 32 34 37;
+  --glass: rgb(var(--glass-tint) / 70%);
+  --glass-thick: rgb(var(--glass-tint) / 82%);
+  --glass-filter: blur(18px) saturate(.86);
+  --glass-thick-filter: blur(26px) saturate(.86);
+  --glass-line: #ffffff27;
+  --glass-muted: #d9dce1;
+  --glass-shadow: inset 0 1px 0 #ffffff10, 0 6px 22px #0000004d;
   --photo-mat: #1b1d20;
   --window-safe-top: 28px;
   --radius-control: 8px;
   --radius-panel: 14px;
   --shadow-panel: inset 0 1px 0 #ffffff06, 0 4px 16px #00000012;
   --shadow-floating: inset 0 1px 0 #ffffff0b, 0 22px 64px #00000048, 0 4px 16px #00000030;
+}
+
+.glass-surface {
+  --glass-surface-fill: var(--glass);
+  --glass-surface-filter: var(--glass-filter);
+  background: var(--glass-surface-fill);
+  -webkit-backdrop-filter: var(--glass-surface-filter);
+  backdrop-filter: var(--glass-surface-filter);
+  border: 1px solid var(--glass-line);
+  box-shadow: var(--glass-shadow);
+}
+.glass-surface-thick {
+  --glass-surface-fill: var(--glass-thick);
+  --glass-surface-filter: var(--glass-thick-filter);
 }

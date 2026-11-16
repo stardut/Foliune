@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { comparePlanExecutionDate, inputOf, newPart, newShot, hasContent, referenceCount, shotCount, planSearchText, moved, sceneReferenceLimitError } from '../src/features/planning/plan-content.ts';
+import { comparePlanExecutionDate, inputOf, newPart, newShot, hasContent, referenceCount, referencesFromSelection, shotCount, planSearchText, moved, sceneReferenceLimitError } from '../src/features/planning/plan-content.ts';
 import { planExportBlocks } from '../src/features/planning/plan-export-content.ts';
 
 function exportedText(blocks) { return blocks.flatMap((block) => block.kind === 'scene-heading' ? [block.title, block.time] : block.kind === 'field' ? [`${block.label}\n${block.value}`] : ['text', 'section'].includes(block.kind) ? [block.value] : []); }
@@ -67,6 +67,20 @@ test('draft copying is independent, reordering retains stable identities, and de
   const shot = newShot(); shot.priority = 'must'; assert.equal(hasContent(shot), true);
   const part = newPart(); part.shots = [newShot()]; assert.equal(hasContent(part), true);
   const ids = [part.id, shot.id, ...part.shots.map((item) => item.id)]; assert.equal(new Set(ids).size, ids.length);
+});
+
+test('reference selection retains stable entries in existing order, even for repeated photos', () => {
+  const references = [
+    { id: 'a-1', photoId: 'a', intent: '场地' },
+    { id: 'b', photoId: 'b', intent: '姿态' },
+    { id: 'a-2', photoId: 'a', intent: '光线' },
+    { id: 'c', photoId: 'c', intent: '服装' },
+  ];
+  const next = referencesFromSelection(references, ['a', 'b', 'new-2', 'new-1']);
+  assert.deepEqual(next.slice(0, 3), references.slice(0, 3));
+  assert.deepEqual(next.slice(3).map(({ photoId, intent }) => [photoId, intent]), [['new-2', ''], ['new-1', '']]);
+  assert.equal(new Set(next.map(({ id }) => id)).size, 5);
+  assert.deepEqual(referencesFromSelection(references, ['b', 'c']), [references[1], references[3]]);
 });
 
 

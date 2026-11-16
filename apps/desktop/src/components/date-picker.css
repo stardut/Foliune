@@ -1,0 +1,45 @@
+.date-picker-field { display: grid; gap: 6px; min-width: 0; }
+.date-picker-field > label { font: inherit; color: var(--muted); }
+.detail-form .date-picker-field > label { font-size: 12px; font-weight: 500; }
+.date-picker-trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-width: 0; min-height: 36px; padding: 7px 10px; text-align: left;
+  border: 1px solid var(--control-line); border-radius: var(--radius-control);
+  color: var(--ink); background: var(--input); font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.date-picker-trigger > svg, .date-picker-placeholder { color: var(--muted); }
+.date-picker-trigger:hover:not(:disabled) { border-color: var(--control-edge); background: var(--control-fill); }
+.date-picker-trigger:active:not(:disabled) { background: var(--control-hover); }
+.date-picker-trigger[aria-invalid=true] { border-color: var(--danger); }
+.date-picker-trigger:disabled { opacity: .55; }
+.modal:has(> .date-picker-dialog) { width: min(390px, calc(100vw - 32px)); padding: 22px; }
+.modal:has(> .date-picker-dialog) .modal-header { margin-bottom: 12px; padding: 0; }
+.date-picker-dialog { display: grid; gap: 8px; }
+.date-picker-dialog .date-picker-value { font-variant-numeric: tabular-nums; }
+.date-picker-value[aria-invalid=true] { border-color: var(--danger); }
+.date-picker-dialog > .form-actions { flex-wrap: wrap; margin-top: 4px; padding-top: 0; }
+.date-picker-clear { margin-right: auto; }
+.date-picker-wheels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.date-wheel {
+  position: relative; overflow: hidden; min-width: 0; touch-action: none; cursor: grab;
+  border: 1px solid var(--control-line); border-radius: var(--radius-control);
+  background: var(--input); font-variant-numeric: tabular-nums;
+}
+.date-wheel[data-grabbing=true] { cursor: grabbing; }
+.date-wheel:hover { border-color: var(--control-edge); }
+:root[data-input-mode=keyboard] .date-wheel:focus-visible { outline: none; border-color: var(--focus); }
+.date-wheel-window, .date-wheel-band { position: absolute; inset-inline: 0; pointer-events: none; }
+.date-wheel-window { inset-block: 0; mask-image: linear-gradient(to bottom, transparent, #000 24%, #000 76%, transparent); color: var(--muted); }
+.date-wheel-band {
+  top: 50%; transform: translateY(-50%); overflow: hidden;
+  border-radius: 5px; background: var(--control-fill); box-shadow: inset 0 0 0 1px var(--control-line); color: var(--ink);
+}
+.date-wheel-drum {
+  position: absolute; inset-inline: 0; top: 50%; height: 0; margin: 0; padding: 0;
+  list-style: none; backface-visibility: hidden; transform-style: preserve-3d;
+}
+.date-wheel-drum > li {
+  position: absolute; inset-inline: 0; display: flex; align-items: center; justify-content: center;
+  gap: 3px; font-size: 14px; line-height: 1; font-weight: 500; white-space: nowrap; backface-visibility: hidden;
+}
+.date-wheel-drum > li > span { color: var(--muted); font-size: 11px; font-weight: 400; }

@@ -82,7 +82,10 @@ impl Cache {
     fn ensure_context(&mut self, store: &Store, conn: &Connection) -> Result<(), String> {
         let library = db::library_root(conn)?;
         let root = active(conn)?;
-        if self.library != library || self.root != root {
+        if self.library != library
+            || self.root != root
+            || self.queue.remove_deleted_failures(conn)?
+        {
             self.update(store, conn, library, root, None)?;
         }
         Ok(())
@@ -502,11 +505,16 @@ pub(crate) async fn delete_group(app: AppHandle, id: String) -> Result<Snapshot,
 
 pub(crate) fn delete_album(conn: &mut Connection, id: &str) -> Result<Snapshot, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    queue::remove_album(&tx, id)?;
-    let snapshot = groups::delete(&tx, id)?;
+    delete_album_records(&tx, id)?;
+    let snapshot = db::snapshot(&tx)?;
     tx.commit().map_err(|e| e.to_string())?;
     crate::album_cover::remove_cached(conn, id);
     Ok(snapshot)
+}
+
+pub(crate) fn delete_album_records(conn: &Connection, id: &str) -> Result<(), String> {
+    queue::remove_album(conn, id)?;
+    groups::delete(conn, id)
 }
 
 fn protocol_source(conn: &Connection, id: &str) -> Result<Original, String> {

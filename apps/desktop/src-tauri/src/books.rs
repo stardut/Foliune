@@ -303,11 +303,11 @@ pub fn create(conn: &mut Connection, input: CreateBookInput) -> Result<BookDetai
         input.page_width,
         input.page_height,
     )?;
-    book_layout::validate(conn, &layout)?;
+    let tx = conn.savepoint().map_err(|e| e.to_string())?;
+    book_layout::validate(&tx, &layout)?;
     let id = uuid::Uuid::new_v4().to_string();
     let version_id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let now = db::next_revision(None);
     tx.execute("INSERT INTO books(id,title,current_version_id,created_at,updated_at) VALUES(?1,?2,?3,?4,?4)",params![id,name,version_id,now]).map_err(|e| e.to_string())?;
     insert_version(&tx, &id, &version_id, "automatic", &layout)?;
     tx.commit().map_err(|e| e.to_string())?;
@@ -319,12 +319,12 @@ pub fn save_version(
     version_id: &str,
     input: VersionInput,
 ) -> Result<BookDetail, String> {
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let current: String = tx
+    let tx = conn.savepoint().map_err(|e| e.to_string())?;
+    let (current, updated_at): (String, String) = tx
         .query_row(
-            "SELECT current_version_id FROM books WHERE id=?1",
+            "SELECT current_version_id,updated_at FROM books WHERE id=?1",
             [book_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?
@@ -332,16 +332,25 @@ pub fn save_version(
     if current != version_id {
         return Err("画册内容已在其他操作中更改，请重新打开后再试；当前修改仍保留。".into());
     }
-    book_layout::validate(&tx, &input)?;
-    let id = uuid::Uuid::new_v4().to_string();
-    insert_version(&tx, book_id, &id, "manual", &input)?;
+    let id = write_manual_version(&tx, book_id, &input)?;
     tx.execute(
         "UPDATE books SET current_version_id=?1,updated_at=?2 WHERE id=?3",
-        params![id, chrono::Utc::now().to_rfc3339(), book_id],
+        params![id, db::next_revision(Some(&updated_at)), book_id],
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     get(conn, book_id)
+}
+
+fn write_manual_version(
+    conn: &Connection,
+    book_id: &str,
+    input: &VersionInput,
+) -> Result<String, String> {
+    book_layout::validate(conn, input)?;
+    let id = uuid::Uuid::new_v4().to_string();
+    insert_version(conn, book_id, &id, "manual", input)?;
+    Ok(id)
 }
 
 pub fn append_photos(
@@ -381,19 +390,46 @@ pub fn append_photos(
     input.label = "追加选片".into();
     save_version(conn, book_id, &detail.book.current_version_id, input)
 }
-pub fn rename(conn: &mut Connection, id: &str, name: &str) -> Result<BookDetail, String> {
-    let name = title(name)?;
-    get(conn, id)?;
-    conn.execute(
-        "UPDATE books SET title=?1,updated_at=?2 WHERE id=?3",
-        params![name, chrono::Utc::now().to_rfc3339(), id],
+pub fn update(
+    conn: &mut Connection,
+    id: &str,
+    expected_revision: &str,
+    name: Option<&str>,
+    version: Option<VersionInput>,
+) -> Result<BookDetail, String> {
+    let tx = conn.savepoint().map_err(|e| e.to_string())?;
+    let detail = get(&tx, id)?;
+    if detail.book.updated_at != expected_revision {
+        return Err(db::REVISION_CONFLICT.into());
+    }
+    let name = name.map(title).transpose()?.unwrap_or(&detail.book.title);
+    let current = match version {
+        Some(input) => write_manual_version(&tx, id, &input)?,
+        None => detail.book.current_version_id,
+    };
+    tx.execute(
+        "UPDATE books SET title=?1,current_version_id=?2,updated_at=?3 WHERE id=?4",
+        params![
+            name,
+            current,
+            db::next_revision(Some(&detail.book.updated_at)),
+            id
+        ],
     )
     .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
     get(conn, id)
 }
 pub fn delete(conn: &mut Connection, id: &str) -> Result<Snapshot, String> {
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let data: Option<String> = tx
+    let tx = conn.savepoint().map_err(|e| e.to_string())?;
+    delete_record(&tx, id)?;
+    let snapshot = db::snapshot(&tx)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(snapshot)
+}
+
+pub(crate) fn delete_record(conn: &Connection, id: &str) -> Result<(), String> {
+    let data: Option<String> = conn
         .query_row(
             "SELECT v.data FROM books b
          LEFT JOIN book_versions v ON v.id=b.current_version_id AND v.book_id=b.id
@@ -407,11 +443,9 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<Snapshot, String> {
     let version: VersionInput = serde_json::from_str(&data.ok_or("画册当前内容不存在")?)
         .map_err(|e| format!("画册内容损坏：{e}"))?;
     let candidates = version_photo_ids(&version).cloned().collect();
-    tx.execute("DELETE FROM books WHERE id=?1", [id])
+    conn.execute("DELETE FROM books WHERE id=?1", [id])
         .map_err(|e| e.to_string())?;
-    let snapshot = content_refs::snapshot_after_deletion(&tx, candidates)?;
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(snapshot)
+    content_refs::hide_unreferenced_photos(conn, candidates)
 }
 
 #[tauri::command]
@@ -424,7 +458,7 @@ pub async fn books_get(app: AppHandle, id: String) -> Result<BookDetail, String>
 }
 #[tauri::command]
 pub async fn books_create(app: AppHandle, input: CreateBookInput) -> Result<BookDetail, String> {
-    db::with_connection(app, move |conn| create(conn, input)).await
+    db::with_connection(app, move |conn| db::write(conn, |conn| create(conn, input))).await
 }
 #[tauri::command]
 pub async fn books_save_version(
@@ -434,17 +468,39 @@ pub async fn books_save_version(
     input: VersionInput,
 ) -> Result<BookDetail, String> {
     db::with_connection(app, move |conn| {
-        save_version(conn, &book_id, &version_id, input)
+        db::write(conn, |conn| {
+            save_version(conn, &book_id, &version_id, input)
+        })
     })
     .await
 }
 #[tauri::command]
-pub async fn books_rename(app: AppHandle, id: String, title: String) -> Result<BookDetail, String> {
-    db::with_connection(app, move |conn| rename(conn, &id, &title)).await
+pub async fn books_rename(
+    app: AppHandle,
+    id: String,
+    title: String,
+    expected_revision: String,
+) -> Result<BookDetail, String> {
+    db::with_connection(app, move |conn| {
+        db::write(conn, |conn| {
+            update(conn, &id, &expected_revision, Some(&title), None)
+        })
+    })
+    .await
 }
 #[tauri::command]
-pub async fn books_delete(app: AppHandle, id: String) -> Result<Snapshot, String> {
-    db::with_connection(app, move |conn| delete(conn, &id)).await
+pub async fn books_delete(
+    app: AppHandle,
+    id: String,
+    expected_revision: String,
+) -> Result<Snapshot, String> {
+    db::with_connection(app, move |conn| {
+        db::write(conn, |conn| {
+            db::check_revision(&get(conn, &id)?.book.updated_at, &expected_revision)?;
+            delete(conn, &id)
+        })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -453,5 +509,8 @@ pub async fn books_append_photos(
     book_id: String,
     photo_ids: Vec<String>,
 ) -> Result<BookDetail, String> {
-    db::with_connection(app, move |conn| append_photos(conn, &book_id, photo_ids)).await
+    db::with_connection(app, move |conn| {
+        db::write(conn, |conn| append_photos(conn, &book_id, photo_ids))
+    })
+    .await
 }

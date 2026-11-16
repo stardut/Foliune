@@ -105,7 +105,7 @@ export function DropdownLayer({ trigger, panel, id, role, label, align = 'start'
   if (host !== activeHost) return null;
   // A dialog's top layer makes body siblings inert. Keep its popup in its
   // own visible scrollport. The workspace popup can escape all scrollports.
-  return createPortal(<div id={id} ref={panel} className="dropdown-panel" data-in-dialog={dialog ? '' : undefined}
+  return createPortal(<div id={id} ref={panel} className="dropdown-panel glass-surface" data-in-dialog={dialog ? '' : undefined}
     role={role} aria-label={label} tabIndex={role === 'menu' ? -1 : undefined}>{children}</div>, host);
 }
 

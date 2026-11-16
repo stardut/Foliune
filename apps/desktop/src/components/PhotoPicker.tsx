@@ -26,7 +26,7 @@ export function PhotoPicker({ selectedIds, onConfirm, onClose, title = '从图�
   onConfirm: (ids: string[]) => void; onClose: () => void; title?: string;
 }) {
   const [selected, setSelected] = useState(() => [...new Set(selectedIds)]);
-  return <Modal title={title} onClose={onClose} wide>
+  return <Modal title={title} onClose={onClose} wide glass>
     <PhotoLibraryPicker {...props} selectedIds={selected} onChange={setSelected} actions={<>
       <button type="button" className="button" onClick={onClose}>取消</button>
       <button type="button" className="button button-primary" disabled={props.maxSelection !== undefined && selected.length > props.maxSelection} onClick={() => onConfirm(selected)}>确认选择</button>

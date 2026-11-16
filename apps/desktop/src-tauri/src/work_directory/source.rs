@@ -229,6 +229,37 @@ pub(crate) fn original_status(
     Ok((Path::new(locator).is_file(), None))
 }
 
+pub(crate) fn probe_original_status(
+    conn: &Connection,
+    photo_id: &str,
+    locator: &str,
+) -> Result<(Option<bool>, Option<BoundAvailability>), String> {
+    if !locator.starts_with(LOCATOR_PREFIX) {
+        let (available, _) = original_status(conn, photo_id, locator)?;
+        return Ok((Some(available), None));
+    }
+    let source = bound_source(conn, photo_id, locator)?;
+    let status = if !source.root.authorized {
+        BoundAvailability::Offline
+    } else if let Ok(root) = RootDirectory::open(&source.root.path) {
+        match root.photo(&source.folder, &source.file_name) {
+            Ok(file) if size_matches(&file, source.expected_size()) => {
+                // The CLI does not start the desktop verifier or hash full originals for search.
+                if source.stat_signature.is_some() && stat_signature(&file) == source.stat_signature
+                {
+                    BoundAvailability::Available
+                } else {
+                    return Ok((None, None));
+                }
+            }
+            _ => BoundAvailability::Missing,
+        }
+    } else {
+        BoundAvailability::Offline
+    };
+    Ok((Some(status == BoundAvailability::Available), Some(status)))
+}
+
 impl BoundSource {
     pub(super) fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {

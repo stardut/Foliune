@@ -7,6 +7,8 @@ mod backup;
 mod book_export;
 mod book_layout;
 mod books;
+pub mod cli;
+mod cli_install;
 mod collage;
 mod content_refs;
 mod context_menu;
@@ -16,6 +18,7 @@ mod db;
 mod groups;
 mod link_import;
 mod local_photo;
+mod local_photo_picker;
 mod model_profiles;
 mod models;
 mod music;
@@ -41,6 +44,26 @@ async fn load_snapshot(app: AppHandle) -> Result<Snapshot, String> {
 }
 
 #[tauri::command]
+async fn snapshot_after_external_edit(
+    app: AppHandle,
+    known_version: Option<u32>,
+) -> Result<(u32, Option<Snapshot>), String> {
+    db::with_connection(app, move |conn| {
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let version: u32 = tx
+            .pragma_query_value(None, "data_version", |row| row.get(0))
+            .map_err(|error| error.to_string())?;
+        let snapshot = if known_version == Some(version) {
+            None
+        } else {
+            Some(db::snapshot(&tx)?)
+        };
+        Ok((version, snapshot))
+    })
+    .await
+}
+
+#[tauri::command]
 async fn import_photos(
     app: AppHandle,
     paths: Vec<String>,
@@ -62,13 +85,23 @@ async fn create_group(app: AppHandle, input: GroupInput) -> Result<Snapshot, Str
 }
 
 #[tauri::command]
-async fn update_group(app: AppHandle, id: String, patch: Value) -> Result<Snapshot, String> {
-    let warm_group = patch.get("cover").map(|_| id.clone());
-    let snapshot =
-        db::with_connection(app.clone(), move |conn| groups::update(conn, &id, patch)).await?;
-    if let Some(group_id) = warm_group {
-        album_cover::prewarm(app, &snapshot, group_id);
-    }
+async fn update_group(
+    app: AppHandle,
+    id: String,
+    patch: Value,
+    expected_cover: Option<models::AlbumCover>,
+) -> Result<Snapshot, String> {
+    let group_id = id.clone();
+    let snapshot = db::with_connection(app.clone(), move |conn| {
+        let cover = patch
+            .as_object()
+            .filter(|fields| fields.len() == 1)
+            .and_then(|fields| fields.get("cover"))
+            .ok_or("无效相簿封面修改")?;
+        groups::save_cover(conn, &id, cover, expected_cover.as_ref())
+    })
+    .await?;
+    album_cover::prewarm(app, &snapshot, group_id);
     Ok(snapshot)
 }
 
@@ -78,8 +111,16 @@ async fn delete_group(app: AppHandle, id: String) -> Result<Snapshot, String> {
 }
 
 #[tauri::command]
-async fn update_photo(app: AppHandle, id: String, patch: Value) -> Result<Snapshot, String> {
-    db::with_connection(app, move |conn| photos::update(conn, &id, patch)).await
+async fn update_photo(
+    app: AppHandle,
+    id: String,
+    patch: Value,
+    expected: Value,
+) -> Result<Snapshot, String> {
+    db::with_connection(app, move |conn| {
+        photos::update_from_baseline(conn, &id, patch, expected)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -115,6 +156,10 @@ async fn relink_photo(app: AppHandle, photo_id: String, path: String) -> Result<
     .map_err(|e| e.to_string())?
 }
 
+fn desktop_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -139,7 +184,10 @@ pub fn run() {
             app_updates::check_app_update,
             app_updates::install_app_update,
             context_menu::popup_context_menu,
+            cli_install::cli_install_status,
+            cli_install::install_cli,
             load_snapshot,
+            snapshot_after_external_edit,
             import_photos,
             create_group,
             update_group,
@@ -151,6 +199,7 @@ pub fn run() {
             set_membership_statuses,
             airdrop::share_album_airdrop,
             relink_photo,
+            local_photo_picker::choose_local_photo_sources,
             curation::prepare_import,
             link_import::prepare_link_import,
             link_import::cancel_link_import,
@@ -205,7 +254,7 @@ pub fn run() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(desktop_context())
         .expect("Foliune 桌面运行失败")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {

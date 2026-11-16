@@ -1,6 +1,6 @@
 //! Shared validation and lifetime rules for persisted photo references.
-use crate::{books, db, models::Snapshot};
-use rusqlite::{Connection, OptionalExtension, Transaction};
+use crate::books;
+use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashSet;
 
 pub fn text(value: &str, label: &str, max: usize) -> Result<(), String> {
@@ -46,11 +46,11 @@ pub fn validate_photos(conn: &Connection, ids: &[String]) -> Result<(), String> 
 }
 
 pub(crate) fn deletion_candidates(
-    tx: &Transaction<'_>,
+    conn: &Connection,
     sql: &str,
     id: &str,
 ) -> Result<HashSet<String>, String> {
-    let mut statement = tx.prepare(sql).map_err(|e| e.to_string())?;
+    let mut statement = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = statement
         .query_map([id], |row| row.get(0))
         .map_err(|e| e.to_string())?;
@@ -59,12 +59,12 @@ pub(crate) fn deletion_candidates(
 
 // Only consider photos used by the deleted record. Its own references have
 // already been removed by cascade; discarded album members still count.
-pub(crate) fn snapshot_after_deletion(
-    tx: &Transaction<'_>,
+pub(crate) fn hide_unreferenced_photos(
+    conn: &Connection,
     mut candidates: HashSet<String>,
-) -> Result<Snapshot, String> {
+) -> Result<(), String> {
     if !candidates.is_empty() {
-        let mut statement = tx
+        let mut statement = conn
             .prepare(
                 "SELECT photo_id FROM memberships
              UNION ALL SELECT photo_id FROM model_photos
@@ -82,9 +82,9 @@ pub(crate) fn snapshot_after_deletion(
             candidates.remove(&id);
         }
     }
-    books::exclude_currently_referenced_photos(tx, &mut candidates)?;
+    books::exclude_currently_referenced_photos(conn, &mut candidates)?;
     if !candidates.is_empty() {
-        let mut hide = tx
+        let mut hide = conn
             .prepare("UPDATE photos SET hidden_after_album_delete=1 WHERE id=?1")
             .map_err(|e| e.to_string())?;
         for photo_id in candidates {
@@ -93,7 +93,7 @@ pub(crate) fn snapshot_after_deletion(
             }
         }
     }
-    db::snapshot(tx)
+    Ok(())
 }
 
 // Callers supply only module-owned SQL; positions must be contiguous even for restored data.

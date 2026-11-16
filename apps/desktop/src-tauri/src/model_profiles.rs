@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelInput {
     pub name: String,
@@ -186,21 +186,34 @@ fn read(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProfile> {
     })
 }
 
-pub fn list(conn: &Connection) -> Result<Vec<ModelProfile>, String> {
-    let mut statement = conn.prepare("SELECT id,name,contact,city,tags,notes,gender,birthday,height_cm,bust_cm,waist_cm,hips_cm,cover_photo_id,created_at,updated_at,tag_options,weight_kg FROM model_profiles ORDER BY updated_at DESC,id").map_err(|e| e.to_string())?;
-    let mut profiles = statement
-        .query_map([], read)
+const PROFILE_SELECT: &str = "SELECT id,name,contact,city,tags,notes,gender,birthday,height_cm,
+    bust_cm,waist_cm,hips_cm,cover_photo_id,created_at,updated_at,tag_options,weight_kg FROM model_profiles";
+
+fn with_photos(conn: &Connection, mut profile: ModelProfile) -> Result<ModelProfile, String> {
+    profile.input.photo_ids = content_refs::read_photos(
+        conn,
+        "SELECT photo_id,position FROM model_photos WHERE model_id=?1 ORDER BY position",
+        &profile.id,
+    )?;
+    Ok(profile)
+}
+
+pub fn get(conn: &Connection, id: &str) -> Result<ModelProfile, String> {
+    let profile = conn
+        .query_row(&format!("{PROFILE_SELECT} WHERE id=?1"), [id], read)
+        .optional()
         .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
+        .ok_or("模特档案不存在")?;
+    with_photos(conn, profile)
+}
+
+pub fn list(conn: &Connection) -> Result<Vec<ModelProfile>, String> {
+    let mut statement = conn
+        .prepare(&format!("{PROFILE_SELECT} ORDER BY updated_at DESC,id"))
         .map_err(|e| e.to_string())?;
-    for profile in &mut profiles {
-        profile.input.photo_ids = content_refs::read_photos(
-            conn,
-            "SELECT photo_id,position FROM model_photos WHERE model_id=?1 ORDER BY position",
-            &profile.id,
-        )?;
-    }
-    Ok(profiles)
+    let rows = statement.query_map([], read).map_err(|e| e.to_string())?;
+    rows.map(|row| with_photos(conn, row.map_err(|e| e.to_string())?))
+        .collect()
 }
 
 pub fn validate_all(conn: &Connection) -> Result<(), String> {
@@ -214,8 +227,43 @@ pub fn validate_all(conn: &Connection) -> Result<(), String> {
 pub fn save(
     conn: &mut Connection,
     id: Option<&str>,
+    input: ModelInput,
+) -> Result<ModelProfile, String> {
+    save_inner(conn, id, None, input)
+}
+
+pub fn update(
+    conn: &mut Connection,
+    id: &str,
+    expected_revision: &str,
+    input: ModelInput,
+) -> Result<ModelProfile, String> {
+    save_inner(conn, Some(id), Some(expected_revision), input)
+}
+
+fn save_inner(
+    conn: &mut Connection,
+    id: Option<&str>,
+    expected_revision: Option<&str>,
     mut input: ModelInput,
 ) -> Result<ModelProfile, String> {
+    let tx = conn.savepoint().map_err(|e| e.to_string())?;
+    let existing = id
+        .map(|id| {
+            tx.query_row(
+                "SELECT created_at,updated_at FROM model_profiles WHERE id=?1",
+                [id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "模特档案不存在".to_string())
+        })
+        .transpose()?;
+    let previous = existing.as_ref().map(|(_, updated)| updated.as_str());
+    if expected_revision.is_some() && expected_revision != previous {
+        return Err(db::REVISION_CONFLICT.into());
+    }
     input.name = content_refs::name(&input.name)?;
     content_refs::deduplicate(&mut input.photo_ids);
     input
@@ -229,24 +277,14 @@ pub fn save(
             .for_each(|option| *option = option.trim().to_string());
         content_refs::deduplicate(options);
     }
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
     validate(&tx, &input)?;
-    let now = chrono::Utc::now().to_rfc3339();
-    let (id, created_at) = match id {
-        Some(id) => {
-            let created = tx
-                .query_row(
-                    "SELECT created_at FROM model_profiles WHERE id=?1",
-                    [id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()
-                .map_err(|e| e.to_string())?
-                .ok_or("模特档案不存在")?;
-            (id.to_string(), created)
-        }
-        None => (uuid::Uuid::new_v4().to_string(), now.clone()),
-    };
+    let now = db::next_revision(previous);
+    let id = id
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let created_at = existing
+        .map(|(created, _)| created)
+        .unwrap_or_else(|| now.clone());
     tx.execute("INSERT INTO model_profiles (id,name,contact,city,tags,notes,gender,birthday,height_cm,bust_cm,waist_cm,hips_cm,cover_photo_id,created_at,updated_at,tag_options,weight_kg) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
         ON CONFLICT(id) DO UPDATE SET name=excluded.name,contact=excluded.contact,city=excluded.city,tags=excluded.tags,tag_options=excluded.tag_options,notes=excluded.notes,gender=excluded.gender,birthday=excluded.birthday,height_cm=excluded.height_cm,bust_cm=excluded.bust_cm,waist_cm=excluded.waist_cm,hips_cm=excluded.hips_cm,cover_photo_id=excluded.cover_photo_id,updated_at=excluded.updated_at,weight_kg=excluded.weight_kg",
         params![id,input.name,input.contact,input.city,serde_json::to_string(&input.tags).map_err(|e| e.to_string())?,input.notes,input.gender,input.birthday,input.height_cm,input.bust_cm,input.waist_cm,input.hips_cm,input.cover_photo_id,created_at,now,input.tag_options.as_ref().map(serde_json::to_string).transpose().map_err(|e| e.to_string())?,input.weight_kg])
@@ -270,23 +308,28 @@ pub fn save(
 }
 
 pub fn delete(conn: &mut Connection, id: &str) -> Result<Snapshot, String> {
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = conn.savepoint().map_err(|e| e.to_string())?;
+    delete_record(&tx, id)?;
+    let snapshot = db::snapshot(&tx)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(snapshot)
+}
+
+pub(crate) fn delete_record(conn: &Connection, id: &str) -> Result<(), String> {
     let candidates = content_refs::deletion_candidates(
-        &tx,
+        conn,
         "SELECT photo_id FROM model_photos WHERE model_id=?1
          UNION ALL SELECT cover_photo_id FROM model_profiles WHERE id=?1 AND cover_photo_id IS NOT NULL",
         id,
     )?;
-    if tx
+    if conn
         .execute("DELETE FROM model_profiles WHERE id=?1", [id])
         .map_err(|e| e.to_string())?
         == 0
     {
         return Err("模特档案不存在".into());
     }
-    let snapshot = content_refs::snapshot_after_deletion(&tx, candidates)?;
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(snapshot)
+    content_refs::hide_unreferenced_photos(conn, candidates)
 }
 
 #[tauri::command]
@@ -294,18 +337,36 @@ pub fn models_list(store: State<'_, Store>) -> Result<Vec<ModelProfile>, String>
     list(&*store.connection.lock().map_err(|e| e.to_string())?)
 }
 #[tauri::command]
-pub fn models_save(
-    store: State<'_, Store>,
+pub async fn models_save(
+    app: AppHandle,
     id: Option<String>,
     input: ModelInput,
+    expected_revision: Option<String>,
 ) -> Result<ModelProfile, String> {
-    save(
-        &mut *store.connection.lock().map_err(|e| e.to_string())?,
-        id.as_deref(),
-        input,
-    )
+    db::with_connection(app, move |conn| {
+        db::write(conn, |conn| match id.as_deref() {
+            Some(id) => update(
+                conn,
+                id,
+                expected_revision.as_deref().ok_or(db::REVISION_CONFLICT)?,
+                input,
+            ),
+            None => save(conn, None, input),
+        })
+    })
+    .await
 }
 #[tauri::command]
-pub async fn models_delete(app: AppHandle, id: String) -> Result<Snapshot, String> {
-    db::with_connection(app, move |conn| delete(conn, &id)).await
+pub async fn models_delete(
+    app: AppHandle,
+    id: String,
+    expected_revision: String,
+) -> Result<Snapshot, String> {
+    db::with_connection(app, move |conn| {
+        db::write(conn, |conn| {
+            db::check_revision(&get(conn, &id)?.updated_at, &expected_revision)?;
+            delete(conn, &id)
+        })
+    })
+    .await
 }

@@ -45,7 +45,7 @@ struct Source {
     cover: Option<AlbumCover>,
 }
 
-fn matches_cover(current: Option<&AlbumCover>, expected: Option<&AlbumCover>) -> bool {
+pub(crate) fn matches_cover(current: Option<&AlbumCover>, expected: Option<&AlbumCover>) -> bool {
     match (current, expected) {
         (Some(current), Some(expected)) => {
             // The caller echoes a snapshot through JavaScript and JSON.

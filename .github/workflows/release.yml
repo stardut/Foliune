@@ -154,6 +154,9 @@ jobs:
           bundle_dir=apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle
           app_path="$bundle_dir/macos/Foliune.app"
           lipo "$app_path/Contents/MacOS/foliune" -verify_arch arm64
+          if [ -f apps/desktop/src-tauri/src/bin/foliune-cli.rs ]; then
+            lipo "$app_path/Contents/MacOS/foliune-cli" -verify_arch arm64
+          fi
           codesign --verify --deep --strict "$app_path"
           signature_info="$(codesign --display --verbose=4 "$app_path" 2>&1)"
           if ! grep -q '^Signature=adhoc$' <<< "$signature_info"; then

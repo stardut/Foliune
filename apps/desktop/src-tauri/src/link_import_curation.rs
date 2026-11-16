@@ -7,7 +7,7 @@ pub fn prepare_import_files(
     library: &str,
     group_id: Option<&str>,
 ) -> Result<CurationDraft, String> {
-    let paths = expand_import_paths(paths)?;
+    let (paths, mut failures) = expand_import_paths(paths);
     let mut draft = {
         let conn = store.connection.lock().map_err(|e| e.to_string())?;
         import_draft(&conn, library, group_id)?
@@ -33,7 +33,8 @@ pub fn prepare_import_files(
         .map(|(id, signature)| (id, StagedOriginal::Local { signature }))
         .collect();
     draft.view.candidates.extend(imported.snapshot.photos);
-    draft.view.failures = imported.failures;
+    failures.extend(imported.failures);
+    draft.view.failures = failures;
     draft.staging = Some(staging);
     // 解码期间可切换图库；只允许把候选注册到其所属的仍在使用的图库。
     let conn = store.connection.lock().map_err(|e| e.to_string())?;
@@ -44,39 +45,52 @@ pub fn prepare_import_files(
     drafts.register(draft)
 }
 
-fn expand_import_paths(paths: Vec<String>) -> Result<Vec<String>, String> {
+fn expand_import_paths(paths: Vec<String>) -> (Vec<String>, Vec<ImportFailure>) {
     let mut files = Vec::new();
+    let mut failures = Vec::new();
     for path in paths {
         let source = Path::new(&path);
-        if !source.is_dir() {
-            files.push(path);
-            continue;
-        }
-        let entries =
-            fs::read_dir(source).map_err(|error| format!("无法读取文件夹「{path}」：{error}"))?;
-        let mut photos = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(|error| format!("无法读取文件夹「{path}」：{error}"))?;
-            let file_type = entry
-                .file_type()
-                .map_err(|error| format!("无法读取「{}」：{error}", entry.path().display()))?;
-            if file_type.is_file() && photos::supported_extension(&entry.path()) {
-                photos.push(entry.path());
+        if source.is_absolute() && source.is_dir() {
+            match import_folder_files(source) {
+                Ok(photos) => files.extend(photos),
+                Err(message) => failures.push(ImportFailure { path, message }),
             }
+        } else {
+            files.push(path);
         }
-        photos.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
-        if photos.is_empty() {
-            return Err(format!(
-                "文件夹「{path}」当前层级没有 JPEG、PNG 或 WebP 照片。"
-            ));
-        }
-        files.extend(
-            photos
-                .into_iter()
-                .map(|path| path.to_string_lossy().into_owned()),
-        );
     }
-    Ok(files)
+    // Selecting an item and its containing folder yields the item only once.
+    let mut seen = HashSet::new();
+    files.retain(|path| seen.insert(path.clone()));
+    (files, failures)
+}
+
+fn import_folder_files(source: &Path) -> Result<Vec<String>, String> {
+    let folder_error = |error| format!("无法读取文件夹：{error}");
+    let entries = fs::read_dir(source).map_err(folder_error)?;
+    let mut photos = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(folder_error)?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("无法读取「{}」：{error}", path.display()))?;
+        if file_type.is_file() && photos::supported_extension(&path) {
+            photos.push(path);
+        }
+    }
+    photos.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+    if photos.is_empty() {
+        return Err("文件夹当前层级没有 JPEG、PNG 或 WebP 照片。".into());
+    }
+    photos
+        .into_iter()
+        .map(|path| {
+            path.into_os_string()
+                .into_string()
+                .map_err(|_| "文件夹含无法读取路径的照片".into())
+        })
+        .collect()
 }
 
 fn import_draft(conn: &Connection, library: &str, group_id: Option<&str>) -> Result<Draft, String> {

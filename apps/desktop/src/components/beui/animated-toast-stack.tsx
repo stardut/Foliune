@@ -6,9 +6,11 @@ import { ArrowDownToLine, CircleAlert, Check, Info, X } from 'lucide-react';
 
 export interface ToastInput {
   title: string;
+  description?: string;
   status?: 'success' | 'error' | 'info';
   duration?: number | null;
   dismissible?: boolean;
+  dismissLabel?: string;
   action?: { label: string; onClick: () => void };
 }
 interface AnimatedToast extends ToastInput { id: string; createdAt: number }
@@ -68,14 +70,20 @@ function ToastItem({ toast, onDismiss }: { toast: AnimatedToast; onDismiss: (id:
   }, []);
   const status = toast.status ?? 'success';
   const Icon = toast.action ? ArrowDownToLine : status === 'error' ? CircleAlert : status === 'info' ? Info : Check;
-  return <li ref={item} className={`toast-item toast-${status}${toast.action ? ' toast-with-action' : ''}`} onFocusCapture={(event) => {
+  return <li ref={item} className={`toast-item toast-${status}${toast.action ? ' toast-with-action' : ''}${toast.description ? ' toast-with-description' : ''}`} onFocusCapture={(event) => {
     if (event.relatedTarget instanceof HTMLElement && !event.relatedTarget.closest('.toast-viewport')) previousFocus.current = event.relatedTarget;
   }}>
     <div className="toast-content" role={status === 'error' ? 'alert' : 'status'}>
       <Icon size={16} className="toast-icon" aria-hidden="true" />
-      <span>{toast.title}</span>
+      {toast.description ? <div className="toast-message">
+        <span>{toast.title}</span>
+        <span className="toast-description">{toast.description}</span>
+      </div> : <span>{toast.title}</span>}
     </div>
     {toast.action && <button type="button" className="button button-primary toast-action" aria-haspopup="dialog" onClick={toast.action.onClick}>{toast.action.label}</button>}
-    {toast.dismissible && <button type="button" className="toast-close" aria-label="关闭提示" onPointerDown={(event) => event.preventDefault()} onClick={() => onDismiss(toast.id)}><X size={14} aria-hidden="true" /></button>}
+    {toast.dismissible && <button type="button" className={toast.dismissLabel ? 'button button-quiet toast-dismiss' : 'toast-close'}
+      aria-label={toast.dismissLabel ?? '关闭提示'} onPointerDown={(event) => event.preventDefault()} onClick={() => onDismiss(toast.id)}>
+      {toast.dismissLabel ?? <X size={14} aria-hidden="true" />}
+    </button>}
   </li>;
 }

@@ -7,20 +7,30 @@ import type { LibrarySnapshot, Photo } from '../../lib/types';
 import { PhotoImage } from '../../components/PhotoImage';
 import { PhotoSourceDialog } from '../../components/PhotoSourceDialog';
 import { IconButton } from '../../components/ui';
-import { moved } from './plan-content';
+import { moved, referencesFromSelection } from './plan-content';
 import { PlanTextarea } from './PlanFields';
 
-export function PlanPhotos({ references, snapshot, photos, editing = false, disabled = false, maxSelection, onChange, onSnapshot, onBusyChange, layout = 'default' }: {
+export function PlanPhotos({ references, snapshot, photos, editing = false, disabled = false, maxSelection, onChange, onSnapshot, onBusyChange, layout = 'plan' }: {
   references: PlanReference[]; snapshot: LibrarySnapshot; photos: Photo[]; onSnapshot: (snapshot: LibrarySnapshot) => void; onBusyChange: (busy: boolean) => void; editing?: boolean; disabled?: boolean; maxSelection: number;
-  onChange: (references: PlanReference[]) => void; layout?: 'default' | 'scene' | 'shot';
+  onChange: (references: PlanReference[]) => void; layout?: 'plan' | 'scene';
 }) {
   const [picking, setPicking] = useState(false);
   const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
+  const selectedIds = [...new Set(references.map((ref) => ref.photoId))];
+  // The picker counts unique photos. Existing repeated references still use one slot each.
+  const pickerLimit = Math.max(0, maxSelection - references.length + selectedIds.length);
+  const addButton = useRef<HTMLButtonElement>(null);
   const refs = useRef(new Map<string, HTMLElement>());
   function move(index: number, offset: number) {
     if (disabled) return;
     onChange(moved(references, index, offset));
     requestAnimationFrame(() => refs.current.get(references[index].id)?.focus());
+  }
+  function remove(index: number) {
+    const next = references.filter((_, position) => position !== index);
+    const target = next[Math.min(index, next.length - 1)];
+    onChange(next);
+    requestAnimationFrame(() => (target ? refs.current.get(target.id) : addButton.current)?.focus());
   }
   return <div className={`plan-reference-group is-${layout} count-${Math.min(references.length, 3)}`}>
     {!!references.length && <div className={`plan-photos ${editing ? 'is-editing' : ''}`}>{references.map((reference, index) => {
@@ -29,12 +39,12 @@ export function PlanPhotos({ references, snapshot, photos, editing = false, disa
         tabIndex={editing ? 0 : undefined} aria-label={editing ? `参考图 ${index + 1}，Alt 加方向键调整顺序` : undefined}
         onKeyDown={(event) => { if (editing && event.target === event.currentTarget && event.altKey && ['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown'].includes(event.key)) { event.preventDefault(); move(index, ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1); } }}>
         <div className="plan-photo-image">{photo ? <PhotoImage photo={photo} lazy /> : <div className="plan-photo-missing" role="status">照片记录缺失</div>}</div>
-        <figcaption>{editing && <div className="plan-photo-controls"><span>参考 {String(index + 1).padStart(2, '0')}</span><div className="workspace-tools"><IconButton label={`前移参考图 ${index + 1}`} disabled={disabled || index === 0} onClick={() => move(index, -1)}><ArrowLeft size={14} /></IconButton><IconButton label={`后移参考图 ${index + 1}`} disabled={disabled || index === references.length - 1} onClick={() => move(index, 1)}><ArrowRight size={14} /></IconButton><IconButton label={`移除参考图 ${index + 1}`} disabled={disabled} onClick={() => onChange(references.filter((ref) => ref.id !== reference.id))}><X size={14} /></IconButton></div></div>}
+        {(editing || reference.intent.trim()) && <figcaption>{editing && <div className="plan-photo-controls"><span>参考 {String(index + 1).padStart(2, '0')}</span><div className="workspace-tools"><IconButton label={`前移参考图 ${index + 1}`} disabled={disabled || index === 0} onClick={() => move(index, -1)}><ArrowLeft size={14} /></IconButton><IconButton label={`后移参考图 ${index + 1}`} disabled={disabled || index === references.length - 1} onClick={() => move(index, 1)}><ArrowRight size={14} /></IconButton><IconButton label={`移除参考图 ${index + 1}`} disabled={disabled} onClick={() => remove(index)}><X size={14} /></IconButton></div></div>}
           {editing ? <label className="plan-field plan-reference-intent"><span>参考意图</span><PlanTextarea aria-label={`参考图 ${index + 1} 的参考意图`} rows={1} maxLength={PLAN_MAX_TEXT} value={reference.intent} placeholder="这张图借鉴什么" disabled={disabled} onChange={(event) => onChange(references.map((ref) => ref.id === reference.id ? { ...ref, intent: event.target.value } : ref))} /></label> : reference.intent.trim() && <p>{reference.intent}</p>}
-        </figcaption>
+        </figcaption>}
       </figure>;
     })}</div>}
-    {editing && <button type="button" className="button plan-add-photos" disabled={disabled || maxSelection === 0} onClick={() => setPicking(true)}><ImagePlus size={14} />{references.length ? '调整参考图' : '添加参考图'}</button>}
-    {picking && createPortal(<PhotoSourceDialog library="collection" onBusyChange={onBusyChange} title={layout === 'scene' ? '选择场景参考 · 最多 3 张' : '选择参考图'} snapshot={snapshot} selectedIds={references.map((ref) => ref.photoId)} maxSelection={maxSelection} onClose={() => setPicking(false)} onConfirm={({ photoIds, snapshot }) => { if (snapshot) onSnapshot(snapshot); onChange(photoIds.map((photoId) => references.find((ref) => ref.photoId === photoId) ?? { id: crypto.randomUUID(), photoId, intent: '' })); setPicking(false); }} />, document.body)}
+    {editing && <button ref={addButton} type="button" className="button plan-add-photos" disabled={disabled || maxSelection === 0} onClick={() => setPicking(true)}><ImagePlus size={14} />{references.length ? '调整参考图' : '添加参考图'}</button>}
+    {picking && createPortal(<PhotoSourceDialog library="collection" onBusyChange={onBusyChange} title={layout === 'scene' ? '选择场景参考 · 最多 3 张' : '选择全案参考图'} snapshot={snapshot} selectedIds={selectedIds} maxSelection={pickerLimit} onClose={() => setPicking(false)} onConfirm={({ photoIds, snapshot }) => { if (snapshot) onSnapshot(snapshot); onChange(referencesFromSelection(references, photoIds)); setPicking(false); }} />, document.body)}
   </div>;
 }

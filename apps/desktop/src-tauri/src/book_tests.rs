@@ -94,7 +94,14 @@ fn album_deletion_hides_history_only_photo_and_preserves_current_book_on_restore
     assert!(state.photos.iter().any(|p| p.id == current_photo));
     assert!(books::create(&mut conn, input(vec![history_photo.clone()])).is_err());
     assert!(books::append_photos(&mut conn, &saved.book.id, vec![history_photo.clone()]).is_err());
-    assert!(book_export::document(&conn, &saved.book.id, history_id, &mut Vec::new()).is_err());
+    assert!(book_export::document(
+        &conn,
+        &saved.book.id,
+        history_id,
+        crate::locale::Locale::Chinese,
+        &mut Vec::new()
+    )
+    .is_err());
     assert_eq!(stored_rows(&conn, &saved.book.id), rows_before_delete);
 
     let original: String = conn
@@ -356,11 +363,16 @@ fn html_contains_original_images_utf8_and_escaped_text() {
         &conn,
         &detail.book.id,
         &detail.book.current_version_id,
+        crate::locale::Locale::English,
         &mut out,
     )
     .unwrap();
     let html = String::from_utf8(out).unwrap();
+    assert!(html.contains("<html lang=\"en\">"));
     assert!(html.contains("<meta charset=\"utf-8\">"));
+    assert!(html.contains("1 page"));
+    assert!(html.contains("Toggle Single Page / Spread"));
+    assert!(html.contains("aria-label=\"Page 1\""));
     assert!(html.contains("data:image/png;base64,"));
     assert!(html.contains(&STANDARD.encode(original)));
     assert!(html.contains("海岸 &lt;script&gt; &amp; 旅途"));
@@ -371,12 +383,16 @@ fn html_contains_original_images_utf8_and_escaped_text() {
         &conn,
         &detail.book.id,
         &detail.book.current_version_id,
+        crate::locale::Locale::Chinese,
         &target,
     )
     .unwrap();
-    assert!(std::fs::read_to_string(target)
-        .unwrap()
-        .contains("data:image/png;base64,"));
+    let html = std::fs::read_to_string(target).unwrap();
+    assert!(html.contains("<html lang=\"zh-CN\">"));
+    assert!(html.contains("1 页"));
+    assert!(html.contains("切换单页 / 双页"));
+    assert!(html.contains("aria-label=\"第 1 页\""));
+    assert!(html.contains("data:image/png;base64,"));
     std::fs::remove_file(path).unwrap();
     assert_eq!(books::list(&conn).unwrap()[0].cover_photo_id, None);
 }
@@ -401,6 +417,7 @@ fn export_missing_original_preserves_target_and_delete_preserves_photos() {
         &conn,
         &detail.book.id,
         &detail.book.current_version_id,
+        crate::locale::Locale::Chinese,
         &target,
     )
     .unwrap_err();
@@ -516,6 +533,7 @@ fn editor_saves_are_immutable_and_stale_save_and_export_are_rejected() {
         &conn,
         &saved.book.id,
         &saved.book.current_version_id,
+        crate::locale::Locale::Chinese,
         &mut out
     )
     .is_err());

@@ -1,4 +1,5 @@
 use crate::db::Store;
+use crate::locale::{display_format, tr};
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -41,7 +42,11 @@ pub async fn music_import(app: tauri::AppHandle, path: String) -> Result<Track, 
         if !["mp3", "m4a", "wav", "ogg", "aac", "flac"].contains(&extension.as_str())
             || !source.is_file()
         {
-            return Err("请选择有效的本地音乐文件".into());
+            return Err(tr(
+                "请选择有效的本地音乐文件",
+                "Choose a valid local music file",
+            )
+            .into());
         }
         let dir = store.root.join("audio");
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -49,10 +54,17 @@ pub async fn music_import(app: tauri::AppHandle, path: String) -> Result<Track, 
         let target = dir.join(format!("{id}.{extension}"));
         if let Err(error) = fs::copy(source, &target) {
             if target.exists() {
-                fs::remove_file(&target)
-                    .map_err(|cleanup| format!("复制音乐失败：{error}；清理失败：{cleanup}"))?;
+                fs::remove_file(&target).map_err(|cleanup| {
+                    display_format!(
+                        "复制音乐失败：{error}；清理失败：{cleanup}",
+                        "Could not copy the music: {error}. Could not clean up: {cleanup}"
+                    )
+                })?;
             }
-            return Err(format!("复制音乐失败：{error}"));
+            return Err(display_format!(
+                "复制音乐失败：{error}",
+                "Could not copy the music: {error}"
+            ));
         }
         app.state::<MusicCache>()
             .0
@@ -64,7 +76,7 @@ pub async fn music_import(app: tauri::AppHandle, path: String) -> Result<Track, 
             name: source
                 .file_name()
                 .and_then(|name| name.to_str())
-                .unwrap_or("本地音乐")
+                .unwrap_or(tr("本地音乐", "Local Music"))
                 .into(),
             path: target.to_string_lossy().into(),
         })
@@ -82,7 +94,12 @@ pub async fn music_release(app: tauri::AppHandle, id: String) -> Result<(), Stri
         let mut files = cache.0.lock().map_err(|e| e.to_string())?;
         if let Some(path) = files.get(&id) {
             if path.exists() {
-                fs::remove_file(path).map_err(|e| format!("清理音乐缓存失败：{e}"))?;
+                fs::remove_file(path).map_err(|e| {
+                    display_format!(
+                        "清理音乐缓存失败：{e}",
+                        "Could not clean up cached music: {e}"
+                    )
+                })?;
             }
             files.remove(&id);
         }

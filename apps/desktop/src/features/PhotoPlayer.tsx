@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n';
 import { presentModal } from '../lib/modal-stack';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -9,7 +10,7 @@ import { IconButton } from '../components/ui';
 import { playerNeighbor, PlayerFrames, usePlayerPresentation } from './PlayerPresentation';
 import './player.css';
 
-const playbackIntervals = [3, 5, 6, 10, 15, 30, 60].map((value) => ({ value, label: `${value} 秒` }));
+const playbackIntervals = [3, 5, 6, 10, 15, 30, 60].map((value) => ({ value, label: t(`${value} 秒`, `${value} sec`) }));
 
 export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }: { photos: Photo[]; photoIds: string[]; onClose: () => void; onRelink: (photo: Photo) => Promise<void>; onFeedback: (message: string, error?: boolean) => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -65,7 +66,7 @@ export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }:
       dismissModal();
       if (musicElement) { musicElement.pause(); musicElement.removeAttribute('src'); musicElement.load(); }
       const old = musicRef.current; musicRef.current = null;
-      if (old) void releaseMusic(old.id).catch((cause) => onFeedback(`清理欣赏配乐失败：${errorMessage(cause)}`, true));
+      if (old) void releaseMusic(old.id).catch((cause) => onFeedback(t(`清理欣赏配乐失败：${errorMessage(cause)}`, `Could not remove slideshow music: ${errorMessage(cause)}`), true));
       previous?.focus();
     };
   }, []);
@@ -77,7 +78,7 @@ export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }:
   useEffect(() => {
     const element = audio.current; if (!element) return;
     element.volume = volume;
-    if (playing && music) void element.play().catch(() => { if (alive.current && musicRef.current?.id === music.id) setError('音乐未能开始播放，请点击播放重试。'); });
+    if (playing && music) void element.play().catch(() => { if (alive.current && musicRef.current?.id === music.id) setError(t('音乐未能开始播放，请点击播放重试。', 'Music could not start. Press Play to try again.')); });
     else element.pause();
   }, [playing, music, volume]);
   function checkIdle() {
@@ -105,7 +106,7 @@ export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }:
   }
   async function fullscreen() {
     try { if (document.fullscreenElement) await document.exitFullscreen(); else await dialog.current?.requestFullscreen(); }
-    catch { setError('当前系统窗口不支持全屏，请使用系统窗口的全屏入口。'); }
+    catch { setError(t('当前系统窗口不支持全屏，请使用系统窗口的全屏入口。', 'This window cannot enter full screen from the player. Use the system window controls.')); }
   }
   function shuffle() {
     const next = !random; setRandom(next);
@@ -122,12 +123,12 @@ export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }:
       stopMusic(); musicRef.current = chosen; setMusic(chosen);
       if (old) await releaseMusic(old.id);
     }
-    catch (cause) { if (alive.current) setError(errorMessage(cause)); else onFeedback(`清理欣赏配乐失败：${errorMessage(cause)}`, true); }
+    catch (cause) { if (alive.current) setError(errorMessage(cause)); else onFeedback(t(`清理欣赏配乐失败：${errorMessage(cause)}`, `Could not remove slideshow music: ${errorMessage(cause)}`), true); }
     finally { if (alive.current) setPickingMusic(false); }
   }
   function stopMusic() { const element = audio.current; if (element) { element.pause(); element.removeAttribute('src'); element.load(); } }
-  async function removeMusic() { const old = musicRef.current; stopMusic(); musicRef.current = null; setMusic(null); if (old) { try { await releaseMusic(old.id); } catch (cause) { setError(`清理欣赏配乐失败：${errorMessage(cause)}`); } } }
-  return <dialog ref={dialog} className={`photo-player ${awake ? 'player-awake' : ''}`} aria-label="照片欣赏播放器"
+  async function removeMusic() { const old = musicRef.current; stopMusic(); musicRef.current = null; setMusic(null); if (old) { try { await releaseMusic(old.id); } catch (cause) { setError(t(`清理欣赏配乐失败：${errorMessage(cause)}`, `Could not remove slideshow music: ${errorMessage(cause)}`)); } } }
+  return <dialog ref={dialog} className={`photo-player ${awake ? 'player-awake' : ''}`} aria-label={t('照片欣赏播放器', 'Photo Slideshow')}
     onPointerMove={reveal} onPointerDown={reveal} onFocusCapture={reveal} onBlurCapture={reveal}
     onCancel={(event) => {
       event.preventDefault();
@@ -151,23 +152,23 @@ export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }:
       if (event.key === 'ArrowRight') { event.preventDefault(); advance(1); }
       if (event.key.toLowerCase() === 'f') void fullscreen();
     }}>
-    <div className="player-top" inert={!awake} {...toolbarEvents}><button className="text-button" type="button" onClick={onClose}><X size={17} />返回</button><span>{(shownId && photosById.get(shownId)?.title) || '照片欣赏'}</span><IconButton label="切换全屏" onClick={() => void fullscreen()}><Maximize2 size={17} /></IconButton></div>
-    <div ref={stage} className="player-stage" tabIndex={-1} role="group" aria-label="照片预览" aria-keyshortcuts="Space ArrowLeft ArrowRight"><PlayerFrames presentation={presentation} onRelink={onRelink} /></div>
-    {error && <div className="player-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError('')}>关闭</button></div>}
+    <div className="player-top" inert={!awake} {...toolbarEvents}><button className="text-button" type="button" onClick={onClose}><X size={17} />{t('返回', 'Back')}</button><span>{(shownId && photosById.get(shownId)?.title) || t('照片欣赏', 'Photo Slideshow')}</span><IconButton label={t('切换全屏', 'Toggle Full Screen')} onClick={() => void fullscreen()}><Maximize2 size={17} /></IconButton></div>
+    <div ref={stage} className="player-stage" tabIndex={-1} role="group" aria-label={t('照片预览', 'Photo Preview')} aria-keyshortcuts="Space ArrowLeft ArrowRight"><PlayerFrames presentation={presentation} onRelink={onRelink} /></div>
+    {error && <div className="player-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError('')}>{t('关闭', 'Close')}</button></div>}
     <div className="player-controls" inert={!awake} {...toolbarEvents}>
-      <IconButton label="上一张" disabled={!loop && index === 0} onClick={() => advance(-1)}><ArrowLeft size={18} /></IconButton>
-      <IconButton label={playing ? '暂停' : '播放'} onClick={() => { setPlaying(!playing); reveal(); }}>{playing ? <Pause size={18} /> : <Play size={18} />}</IconButton>
-      <IconButton label="下一张" disabled={!loop && index === order.length - 1} onClick={() => advance(1)}><ArrowRight size={18} /></IconButton>
+      <IconButton label={t('上一张', 'Previous Photo')} disabled={!loop && index === 0} onClick={() => advance(-1)}><ArrowLeft size={18} /></IconButton>
+      <IconButton label={playing ? t('暂停', 'Pause') : t('播放', 'Play')} onClick={() => { setPlaying(!playing); reveal(); }}>{playing ? <Pause size={18} /> : <Play size={18} />}</IconButton>
+      <IconButton label={t('下一张', 'Next Photo')} disabled={!loop && index === order.length - 1} onClick={() => advance(1)}><ArrowRight size={18} /></IconButton>
       <span className="player-counter">{String(shownIndex + 1).padStart(2, '0')} / {order.length}</span><span className="player-divider" />
-      <IconButton label={random ? '关闭随机播放' : '随机播放'} active={random} onClick={shuffle}><Shuffle size={16} /></IconButton>
-      <IconButton label={loop ? '关闭循环' : '循环播放'} active={loop} onClick={() => setLoop(!loop)}><Repeat2 size={17} /></IconButton>
-      <button ref={settingsToggle} type="button" className={`icon-button ${settings ? 'is-active' : ''}`} aria-label="播放与音乐设置" title="播放与音乐设置" aria-expanded={settings} aria-controls={settings ? settingsId : undefined}
+      <IconButton label={random ? t('关闭随机播放', 'Turn Off Shuffle') : t('随机播放', 'Shuffle')} active={random} onClick={shuffle}><Shuffle size={16} /></IconButton>
+      <IconButton label={loop ? t('关闭循环', 'Turn Off Repeat') : t('循环播放', 'Repeat')} active={loop} onClick={() => setLoop(!loop)}><Repeat2 size={17} /></IconButton>
+      <button ref={settingsToggle} type="button" className={`icon-button ${settings ? 'is-active' : ''}`} aria-label={t('播放与音乐设置', 'Playback and Music Settings')} title={t('播放与音乐设置', 'Playback and Music Settings')} aria-expanded={settings} aria-controls={settings ? settingsId : undefined}
         onClick={() => { if (settings) closeSettings(); else setSettings(true); }}><Settings2 size={17} /></button>
     </div>
-    {settings && <section id={settingsId} className="player-settings" aria-label="播放设置"><div className="player-settings-title"><h2>播放与音乐</h2><IconButton label="关闭播放设置" onClick={closeSettings}><X size={15} /></IconButton></div>
-      <DropdownSelect label="每张停留" field value={seconds} options={playbackIntervals} onChange={setSeconds} />
-      <button type="button" className="button" disabled={pickingMusic} onClick={() => void chooseMusic()}><Music2 size={14} />{pickingMusic ? '正在选择…' : '选择本地音乐'}</button>{music && <><p className="player-music-name">{music.name}</p><label className="volume-label"><Volume2 size={14} /><input aria-label="音乐音量" type="range" min="0" max="1" step=".05" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /><span>{Math.round(volume * 100)}%</span></label><button type="button" className="text-button" onClick={() => void removeMusic()}>移除音乐</button></>}<p className="muted">配乐仅用于当前欣赏会话。</p></section>}
-    <audio ref={audio} src={music?.url} loop onError={() => setError('音乐无法读取或格式不受当前系统支持，请重新选择。')} />
+    {settings && <section id={settingsId} className="player-settings" aria-label={t('播放设置', 'Playback Settings')}><div className="player-settings-title"><h2>{t('播放与音乐', 'Playback and Music')}</h2><IconButton label={t('关闭播放设置', 'Close Playback Settings')} onClick={closeSettings}><X size={15} /></IconButton></div>
+      <DropdownSelect label={t('每张停留', 'Time per Photo')} field value={seconds} options={playbackIntervals} onChange={setSeconds} />
+      <button type="button" className="button" disabled={pickingMusic} onClick={() => void chooseMusic()}><Music2 size={14} />{pickingMusic ? t('正在选择…', 'Choosing…') : t('选择本地音乐', 'Choose Local Music')}</button>{music && <><p className="player-music-name">{music.name}</p><label className="volume-label"><Volume2 size={14} /><input aria-label={t('音乐音量', 'Music Volume')} type="range" min="0" max="1" step=".05" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /><span>{Math.round(volume * 100)}%</span></label><button type="button" className="text-button" onClick={() => void removeMusic()}>{t('移除音乐', 'Remove Music')}</button></>}<p className="muted">{t('配乐仅用于当前欣赏会话。', 'Music is used for this slideshow session only.')}</p></section>}
+    <audio ref={audio} src={music?.url} loop onError={() => setError(t('音乐无法读取或格式不受当前系统支持，请重新选择。', 'Could not read the music file or its format is unsupported. Choose another file.'))} />
   </dialog>;
 }
 function errorMessage(cause: unknown) { return cause instanceof Error ? cause.message : String(cause); }

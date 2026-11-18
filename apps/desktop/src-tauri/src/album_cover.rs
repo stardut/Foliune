@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use crate::{
     collage::{crop_cover, MAX_SOURCE_PIXELS},
     db::{self, Store},
@@ -20,7 +21,12 @@ const CACHE_DIRECTORY: &str = "album-covers-v1";
 const TARGET: (u32, u32) = (1200, 800);
 const MAX_JPEG_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_RGB_ICC_BYTES: usize = 512 * 1024;
-const CHANGED: &str = "相簿封面或来源已变化";
+fn changed() -> &'static str {
+    tr(
+        "相簿封面或来源已变化",
+        "The album cover or its source changed",
+    )
+}
 
 type Fingerprint = [u8; 32];
 // 作品原件使用索引中的内容摘要。其他原件的修订来自已打开文件的状态。
@@ -93,7 +99,7 @@ impl Source {
             )
             .optional()
             .map_err(|error| error.to_string())?
-            .ok_or(CHANGED)?;
+            .ok_or_else(changed)?;
         if photo_id != request.photo_id
             || original_path != request.original_path
             || request
@@ -102,7 +108,7 @@ impl Source {
                 .is_some_and(|expected| *expected != thumbnail_path)
             || !matches_cover(cover.as_ref(), request.cover.as_ref())
         {
-            return Err(CHANGED.into());
+            return Err(changed().into());
         }
         Ok(Self {
             root: db::library_root(conn)?,
@@ -187,11 +193,20 @@ fn encode_profile(jpeg: Vec<u8>, profile: &[u8]) -> Vec<u8> {
 fn render(file: File, name: &str, cover: Option<&AlbumCover>) -> Result<Vec<u8>, String> {
     let opened = photos::inspect_open_image(Path::new(name), file)?;
     let orientation = opened.orientation();
-    let decode_error = |error| format!("封面原件解码失败：{error}");
+    let decode_error = |error| {
+        display_format!(
+            "封面原件解码失败：{error}",
+            "Could not decode the cover original: {error}"
+        )
+    };
     let mut decoder = opened.reader.into_decoder().map_err(decode_error)?;
     let (width, height) = decoder.dimensions();
     if u64::from(width) * u64::from(height) > MAX_SOURCE_PIXELS {
-        return Err("封面原件超过 1.6 亿像素".into());
+        return Err(tr(
+            "封面原件超过 1.6 亿像素",
+            "The cover original exceeds 160 megapixels",
+        )
+        .into());
     }
     // Match ImageReader::decode's allocation check when using the decoder directly.
     let mut limits = image::Limits::default();
@@ -217,7 +232,7 @@ fn render(file: File, name: &str, cover: Option<&AlbumCover>) -> Result<Vec<u8>,
         .min(cropped.height() / 2)
         .min(TARGET.0 / 3);
     if units == 0 {
-        return Err("封面取景像素不足".into());
+        return Err(tr("封面取景像素不足", "The cover crop is too small").into());
     }
     let size = (units * 3, units * 2);
     let resized = if (cropped.width(), cropped.height()) == size {
@@ -228,13 +243,22 @@ fn render(file: File, name: &str, cover: Option<&AlbumCover>) -> Result<Vec<u8>,
     let mut bytes = Vec::new();
     JpegEncoder::new_with_quality(&mut bytes, 90)
         .encode_image(&photos::rgb_on_white(resized))
-        .map_err(|error| format!("生成封面失败：{error}"))?;
+        .map_err(|error| {
+            display_format!(
+                "生成封面失败：{error}",
+                "Could not generate the cover: {error}"
+            )
+        })?;
     let bytes = match profile {
         Some(profile) => encode_profile(bytes, &profile),
         None => bytes,
     };
     if bytes.len() as u64 > MAX_JPEG_BYTES {
-        return Err("生成的封面超过缓存大小限制".into());
+        return Err(tr(
+            "生成的封面超过缓存大小限制",
+            "The generated cover exceeds the cache size limit",
+        )
+        .into());
     }
     Ok(bytes)
 }
@@ -246,7 +270,7 @@ fn ensure_current<'a>(
 ) -> Result<MutexGuard<'a, Connection>, String> {
     let conn = store.connection.lock().map_err(|error| error.to_string())?;
     if &Source::resolve(&conn, request)? != source {
-        return Err(CHANGED.into());
+        return Err(changed().into());
     }
     Ok(conn)
 }
@@ -291,7 +315,7 @@ fn read(store: &Store, request: &Request) -> Result<Vec<u8>, String> {
     if work_directory::stat_signature(&file).as_deref() != Some(signature.as_str())
         || (!indexed && source.original.open_with_signature()?.1 != signature)
     {
-        return Err(CHANGED.into());
+        return Err(changed().into());
     }
     let revision = if indexed {
         INDEXED_REVISION

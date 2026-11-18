@@ -52,7 +52,7 @@ public:
 
 using AddPath = bool (*)(void *, const wchar_t *, size_t);
 
-HRESULT choose(HWND parent, void *context, AddPath addPath) {
+HRESULT choose(HWND parent, bool chinese, void *context, AddPath addPath) {
     ComPtr<IFileOpenDialog> dialog;
     HRESULT result = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
         IID_PPV_ARGS(dialog.GetAddressOf()));
@@ -60,14 +60,14 @@ HRESULT choose(HWND parent, void *context, AddPath addPath) {
     FILEOPENDIALOGOPTIONS options;
     if (FAILED(result = dialog->GetOptions(&options))) return result;
     if (FAILED(result = dialog->SetOptions(options | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM))) return result;
-    const COMDLG_FILTERSPEC filters[] = {{L"照片（JPEG / PNG / WebP）", L"*.jpg;*.jpeg;*.png;*.webp"}};
+    const COMDLG_FILTERSPEC filters[] = {{chinese ? L"照片（JPEG / PNG / WebP）" : L"Photos (JPEG / PNG / WebP)", L"*.jpg;*.jpeg;*.png;*.webp"}};
     if (FAILED(result = dialog->SetFileTypes(ARRAYSIZE(filters), filters))) return result;
-    if (FAILED(result = dialog->SetTitle(L"选择照片或文件夹"))) return result;
-    if (FAILED(result = dialog->SetOkButtonLabel(L"打开照片"))) return result;
+    if (FAILED(result = dialog->SetTitle(chinese ? L"选择照片或文件夹" : L"Choose Photos or Folders"))) return result;
+    if (FAILED(result = dialog->SetOkButtonLabel(chinese ? L"打开照片" : L"Open Photos"))) return result;
 
     ComPtr<IFileDialogCustomize> controls;
     if (FAILED(result = dialog.As(&controls))) return result;
-    if (FAILED(result = controls->AddPushButton(chooseSelection, L"使用所选项目"))) return result;
+    if (FAILED(result = controls->AddPushButton(chooseSelection, chinese ? L"使用所选项目" : L"Use Selected Items"))) return result;
     auto events = Make<SelectionEvents>();
     if (!events) return E_OUTOFMEMORY;
     DWORD cookie = 0;
@@ -94,10 +94,10 @@ HRESULT choose(HWND parent, void *context, AddPath addPath) {
 }
 }
 
-extern "C" HRESULT foliune_choose_local_photo_sources_windows(HWND parent, void *context, AddPath addPath) {
+extern "C" HRESULT foliune_choose_local_photo_sources_windows(HWND parent, bool chinese, void *context, AddPath addPath) {
     HRESULT result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (FAILED(result)) return result;
-    result = choose(parent, context, addPath);
+    result = choose(parent, chinese, context, addPath);
     CoUninitialize();
     return result;
 }

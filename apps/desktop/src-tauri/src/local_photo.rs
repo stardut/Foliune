@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use crate::work_directory::{open_file_at_path, stat_signature};
 use std::{
     fs::File,
@@ -6,7 +7,9 @@ use std::{
 };
 
 pub(crate) const PREFIX: &str = "local-photo:";
-const MISSING: &str = "照片原件缺失";
+fn missing() -> &'static str {
+    tr("照片原件缺失", "The original photo is missing")
+}
 
 pub(crate) fn is_locator(value: &str) -> bool {
     value.starts_with(PREFIX)
@@ -15,21 +18,34 @@ pub(crate) fn is_locator(value: &str) -> bool {
 /// Canonicalize an explicitly selected absolute file path before persisting it.
 pub(crate) fn locator(path: &Path) -> Result<String, String> {
     if !path.is_absolute() {
-        return Err("请选择照片的绝对路径".into());
+        return Err(tr(
+            "请选择照片的绝对路径",
+            "Choose an absolute path to the photo",
+        )
+        .into());
     }
     let path = path.canonicalize().map_err(read_error)?;
     if !path.is_file() {
-        return Err("照片文件不存在或不是普通文件".into());
+        return Err(tr(
+            "照片文件不存在或不是普通文件",
+            "The photo is missing or is not a regular file",
+        )
+        .into());
     }
-    let path = path.to_str().ok_or("照片路径无法保存")?;
+    let path = path
+        .to_str()
+        .ok_or(tr("照片路径无法保存", "Could not save the photo path"))?;
     Ok(format!("{PREFIX}{path}"))
 }
 
 fn read_error(error: io::Error) -> String {
     if error.kind() == io::ErrorKind::NotFound {
-        MISSING.into()
+        missing().into()
     } else {
-        format!("读取本地照片原件失败：{error}")
+        display_format!(
+            "读取本地照片原件失败：{error}",
+            "Could not read the local original: {error}"
+        )
     }
 }
 
@@ -58,19 +74,29 @@ pub(crate) fn image_content_type(bytes: &[u8]) -> Option<&'static str> {
 }
 
 pub(crate) fn open(locator: &str) -> Result<File, String> {
-    let path = path(locator).ok_or(MISSING)?;
+    let path = path(locator).ok_or_else(missing)?;
     let mut file = open_file_at_path(path).map_err(read_error)?;
     let mut header = [0; 12];
     file.read_exact(&mut header).map_err(read_error)?;
     if image_content_type(&header).is_none() {
-        return Err("照片原件格式无法识别".into());
+        return Err(tr(
+            "照片原件格式无法识别",
+            "Could not identify the original photo format",
+        )
+        .into());
     }
     file.rewind().map_err(read_error)?;
     Ok(file)
 }
 
 pub(crate) fn file_signature(file: &File) -> Result<String, String> {
-    stat_signature(file).ok_or_else(|| "无法确认本地照片文件状态".into())
+    stat_signature(file).ok_or_else(|| {
+        tr(
+            "无法确认本地照片文件状态",
+            "Could not verify the local photo file",
+        )
+        .into()
+    })
 }
 
 pub(crate) fn signature(locator: &str) -> Result<String, String> {

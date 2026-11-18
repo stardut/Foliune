@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { TauriEvent } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -31,7 +32,7 @@ export function PlanningWorkspace({ snapshot, photos, onSnapshot, onDirtyChange,
     void getCurrentWindow().listen(TauriEvent.WINDOW_FOCUS, () => { if (mounted) refresh(); }).then((stop) => {
       if (mounted) unlisten = stop;
       else stop();
-    }).catch((cause: unknown) => console.error('无法监听策划窗口的焦点变化', cause));
+    }).catch((cause: unknown) => console.error(t('无法监听策划窗口的焦点变化', 'Could not listen for focus changes in the Shoot Plans window'), cause));
     return () => { mounted = false; unlisten?.(); };
   }, [refresh]);
   useEffect(() => {
@@ -56,18 +57,18 @@ export function PlanningWorkspace({ snapshot, photos, onSnapshot, onDirtyChange,
   const closeDetail = onBackToSearch ?? (() => { setActive(null); refresh(); });
   if (active) return <PlanDetail snapshot={snapshot} key={active === 'new' ? 'new' : active.id} plan={active === 'new' ? undefined : active} photos={photos} onSnapshot={onSnapshot}
     removed={active !== 'new' && plans !== null && !plans.some((item) => item.id === active.id)}
-    onDirtyChange={onDirtyChange} onBusyChange={onBusyChange} backLabel={onBackToSearch ? '返回搜索' : undefined} onClose={closeDetail}
+    onDirtyChange={onDirtyChange} onBusyChange={onBusyChange} backLabel={onBackToSearch ? t('返回搜索', 'Back to Search') : undefined} onClose={closeDetail}
     onRefresh={refresh} onSaved={(saved) => { refresh(); setPlans((items) => [saved, ...(items ?? []).filter((item) => item.id !== saved.id)]); setActive(saved); }}
     onDeleted={(id) => { setPlans((items) => items && items.filter((item) => item.id !== id)); closeDetail(); }} />;
   const planCount = plans?.length ?? 0;
-  return <section aria-label="拍摄策划">
-    <WorkspaceHeader title="策划" count={!loading && !error ? `${planCount} 份策划` : undefined}>
-      <button type="button" className="button" disabled={loading || !!error} onClick={() => setActive('new')}><Plus size={15} />新建策划</button>
+  return <section aria-label={t('拍摄策划', 'Shoot Plans')}>
+    <WorkspaceHeader title={t('策划', 'Shoot Plans')} count={!loading && !error ? t(`${planCount} 份策划`, `${planCount} ${planCount === 1 ? 'plan' : 'plans'}`) : undefined}>
+      <button type="button" className="button" disabled={loading || !!error} onClick={() => setActive('new')}><Plus size={15} />{t('新建策划', 'New Plan')}</button>
     </WorkspaceHeader>
     <div className="planning-home-content">
-      {loading ? <Busy label="正在读取策划" /> : error ? <div className="planning-load-error"><p className="form-error" role="alert">{error}</p><button type="button" className="button" onClick={() => { setLoading(true); refresh(); }}>重新读取</button></div> : <>
-        {planCount > 0 && <div className="search-field"><Search size={17} /><input aria-label="搜索策划" placeholder="搜索策划、场景或参考意图" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <IconButton label="清空搜索" onClick={() => setQuery('')}><X size={15} /></IconButton>}</div>}
-        {!planCount ? <EmptyState title="写下下一次拍摄的想法" action={<button type="button" className="button" onClick={() => setActive('new')}><Plus size={15} />新建策划</button>} /> : !filtered.length ? <EmptyState title="没有找到策划" /> : <div className="plan-list">
+      {loading ? <Busy label={t('正在读取策划', 'Loading shoot plans')} /> : error ? <div className="planning-load-error"><p className="form-error" role="alert">{error}</p><button type="button" className="button" onClick={() => { setLoading(true); refresh(); }}>{t('重新读取', 'Reload')}</button></div> : <>
+        {planCount > 0 && <div className="search-field"><Search size={17} /><input aria-label={t('搜索策划', 'Search Shoot Plans')} placeholder={t('搜索策划、场景或参考意图', 'Search plans, scenes, or reference notes')} value={query} onChange={(event) => setQuery(event.target.value)} />{query && <IconButton label={t('清空搜索', 'Clear Search')} onClick={() => setQuery('')}><X size={15} /></IconButton>}</div>}
+        {!planCount ? <EmptyState title={t('写下下一次拍摄的想法', 'Plan Your Next Shoot')} action={<button type="button" className="button" onClick={() => setActive('new')}><Plus size={15} />{t('新建策划', 'New Plan')}</button>} /> : !filtered.length ? <EmptyState title={t('没有找到策划', 'No Shoot Plans Found')} /> : <div className="plan-list">
           {filtered.map((plan) => <PlanListItem key={plan.id} plan={plan} photosById={photosById} onOpen={() => setActive(plan)} />)}
         </div>}
       </>}
@@ -91,17 +92,21 @@ function PlanListItem({ plan, photosById, onOpen }: {
   const dateAndLocationId = `${titleId}-date-location`;
   const excerptId = `${titleId}-excerpt`;
   const countsId = `${titleId}-counts`;
+  const shots = shotCount(plan);
   const descriptionIds = [dateAndLocationId, plan.concept && excerptId, countsId].filter(Boolean).join(' ');
 
   return <button type="button" className="plan-list-item" aria-labelledby={titleId} aria-describedby={descriptionIds} onClick={onOpen}>
     <span className="plan-list-copy">
       <span id={titleId} className="plan-list-title">{plan.title}</span>
       <span id={dateAndLocationId} className="plan-list-meta">
-        {plan.executionDate ? <span className="plan-list-date">执行日期 <time dateTime={plan.executionDate}>{plan.executionDate}</time></span> : '未设执行日期'}
+        {plan.executionDate ? <span className="plan-list-date">{t('执行日期 ', 'Shoot Date ')}<time dateTime={plan.executionDate}>{plan.executionDate}</time></span> : t('未设执行日期', 'No Shoot Date')}
         {timeAndLocation && ` · ${timeAndLocation}`}
       </span>
       {plan.concept && <span id={excerptId} className="plan-list-excerpt">{plan.concept}</span>}
-      <span id={countsId} className="plan-list-meta">{plan.parts.length} 个场景 · {shotCount(plan)} 个镜头 · {references.length} 张场景参考</span>
+      <span id={countsId} className="plan-list-meta">{t(
+        `${plan.parts.length} 个场景 · ${shots} 个镜头 · ${references.length} 张场景参考`,
+        `${plan.parts.length} ${plan.parts.length === 1 ? 'scene' : 'scenes'} · ${shots} ${shots === 1 ? 'shot' : 'shots'} · ${references.length} ${references.length === 1 ? 'scene reference' : 'scene references'}`,
+      )}</span>
     </span>
     {previews.length > 0 && <span className="plan-list-previews" aria-hidden="true">
       {previews.map((photo) => <img key={photo.id} src={photo.thumbnailUrl} width={photo.width} height={photo.height}

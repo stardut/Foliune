@@ -1,3 +1,4 @@
+import { getLocale, photoCount, t } from '../lib/i18n';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import { PhotoImage } from '../components/PhotoImage';
@@ -7,7 +8,7 @@ import { albumCoverRevision, albumCoverStageStyle, albumCoverStyle, resetAlbumCo
 
 type PinchEvent = Event & { scale: number };
 
-export function AlbumCoverDialog({ photo, albumName, photoCount, initialCover, busy, onClose, onSave }: {
+export function AlbumCoverDialog({ photo, albumName, photoCount: count, initialCover, busy, onClose, onSave }: {
   photo: Photo;
   albumName: string;
   photoCount: number;
@@ -89,13 +90,13 @@ export function AlbumCoverDialog({ photo, albumName, photoCount, initialCover, b
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setSaving(false); }
   }
-  return <Modal title="设置相簿封面" onClose={onClose} closeDisabled={blocked}>
+  return <Modal title={t('设置相簿封面', 'Set Album Cover')} onClose={onClose} closeDisabled={blocked}>
     <div className="album-cover-editor">
-      <p id={instructionsId} className="sr-only">拖动照片或使用方向键调整取景，Shift 加速。使用缩放滑块或触控板捏合调整大小。</p>
+      <p id={instructionsId} className="sr-only">{t('拖动照片或使用方向键调整取景，Shift 加速。使用缩放滑块或触控板捏合调整大小。', 'Drag the photo or use the arrow keys to adjust the crop. Hold Shift to move faster. Use the slider or pinch on the trackpad to zoom.')}</p>
       <div className="album-cover-editor-layout">
         <div className="album-cover-editor-main">
           <div className="album-cover-editor-stage">
-            <div ref={frameRef} className="album-cover album-cover-editor-frame" role="group" aria-label="封面取景" aria-describedby={instructionsId}
+            <div ref={frameRef} className="album-cover album-cover-editor-frame" role="group" aria-label={t('封面取景', 'Cover Crop')} aria-describedby={instructionsId}
               style={albumCoverStageStyle(cover, photo)} tabIndex={editable ? 0 : undefined}
               data-editable={editable || undefined} data-dragging={dragging || undefined}
               onDragStart={(event) => event.preventDefault()}
@@ -132,33 +133,33 @@ export function AlbumCoverDialog({ photo, albumName, photoCount, initialCover, b
           </div>
           <div className="album-cover-editor-tools">
             <label className="album-cover-zoom">
-              缩放
+              {t('缩放', 'Zoom')}
               <input type="range" min={1} max={3} step={.01} value={cover.zoom} disabled={!editable}
                 aria-valuetext={`${Math.round(cover.zoom * 100)}%`}
                 onChange={(event) => { const zoom = Number(event.currentTarget.value); setCover((previous) => zoomAlbumCover(previous, photo, zoom)); }} />
               <span aria-hidden="true">{Math.round(cover.zoom * 100)}%</span>
             </label>
-            <button type="button" className="text-button" disabled={!editable} onClick={() => setCover(resetAlbumCover(photo.id))}>重置</button>
+            <button type="button" className="text-button" disabled={!editable} onClick={() => setCover(resetAlbumCover(photo.id))}>{t('重置', 'Reset')}</button>
             <button type="button" className="text-button album-cover-preview-toggle" disabled={!ready} aria-expanded={previewOpen} aria-controls={previewId}
-              onClick={() => setPreviewOpen((previous) => !previous)}>预览</button>
+              onClick={() => setPreviewOpen((previous) => !previous)}>{t('预览', 'Preview')}</button>
           </div>
         </div>
-        <aside id={previewId} className="album-cover-card-preview" data-expanded={previewOpen || undefined} aria-label="首页卡片预览">
+        <aside id={previewId} className="album-cover-card-preview" data-expanded={previewOpen || undefined} aria-label={t('首页卡片预览', 'Album Card Preview')}>
           <div className="album-open">
             <div className="album-cover" style={albumCoverStyle(cover)}>
               {ready && <div className="image-asset"><img src={frameRef.current?.querySelector('img')?.getAttribute('src') ?? undefined} width={photo.width} height={photo.height} alt={photo.title || photo.originalName} /></div>}
             </div>
-            <div className="album-caption"><div className="album-heading"><h2>{albumName}</h2><div className="album-caption-meta"><span className="album-count">{photoCount}<span>张</span></span></div></div></div>
+            <div className="album-caption"><div className="album-heading"><h2>{albumName}</h2><div className="album-caption-meta"><span className="album-count">{getLocale() === 'zh-CN' ? <>{count}<span>张</span></> : photoCount(count)}</span></div></div></div>
           </div>
         </aside>
       </div>
       {error && <p role="alert" className="form-error">{error}</p>}
-      <span className="sr-only" role="status">{saving ? '正在保存封面' : ''}</span>
+      <span className="sr-only" role="status">{saving ? t('正在保存封面', 'Saving cover') : ''}</span>
       <div className="form-actions">
-        <button type="button" className="button" onClick={onClose} disabled={blocked}>取消</button>
+        <button type="button" className="button" onClick={onClose} disabled={blocked}>{t('取消', 'Cancel')}</button>
         <button type="button" className="button button-primary album-cover-save" onClick={() => void save()} disabled={!editable} aria-busy={saving}>
           {saving && <LoaderCircle size={14} className="spin" aria-hidden="true" />}
-          {saving ? '正在保存…' : '保存封面'}
+          {saving ? t('正在保存…', 'Saving…') : t('保存封面', 'Save Cover')}
         </button>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n.ts';
 import { PLAN_PNG_MAX_BYTES, PLAN_PNG_MAX_EDGE, PLAN_PNG_MAX_PIXELS, type ShootPlanInput } from '../../lib/planning-types.ts';
 import type { Photo } from '../../lib/types';
 import { canReadOriginal, isLocalPhoto, originalReadUrl } from '../../lib/photo-availability.ts';
@@ -34,22 +35,22 @@ type Block = TextBlock | ImageBlock | RuleBlock;
 async function loadOriginal(photo: Photo): Promise<HTMLImageElement> {
   const name = photo.title || photo.originalName;
   if (!canReadOriginal(photo) || !photo.originalUrl) throw new Error(isLocalPhoto(photo)
-    ? `参考图“${name}”找不到源文件。`
-    : `参考图“${name}”原图缺失，请重新定位后导出。`);
+    ? t(`参考图“${name}”找不到源文件。`, `Source file missing for reference photo “${name}”.`)
+    : t(`参考图“${name}”原图缺失，请重新定位后导出。`, `Relink the missing original for reference photo “${name}” before exporting.`));
   const image = new Image();
   // Tauri's asset protocol grants access for the window origin.
   image.crossOrigin = 'anonymous';
   image.src = originalReadUrl(photo, crypto.randomUUID());
   try {
     await image.decode();
-    if (!image.naturalWidth || !image.naturalHeight) throw new Error('图像尺寸无效');
+    if (!image.naturalWidth || !image.naturalHeight) throw new Error(t('图像尺寸无效', 'Invalid image dimensions'));
     return image;
   } catch { image.src = ''; throw new Error(isLocalPhoto(photo)
-    ? `参考图“${name}”找不到源文件或无法读取。`
-    : `参考图“${name}”无法解码，未导出长图。`); }
+    ? t(`参考图“${name}”找不到源文件或无法读取。`, `Could not find or read the source file for reference photo “${name}”.`)
+    : t(`参考图“${name}”无法解码，未导出长图。`, `Could not decode reference photo “${name}”. Export failed.`)); }
 }
 function assertHeight(height: number) {
-  if (height > PLAN_PNG_MAX_EDGE || height * WIDTH > PLAN_PNG_MAX_PIXELS) throw new Error('长图超出可导出尺寸（最高 32768 像素），请缩减文字或参考图后导出。');
+  if (height > PLAN_PNG_MAX_EDGE || height * WIDTH > PLAN_PNG_MAX_PIXELS) throw new Error(t('长图超出可导出尺寸（最高 32768 像素），请缩减文字或参考图后导出。', 'The PNG exceeds the export dimensions (up to 32,768 pixels tall). Shorten the text or remove some reference photos.'));
 }
 async function measureBlocks(context: CanvasRenderingContext2D, content: PlanExportBlock[], photos: Photo[]) {
   const blocks: Block[] = [];
@@ -70,7 +71,7 @@ async function measureBlocks(context: CanvasRenderingContext2D, content: PlanExp
   }
   for (const block of content) {
     if (block.kind === 'section-start') {
-      if (section) throw new Error('策划长图章节结构无效。');
+      if (section) throw new Error(t('策划长图章节结构无效。', 'The shoot plan has an invalid export section structure.'));
       if (block.scope === 'scene') {
         y += SCENE_GAP;
         blocks.push({ kind: 'rule', x: CONTENT_X, y, width: CONTENT_WIDTH });
@@ -80,7 +81,7 @@ async function measureBlocks(context: CanvasRenderingContext2D, content: PlanExp
       }
       section = { scope: block.scope, y }; lastGap = 0;
     } else if (block.kind === 'section-end') {
-      if (!section) throw new Error('策划长图章节结构无效。');
+      if (!section) throw new Error(t('策划长图章节结构无效。', 'The shoot plan has an invalid export section structure.'));
       y -= lastGap;
       section = undefined; lastGap = 0;
     } else if (block.kind === 'text') {
@@ -124,7 +125,7 @@ async function measureBlocks(context: CanvasRenderingContext2D, content: PlanExp
       const entries = [];
       for (const reference of block.references) {
         const photo = map.get(reference.photoId);
-        if (!photo) throw new Error('策划中的参考图记录缺失，请移除缺失引用后导出。');
+        if (!photo) throw new Error(t('策划中的参考图记录缺失，请移除缺失引用后导出。', 'Remove missing reference photos from the plan before exporting.'));
         // Decode and release sequentially; dimensions come from each actual original.
         const image = await loadOriginal(photo);
         try {
@@ -147,7 +148,7 @@ async function measureBlocks(context: CanvasRenderingContext2D, content: PlanExp
     }
     assertHeight(y + MARGIN);
   }
-  if (section) throw new Error('策划长图章节结构无效。');
+  if (section) throw new Error(t('策划长图章节结构无效。', 'The shoot plan has an invalid export section structure.'));
   return { blocks, height: Math.max(480, Math.ceil(y + MARGIN)) };
 }
 
@@ -157,7 +158,7 @@ export async function renderPlanPng(plan: ShootPlanInput, photos: Photo[]): Prom
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   try {
-    if (!context) throw new Error('当前环境无法创建长图画布。');
+    if (!context) throw new Error(t('当前环境无法创建长图画布。', 'Could not create a canvas for the shoot plan PNG.'));
     const { blocks, height } = await measureBlocks(context, planExportBlocks(plan), photos);
     assertHeight(height);
     canvas.width = WIDTH; canvas.height = height;
@@ -176,11 +177,11 @@ export async function renderPlanPng(plan: ShootPlanInput, photos: Photo[]): Prom
         finally { image.src = ''; }
       }
     }
-    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('长图编码失败，请缩减内容后重试。')), 'image/png'));
-    if (blob.size > PLAN_PNG_MAX_BYTES) throw new Error('长图超过 64MiB，请减少参考图或内容后导出。');
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error(t('长图编码失败，请缩减内容后重试。', 'Could not encode the PNG. Reduce the amount of content and try again.'))), 'image/png'));
+    if (blob.size > PLAN_PNG_MAX_BYTES) throw new Error(t('长图超过 64MiB，请减少参考图或内容后导出。', 'The PNG exceeds 64 MiB. Reduce the number of reference photos or the amount of text.'));
     return new Uint8Array(await blob.arrayBuffer());
   } catch (cause) {
-    if (cause instanceof DOMException && cause.name === 'SecurityError') throw new Error('原图读取权限不足，无法生成完整长图。');
+    if (cause instanceof DOMException && cause.name === 'SecurityError') throw new Error(t('原图读取权限不足，无法生成完整长图。', 'Permission to read the originals is required to export the full PNG.'));
     throw cause;
   } finally { canvas.width = 0; canvas.height = 0; }
 }

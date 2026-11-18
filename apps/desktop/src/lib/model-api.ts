@@ -1,10 +1,11 @@
+import { t } from './i18n.ts';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { withImageUrls } from './api';
 import type { ModelInput, ModelProfile } from './model-types';
 import type { LibrarySnapshot } from './types';
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  if (!isTauri()) throw new Error('请在 Foliune 桌面应用中使用模特档案。');
+  if (!isTauri()) throw new Error(t('请在 Foliune 桌面应用中使用模特档案。', 'Use the Foliune desktop app to work with model profiles.'));
   try { return await invoke<T>(command, args); }
   catch (cause) { throw new Error(typeof cause === 'string' ? cause : String(cause)); }
 }

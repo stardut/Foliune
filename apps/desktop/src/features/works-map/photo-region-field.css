@@ -1,0 +1,7 @@
+.photo-region-field { display: grid; min-width: 0; gap: 7px; }
+.photo-region-control { display: flex; align-items: center; gap: 5px; }
+.photo-region-control > .icon-button { width: 32px; flex-shrink: 0; }
+.photo-region-options { max-height: 168px; overflow-y: auto; overscroll-behavior: contain; padding: 3px; border: 1px solid var(--control-line); border-radius: var(--radius-control); }
+.photo-region-options > .dropdown-row { height: auto; min-height: 32px; gap: 10px; }
+.photo-region-option-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.photo-region-options small { max-width: 48%; text-align: right; color: var(--muted); overflow-wrap: anywhere; }

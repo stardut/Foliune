@@ -38,6 +38,12 @@ fn setup() -> (tempfile::TempDir, Store, String) {
 #[test]
 fn backup_restore_adds_to_current_library_and_keeps_stable_photo_and_book_refs() {
     let (dir, store, id) = setup();
+    photos::update(
+        &mut store.connection.lock().unwrap(),
+        &id,
+        json!({"location":"原始拍摄地点", "locationRegionId":"FRA:Île-de-France"}),
+    )
+    .unwrap();
     let book = books::create(
         &mut store.connection.lock().unwrap(),
         CreateBookInput {
@@ -90,6 +96,8 @@ fn backup_restore_adds_to_current_library_and_keeps_stable_photo_and_book_refs()
         .unwrap();
     assert!(photo.original_available && photo.thumbnail_available);
     assert!(std::path::Path::new(&photo.original_path).starts_with(&target.root));
+    assert_eq!(photo.location, "原始拍摄地点");
+    assert_eq!(photo.location_region_id, "FRA:Île-de-France");
     let restored_book = books::get(&target.connection.lock().unwrap(), &book.book.id).unwrap();
     assert_eq!(
         restored_book.versions[0].input.chapters[0].photo_ids,
@@ -98,7 +106,7 @@ fn backup_restore_adds_to_current_library_and_keeps_stable_photo_and_book_refs()
     photos::update(
         &mut target.connection.lock().unwrap(),
         &id,
-        json!({"title":"当前标题"}),
+        json!({"title":"当前标题", "locationRegionId":"ESP:Castilla y León"}),
     )
     .unwrap();
     let repeated = backup::restore(&target, &path).unwrap();
@@ -110,6 +118,7 @@ fn backup_restore_adds_to_current_library_and_keeps_stable_photo_and_book_refs()
         .find(|photo| photo.id == id)
         .unwrap();
     assert_eq!(current.title, "当前标题");
+    assert_eq!(current.location_region_id, "ESP:Castilla y León");
     assert_eq!(current.original_path, photo.original_path);
     assert_eq!(current.thumbnail_path, photo.thumbnail_path);
     assert_eq!(

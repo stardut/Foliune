@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use crate::{
     db::{self, Store},
     models::{self, Photo},
@@ -53,7 +54,11 @@ pub enum Fit {
 fn validate(input: &CollageInput) -> Result<Rgba<u8>, String> {
     models::library(&input.library)?;
     if input.title.trim().is_empty() || input.title.trim().chars().count() > 120 {
-        return Err("拼图名称应为 1–120 个字符".into());
+        return Err(tr(
+            "拼图名称应为 1–120 个字符",
+            "The collage name must be 1–120 characters",
+        )
+        .into());
     }
     if input.width == 0
         || input.height == 0
@@ -61,10 +66,14 @@ fn validate(input: &CollageInput) -> Result<Rgba<u8>, String> {
         || input.height > MAX_EDGE
         || u64::from(input.width) * u64::from(input.height) > MAX_PIXELS
     {
-        return Err("拼图尺寸须为正整数，单边不超过 32768 像素，总像素不超过 1.6 亿；请调整布局、选片或输出尺寸".into());
+        return Err(tr("拼图尺寸须为正整数，单边不超过 32768 像素，总像素不超过 1.6 亿；请调整布局、选片或输出尺寸", "Use positive whole numbers up to 32,768 pixels per side and 160 megapixels total. Adjust the layout, selected photos, or export dimensions.").into());
     }
     if input.items.is_empty() || input.items.len() > MAX_ITEMS {
-        return Err("每幅拼图须包含 1–100 张照片".into());
+        return Err(tr(
+            "每幅拼图须包含 1–100 张照片",
+            "Each collage must contain 1–100 photos",
+        )
+        .into());
     }
     for item in &input.items {
         if item.width == 0
@@ -78,7 +87,11 @@ fn validate(input: &CollageInput) -> Result<Rgba<u8>, String> {
                 .checked_add(item.height)
                 .is_none_or(|bottom| bottom > input.height)
         {
-            return Err("照片矩形须为画布范围内的正整数像素尺寸".into());
+            return Err(tr(
+                "照片矩形须为画布范围内的正整数像素尺寸",
+                "Photo frames must use whole pixels and fit within the canvas",
+            )
+            .into());
         }
         if !item.offset_x.is_finite()
             || !item.offset_y.is_finite()
@@ -87,19 +100,31 @@ fn validate(input: &CollageInput) -> Result<Rgba<u8>, String> {
             || !item.zoom.is_finite()
             || !(1.0..=8.0).contains(&item.zoom)
         {
-            return Err("照片偏移须在 0–1 之间，缩放须在 1–8 倍之间".into());
+            return Err(tr(
+                "照片偏移须在 0–1 之间，缩放须在 1–8 倍之间",
+                "Photo offsets must be between 0 and 1, and zoom must be between 1× and 8×",
+            )
+            .into());
         }
         if item.fit == Fit::Contain && item.zoom != 1.0 {
-            return Err("完整显示照片时缩放须为 1 倍".into());
+            return Err(tr(
+                "完整显示照片时缩放须为 1 倍",
+                "Zoom must be 1× when showing the whole photo",
+            )
+            .into());
         }
     }
     let color = input.background.as_bytes();
     if color.len() != 7 || color[0] != b'#' || !color[1..].iter().all(u8::is_ascii_hexdigit) {
-        return Err("背景颜色须使用 #RRGGBB 格式".into());
+        return Err(tr(
+            "背景颜色须使用 #RRGGBB 格式",
+            "Use the #RRGGBB format for the background color",
+        )
+        .into());
     }
     let channel = |start| {
         u8::from_str_radix(&input.background[start..start + 2], 16)
-            .map_err(|_| "背景颜色无效".to_string())
+            .map_err(|_| tr("背景颜色无效", "Invalid background color").to_string())
     };
     Ok(Rgba([channel(1)?, channel(3)?, channel(5)?, 255]))
 }
@@ -157,24 +182,40 @@ fn render(
     let bytes = input.width as usize * input.height as usize * 3;
     let mut pixels = Vec::new();
     pixels.try_reserve_exact(bytes).map_err(|_| {
-        "内存不足，无法以当前分辨率生成拼图；请调整布局、选片或输出尺寸".to_string()
+        tr("内存不足，无法以当前分辨率生成拼图；请调整布局、选片或输出尺寸", "There is not enough memory to create the collage at this resolution. Adjust the layout, selected photos, or export dimensions.").to_string()
     })?;
     pixels.resize(bytes, 0);
     for pixel in pixels.chunks_exact_mut(3) {
         pixel.copy_from_slice(&background.0[..3]);
     }
-    let mut canvas =
-        RgbImage::from_raw(input.width, input.height, pixels).ok_or("无法创建拼图画布")?;
+    let mut canvas = RgbImage::from_raw(input.width, input.height, pixels).ok_or(tr(
+        "无法创建拼图画布",
+        "Could not create the collage canvas",
+    ))?;
     for ((item, source), original) in input.items.iter().zip(sources).zip(originals) {
         use std::io::{BufReader, Seek};
         let mut file = original.open()?;
         let dimensions = image::ImageReader::new(BufReader::new(&mut file))
             .with_guessed_format()
-            .map_err(|e| format!("识别来源照片失败：{e}"))?
+            .map_err(|e| {
+                display_format!(
+                    "识别来源照片失败：{e}",
+                    "Could not identify the source photo: {e}"
+                )
+            })?
             .into_dimensions()
-            .map_err(|e| format!("读取来源照片尺寸失败：{e}"))?;
+            .map_err(|e| {
+                display_format!(
+                    "读取来源照片尺寸失败：{e}",
+                    "Could not read the source photo dimensions: {e}"
+                )
+            })?;
         if u64::from(dimensions.0) * u64::from(dimensions.1) > MAX_SOURCE_PIXELS {
-            return Err("来源照片超过 1.6 亿像素，请先使用尺寸较小的照片".into());
+            return Err(tr(
+                "来源照片超过 1.6 亿像素，请先使用尺寸较小的照片",
+                "The source photo exceeds 160 megapixels. Use a smaller photo.",
+            )
+            .into());
         }
         file.rewind().map_err(|e| e.to_string())?;
         let image = photos::load_oriented_image(Path::new(&source.original_name), file)?;
@@ -211,7 +252,10 @@ pub fn export_png(store: &Store, directory: &Path, input: CollageInput) -> Resul
                     .iter()
                     .find(|photo| photo.id == item.photo_id && photo.library == input.library)
                     .cloned()
-                    .ok_or("来源照片不存在或不属于当前图库类别")?;
+                    .ok_or(tr(
+                        "来源照片不存在或不属于当前图库类别",
+                        "The source photo is missing or belongs to a different library section",
+                    ))?;
                 let original =
                     crate::work_directory::original(&conn, &photo.id, &photo.original_path)?;
                 Ok((photo, original))
@@ -224,7 +268,11 @@ pub fn export_png(store: &Store, directory: &Path, input: CollageInput) -> Resul
     {
         let conn = store.connection.lock().map_err(|e| e.to_string())?;
         if db::library_root(&conn)? != root {
-            return Err("图库已切换，请重新开始拼图。".into());
+            return Err(tr(
+                "图库已切换，请重新开始拼图。",
+                "The library changed. Start the collage again.",
+            )
+            .into());
         }
         for source in &sources {
             let path: String = conn
@@ -233,14 +281,23 @@ pub fn export_png(store: &Store, directory: &Path, input: CollageInput) -> Resul
                     params![source.id, source.library],
                     |row| row.get(0),
                 )
-                .map_err(|_| "来源照片已变化，请重新生成拼图。")?;
+                .map_err(|_| {
+                    tr(
+                        "来源照片已变化，请重新生成拼图。",
+                        "A source photo changed. Generate the collage again.",
+                    )
+                })?;
             if path != source.original_path {
-                return Err("来源照片已重新定位，请重新生成拼图。".into());
+                return Err(tr(
+                    "来源照片已重新定位，请重新生成拼图。",
+                    "A source photo was relocated. Generate the collage again.",
+                )
+                .into());
             }
         }
     }
     // 背景不透明，输出 RGB PNG，避免引入 JPEG 代际损失和多余 alpha。
-    write_png(directory, &input.title, "拼图", |writer| {
+    write_png(directory, &input.title, tr("拼图", "Collage"), |writer| {
         PngEncoder::new(writer)
             .write_image(&canvas, input.width, input.height, ExtendedColorType::Rgb8)
             .map_err(|e| e.to_string())

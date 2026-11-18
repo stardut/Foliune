@@ -25,11 +25,11 @@ export function sortAlbumPhotos(photos: Photo[], sort: PhotoSort): Photo[] {
 type Timed<Item> = { item: Item; time: number };
 
 // Group the complete result once. Rank each section by its newest photo in either direction.
-export function workPhotoSections(photos: Photo[], view: WorkGrouping, sort: TimeSort = 'time-desc'): [string, Photo[]][] {
+export function workPhotoSections(photos: Photo[], view: WorkGrouping, sort: TimeSort = 'time-desc', emptyHeading = view === 'location' ? '未填写地点' : '未归入项目'): [string, Photo[]][] {
   const sections = new Map<string, { items: Timed<Photo>[]; latest: number }>();
   for (const photo of photos) {
     const time = photoTime(photo);
-    const heading = view === 'location' ? photo.location.trim() || '未填写地点' : photo.project.trim() || '未归入项目';
+    const heading = photo[view].trim() || emptyHeading;
     const section = sections.get(heading) ?? { items: [], latest: -Infinity };
     section.items.push({ item: photo, time });
     if (time > section.latest) section.latest = time;

@@ -1,3 +1,4 @@
+import './fixtures/chinese-interface.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { comparePlanExecutionDate, inputOf, newPart, newShot, hasContent, referenceCount, referencesFromSelection, shotCount, planSearchText, moved, sceneReferenceLimitError } from '../src/features/planning/plan-content.ts';

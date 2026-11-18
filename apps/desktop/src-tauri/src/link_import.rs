@@ -1,4 +1,5 @@
 //! Link requests own only temporary files. A completed result remains a curation draft.
+use crate::locale::{display_format, tr};
 use crate::{
     curation::{self, CurationDraft, CurationStore},
     db::{self, Store},
@@ -40,7 +41,7 @@ impl Session {
     fn active(&self) -> Result<MutexGuard<'_, Progress>, String> {
         let progress = self.progress.lock().map_err(|e| e.to_string())?;
         if progress.cancelled {
-            return Err("链接导入已取消。".into());
+            return Err(tr("链接导入已取消。", "Link import canceled.").into());
         }
         Ok(progress)
     }
@@ -48,7 +49,10 @@ impl Session {
         match fs::remove_dir_all(&self.directory) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(format!("清理链接暂存失败：{error}")),
+            Err(error) => Err(display_format!(
+                "清理链接暂存失败：{error}",
+                "Could not clean up temporary link files: {error}"
+            )),
         }
     }
 }
@@ -69,20 +73,33 @@ impl Drop for Session {
 pub struct LinkImportStore(Mutex<HashMap<String, Option<Arc<Session>>>>);
 impl LinkImportStore {
     fn begin(&self, root: PathBuf, request: &str) -> Result<Arc<Session>, String> {
-        uuid::Uuid::parse_str(request).map_err(|_| "链接请求标识无效")?;
+        uuid::Uuid::parse_str(request)
+            .map_err(|_| tr("链接请求标识无效", "Invalid link request ID"))?;
         let mut entries = self.0.lock().map_err(|e| e.to_string())?;
         if entries.contains_key(request) {
-            return Err("链接请求已取消或已经使用，请重新开始。".into());
+            return Err(tr(
+                "链接请求已取消或已经使用，请重新开始。",
+                "This link request was canceled or already used. Start again.",
+            )
+            .into());
         }
         let id = uuid::Uuid::new_v4().to_string();
         let directory = root.join("staging").join(&id);
-        fs::create_dir_all(&directory).map_err(|e| format!("无法创建链接暂存：{e}"))?;
+        fs::create_dir_all(&directory).map_err(|e| {
+            display_format!(
+                "无法创建链接暂存：{e}",
+                "Could not create temporary storage for the link: {e}"
+            )
+        })?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             if let Err(error) = fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)) {
                 let _ = fs::remove_dir_all(&directory);
-                return Err(format!("无法设置链接暂存权限：{error}"));
+                return Err(display_format!(
+                    "无法设置链接暂存权限：{error}",
+                    "Could not set permissions on temporary link storage: {error}"
+                ));
             }
         }
         let session = Arc::new(Session {
@@ -93,14 +110,19 @@ impl LinkImportStore {
             progress: Mutex::new(Progress::default()),
         });
         for folder in ["originals", "thumbnails"] {
-            fs::create_dir(session.directory.join(folder))
-                .map_err(|e| format!("无法创建链接候选目录：{e}"))?;
+            fs::create_dir(session.directory.join(folder)).map_err(|e| {
+                display_format!(
+                    "无法创建链接候选目录：{e}",
+                    "Could not create a folder for linked photos: {e}"
+                )
+            })?;
         }
         entries.insert(request.into(), Some(session.clone()));
         Ok(session)
     }
     fn cancel(&self, request: &str) -> Result<Option<String>, String> {
-        uuid::Uuid::parse_str(request).map_err(|_| "链接请求标识无效")?;
+        uuid::Uuid::parse_str(request)
+            .map_err(|_| tr("链接请求标识无效", "Invalid link request ID"))?;
         let mut entries = self.0.lock().map_err(|e| e.to_string())?;
         let Some(Some(session)) = entries.get(request) else {
             entries.insert(request.into(), None);
@@ -173,7 +195,11 @@ pub struct LinkImportProgress {
 
 fn check_library(conn: &rusqlite::Connection, session: &Session) -> Result<(), String> {
     if db::library_root(conn)? != session.root {
-        return Err("图库已切换，本次链接候选已取消。".into());
+        return Err(tr(
+            "图库已切换，本次链接候选已取消。",
+            "The library changed. The linked photos were discarded from this import.",
+        )
+        .into());
     }
     Ok(())
 }
@@ -209,7 +235,12 @@ fn send_progress(
     let _active = session.active()?;
     progress
         .send(LinkImportProgress { total, photo })
-        .map_err(|e| format!("无法传递链接导入进度：{e}"))
+        .map_err(|e| {
+            display_format!(
+                "无法传递链接导入进度：{e}",
+                "Could not report link import progress: {e}"
+            )
+        })
 }
 
 #[tauri::command]
@@ -261,7 +292,12 @@ pub async fn prepare_link_import(
                 Ok::<_, String>(photo)
             })
             .await
-            .map_err(|_| "准备链接图片任务失败")??;
+            .map_err(|_| {
+                tr(
+                    "准备链接图片任务失败",
+                    "Could not prepare the linked images",
+                )
+            })??;
             photos.push(photo);
         }
         let handle = app.clone();
@@ -277,7 +313,13 @@ pub async fn prepare_link_import(
             )
         })
         .await
-        .map_err(|_| "准备链接候选任务失败".to_string())?
+        .map_err(|_| {
+            tr(
+                "准备链接候选任务失败",
+                "Could not prepare the linked photos",
+            )
+            .to_string()
+        })?
     }
     .await;
     app.state::<LinkImportStore>()

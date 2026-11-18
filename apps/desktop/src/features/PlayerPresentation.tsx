@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { PhotoUnavailable } from '../components/PhotoImage';
 import { canReadOriginal, originalReadUrl } from '../lib/photo-availability';
@@ -109,7 +110,7 @@ export function PlayerFrames({ presentation, onRelink }: {
     </div>}
     {displayed?.status === 'error' && (displayed.frame.photo
       ? <div key={displayed.frame.key} className="player-frame image-asset image-unavailable" role="status"><PhotoUnavailable photo={displayed.frame.photo} onRelink={onRelink} /></div>
-      : <p role="alert">此照片不在当前图库中</p>)}
+      : <p role="alert">{t('此照片不在当前图库中', 'This photo is unavailable in the current library')}</p>)}
     {waiting && <PlayerWaiting key={requested.key} />}
     <PlayerEntryVeil />
   </>;
@@ -130,7 +131,7 @@ function PlayerWaiting() {
     const timer = setTimeout(() => setVisible(true), 800);
     return () => clearTimeout(timer);
   }, []);
-  return visible && <span className="player-waiting" role="status"><span className="sr-only">正在准备照片</span></span>;
+  return visible && <span className="player-waiting" role="status"><span className="sr-only">{t('正在准备照片', 'Preparing photo')}</span></span>;
 }
 
 function PlayerFrameImage({ frame, priority, onDecoded }: {

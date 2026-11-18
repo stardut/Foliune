@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ImagePlus } from 'lucide-react';
 import type { ModelProfile } from '../../lib/model-types';
@@ -38,32 +39,32 @@ export function ModelEditor({ model, snapshot, photos, onSnapshot, onDirtyChange
   async function save() {
     if (busy) return;
     if (!form.current?.reportValidity()) { setLeaving(false); return; }
-    if (!draft.name.trim()) { setError('请填写姓名或昵称。'); setLeaving(false); return; }
+    if (!draft.name.trim()) { setError(t('请填写姓名或昵称。', 'Enter a name or nickname.')); setLeaving(false); return; }
     const heightCm = readMeasurement(draft.heightCm);
     const weightKg = readMeasurement(draft.weightKg);
-    if (heightCm === undefined || (heightCm !== null && heightCm > 300)) { setError('身高须大于 0 且不超过 300 cm。'); setLeaving(false); return; }
-    if (weightKg === undefined) { setError('体重须为大于 0 的有效数值。'); setLeaving(false); return; }
-    if (draft.tagOptions && draft.tagOptions.length > 100) { setError('可选风格标签最多 100 个，请在管理风格标签中删除不需要的标签。'); setLeaving(false); return; }
+    if (heightCm === undefined || (heightCm !== null && heightCm > 300)) { setError(t('身高须大于 0 且不超过 300 cm。', 'Height must be greater than 0 and at most 300 cm.')); setLeaving(false); return; }
+    if (weightKg === undefined) { setError(t('体重须为大于 0 的有效数值。', 'Enter a weight greater than 0.')); setLeaving(false); return; }
+    if (draft.tagOptions && draft.tagOptions.length > 100) { setError(t('可选风格标签最多 100 个，请在管理风格标签中删除不需要的标签。', 'Up to 100 style tags are available. Remove unused tags under Manage Style Tags.')); setLeaving(false); return; }
     setBusy(true); setError('');
     try {
       const saved = await modelsApi.saveModel(model?.id ?? null, { ...draft, heightCm, weightKg, name: draft.name.trim(), tags: [...new Set(draft.tags.map((tag) => tag.trim()).filter(Boolean))], tagOptions: draft.tagOptions ? [...new Set(draft.tagOptions.map((tag) => tag.trim()).filter(Boolean))] : null }, model?.updatedAt ?? null);
       if (!mounted.current) return;
       setBaseline(draftOf(saved)); setDraft(draftOf(saved)); setLeaving(false); onSaved(saved);
-      toast({ title: '已保存模特档案' });
+      toast({ title: t('已保存模特档案', 'Model profile saved') });
     } catch (cause) { if (mounted.current) { toast({ title: message(cause), status: 'error' }); setLeaving(false); } }
     finally { if (mounted.current) setBusy(false); }
   }
-  return <section className="model-workspace" aria-label={model ? `${model.name}的档案` : '新建模特档案'}>
-    <header className="workspace-intro model-editor-header"><div className="model-editor-heading"><IconButton label={model ? "返回档案" : "返回模特"} disabled={busy} onClick={leave}><ArrowLeft size={18} /></IconButton><h1>{model ? draft.name || model.name : '新建档案'}</h1></div><div className="workspace-tools">{dirty && <span className="model-save-status">未保存</span>}<button type="button" className="button" disabled={busy} onClick={leave}>取消</button><button type="button" className="button button-primary" disabled={busy || (!dirty && !!model)} onClick={() => void save()}>{busy ? '处理中…' : '保存档案'}</button></div></header>
+  return <section className="model-workspace" aria-label={model ? t(`${model.name}的档案`, `Profile for ${model.name}`) : t('新建模特档案', 'New Model Profile')}>
+    <header className="workspace-intro model-editor-header"><div className="model-editor-heading"><IconButton label={model ? t('返回档案', 'Back to Profile') : t('返回模特', 'Back to Models')} disabled={busy} onClick={leave}><ArrowLeft size={18} /></IconButton><h1>{model ? draft.name || model.name : t('新建档案', 'New Profile')}</h1></div><div className="workspace-tools">{dirty && <span className="model-save-status">{t('未保存', 'Unsaved')}</span>}<button type="button" className="button" disabled={busy} onClick={leave}>{t('取消', 'Cancel')}</button><button type="button" className="button button-primary" disabled={busy || (!dirty && !!model)} onClick={() => void save()}>{busy ? t('处理中…', 'Working…') : t('保存档案', 'Save Profile')}</button></div></header>
     {error && <p className="form-error model-error" role="alert">{error}</p>}
     <div className="model-editor-layout">
-      <form ref={form} className="model-profile-form model-profile-card" aria-label="基本资料" onSubmit={(event) => { event.preventDefault(); void save(); }}><ModelFields value={draft} onChange={update} disabled={busy} /><button type="submit" className="model-submit-hidden" tabIndex={-1} aria-hidden="true">保存档案</button></form>
-      <section className="model-sample-section" aria-label="样片"><div className="model-sample-tools"><div className="workspace-tools"><button type="button" className="button" disabled={busy} onClick={() => setPicking(true)}><ImagePlus size={14} />添加照片</button></div></div>
-        {draft.photoIds.length ? <ModelSamples ids={draft.photoIds} coverId={draft.coverPhotoId} photos={photos} disabled={busy} onChange={setPhotos} onCover={(id) => update({ ...draft, coverPhotoId: id })} onRelink={onRelink} /> : <EmptyState title="还没有样片" action={<button type="button" className="button" disabled={busy} onClick={() => setPicking(true)}><ImagePlus size={15} />选择样片</button>} />}
+      <form ref={form} className="model-profile-form model-profile-card" aria-label={t('基本资料', 'Profile Details')} onSubmit={(event) => { event.preventDefault(); void save(); }}><ModelFields value={draft} onChange={update} disabled={busy} /><button type="submit" className="model-submit-hidden" tabIndex={-1} aria-hidden="true">{t('保存档案', 'Save Profile')}</button></form>
+      <section className="model-sample-section" aria-label={t('样片', 'Portfolio Photos')}><div className="model-sample-tools"><div className="workspace-tools"><button type="button" className="button" disabled={busy} onClick={() => setPicking(true)}><ImagePlus size={14} />{t('添加照片', 'Add Photos')}</button></div></div>
+        {draft.photoIds.length ? <ModelSamples ids={draft.photoIds} coverId={draft.coverPhotoId} photos={photos} disabled={busy} onChange={setPhotos} onCover={(id) => update({ ...draft, coverPhotoId: id })} onRelink={onRelink} /> : <EmptyState title={t('还没有样片', 'No Portfolio Photos Yet')} action={<button type="button" className="button" disabled={busy} onClick={() => setPicking(true)}><ImagePlus size={15} />{t('选择样片', 'Select Portfolio Photos')}</button>} />}
       </section>
     </div>
-    {picking && <PhotoSourceDialog snapshot={snapshot} library="work" selectedIds={draft.photoIds} title="选择模特样片" onBusyChange={setSourceBusy} onClose={() => setPicking(false)} onConfirm={({ photoIds, snapshot }) => { if (snapshot) onSnapshot(snapshot); setPhotos(photoIds); setPicking(false); }} />}
-    {leaving && <Modal title="保存档案修改？" onClose={() => { if (!busy) setLeaving(false); }}><p>离开后，未保存的资料与样片调整将丢失。</p><div className="form-actions"><button type="button" className="button" disabled={busy} onClick={() => setLeaving(false)}>继续编辑</button><button type="button" className="button" disabled={busy} onClick={onClose}>放弃修改</button><button type="button" className="button button-primary" disabled={busy} onClick={() => void save()}>{busy ? '保存中…' : '保存并离开'}</button></div></Modal>}
+    {picking && <PhotoSourceDialog snapshot={snapshot} library="work" selectedIds={draft.photoIds} title={t('选择模特样片', 'Select Model Portfolio Photos')} onBusyChange={setSourceBusy} onClose={() => setPicking(false)} onConfirm={({ photoIds, snapshot }) => { if (snapshot) onSnapshot(snapshot); setPhotos(photoIds); setPicking(false); }} />}
+    {leaving && <Modal title={t('保存档案修改？', 'Save Profile Changes?')} onClose={() => { if (!busy) setLeaving(false); }}><p>{t('离开后，未保存的资料与样片调整将丢失。', 'Leaving this page discards unsaved profile and photo changes.')}</p><div className="form-actions"><button type="button" className="button" disabled={busy} onClick={() => setLeaving(false)}>{t('继续编辑', 'Keep Editing')}</button><button type="button" className="button" disabled={busy} onClick={onClose}>{t('放弃修改', 'Discard Changes')}</button><button type="button" className="button button-primary" disabled={busy} onClick={() => void save()}>{busy ? t('保存中…', 'Saving…') : t('保存并离开', 'Save and Leave')}</button></div></Modal>}
   </section>;
 }
 

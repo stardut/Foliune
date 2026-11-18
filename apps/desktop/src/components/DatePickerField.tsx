@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n.ts';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarDays } from 'lucide-react';
@@ -16,13 +17,13 @@ export function DatePickerField({ label, value, onChange, name, errorId, disable
   return <div className="date-picker-field">
     <label htmlFor={id}>{label}</label>
     <button id={id} type="button" name={name} className="date-picker-trigger" disabled={disabled}
-      aria-label={`${label}：${text || '未设置'}`} aria-haspopup="dialog" aria-expanded={open}
+      aria-label={t(`${label}：${text || '未设置'}`, `${label}: ${text || 'Not set'}`)} aria-haspopup="dialog" aria-expanded={open}
       aria-invalid={errorId ? true : undefined} aria-describedby={errorId}
       onClick={(event) => { event.currentTarget.focus(); setOpen(true); }}>
-      {value ? <time dateTime={value}>{text}</time> : <span className="date-picker-placeholder">{withTime ? '未设置' : '选择日期'}</span>}
+      {value ? <time dateTime={value}>{text}</time> : <span className="date-picker-placeholder">{withTime ? t('未设置', 'Not set') : t('选择日期', 'Choose date')}</span>}
       <CalendarDays size={15} aria-hidden="true" />
     </button>
-    {open && createPortal(<DatePickerDialog title={`选择${label}`} value={value} withTime={withTime} onClose={close}
+    {open && createPortal(<DatePickerDialog title={t(`选择${label}`, `Choose ${label}`)} value={value} withTime={withTime} onClose={close}
       onSelect={(next) => { onChange(next); close(); }} />, document.body)}
   </div>;
 }
@@ -66,7 +67,7 @@ function DatePickerDialog({ title, value, withTime, onClose, onSelect }: {
     <form className="date-picker-dialog" onSubmit={confirm} onKeyDown={(event) => {
       if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); }
     }}>
-      <input ref={input} aria-label={withTime ? '日期和时间' : '日期'} className="date-picker-value" value={text}
+      <input ref={input} aria-label={withTime ? t('日期和时间', 'Date and time') : t('日期', 'Date')} className="date-picker-value" value={text}
         placeholder={withTime ? 'YYYY-MM-DD HH:mm:ss' : 'YYYY-MM-DD'} aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : undefined}
         onChange={(event) => {
           const next = event.target.value;
@@ -75,21 +76,21 @@ function DatePickerDialog({ title, value, withTime, onClose, onSelect }: {
           if (parsed) updateParts(parsed);
           setInvalid(false);
         }} />
-      {invalid && <p id={errorId} className="form-error" role="alert">{withTime ? '请输入有效的日期和时间（YYYY-MM-DD HH:mm:ss）。' : '请输入有效的日期（YYYY-MM-DD）。'}</p>}
-      <div className="date-picker-wheels" role="group" aria-label="日期">
-        <WheelPicker label="年" min={1} max={9999} value={parts.year} onValueChange={(next) => changePart('year', next)} />
-        <WheelPicker label="月" min={1} max={12} value={parts.month} onValueChange={(next) => changePart('month', next)} />
-        <WheelPicker label="日" min={1} max={daysInMonth(parts.year, parts.month)} value={parts.day} onValueChange={(next) => changePart('day', next)} />
+      {invalid && <p id={errorId} className="form-error" role="alert">{withTime ? t('请输入有效的日期和时间（YYYY-MM-DD HH:mm:ss）。', 'Enter a valid date and time (YYYY-MM-DD HH:mm:ss).') : t('请输入有效的日期（YYYY-MM-DD）。', 'Enter a valid date (YYYY-MM-DD).')}</p>}
+      <div className="date-picker-wheels" role="group" aria-label={t('日期', 'Date')}>
+        <WheelPicker label={t('年', 'Year')} min={1} max={9999} value={parts.year} onValueChange={(next) => changePart('year', next)} />
+        <WheelPicker label={t('月', 'Month')} min={1} max={12} value={parts.month} onValueChange={(next) => changePart('month', next)} />
+        <WheelPicker label={t('日', 'Day')} min={1} max={daysInMonth(parts.year, parts.month)} value={parts.day} onValueChange={(next) => changePart('day', next)} />
       </div>
-      {withTime && <div className="date-picker-wheels" role="group" aria-label="时间">
-        <WheelPicker label="时" min={0} max={23} value={parts.hour} onValueChange={(next) => changePart('hour', next)} />
-        <WheelPicker label="分" min={0} max={59} value={parts.minute} onValueChange={(next) => changePart('minute', next)} />
-        <WheelPicker label="秒" min={0} max={59} value={parts.second} onValueChange={(next) => changePart('second', next)} />
+      {withTime && <div className="date-picker-wheels" role="group" aria-label={t('时间', 'Time')}>
+        <WheelPicker label={t('时', 'Hour')} min={0} max={23} value={parts.hour} onValueChange={(next) => changePart('hour', next)} />
+        <WheelPicker label={t('分', 'Minute')} min={0} max={59} value={parts.minute} onValueChange={(next) => changePart('minute', next)} />
+        <WheelPicker label={t('秒', 'Second')} min={0} max={59} value={parts.second} onValueChange={(next) => changePart('second', next)} />
       </div>}
       <div className="form-actions">
-        {withTime && value && <button type="button" className="button date-picker-clear" onClick={() => onSelect('')}>清除</button>}
-        <button type="button" className="button" onClick={onClose}>取消</button>
-        <button type="submit" className="button button-primary">确定</button>
+        {withTime && value && <button type="button" className="button date-picker-clear" onClick={() => onSelect('')}>{t('清除', 'Clear')}</button>}
+        <button type="button" className="button" onClick={onClose}>{t('取消', 'Cancel')}</button>
+        <button type="submit" className="button button-primary">{t('确定', 'Done')}</button>
       </div>
     </form>
   </Modal>;

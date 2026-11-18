@@ -1,11 +1,12 @@
 use crate::books::{BookChapter, BookItem, BookPage, VersionInput};
+use crate::locale::{display_format, tr};
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
 
 pub fn template(value: &str) -> Result<(), String> {
     match value {
         "white" | "full" | "pair" => Ok(()),
-        _ => Err("未知画册模板".into()),
+        _ => Err(tr("未知画册模板", "Unknown photo book template").into()),
     }
 }
 
@@ -59,13 +60,24 @@ pub fn generate(
     }
     Ok(VersionInput {
         _legacy_reflow_undo_id: None,
-        label: "自动排版".into(),
+        label: automatic_label(crate::locale::current()).into(),
         template: style.into(),
         page_width: width,
         page_height: height,
         chapters,
         pages,
     })
+}
+
+const AUTOMATIC_LABEL_ZH: &str = "自动排版";
+const AUTOMATIC_LABEL_EN: &str = "Automatic Layout";
+
+pub(crate) fn automatic_label(locale: crate::locale::Locale) -> &'static str {
+    locale.text(AUTOMATIC_LABEL_ZH, AUTOMATIC_LABEL_EN)
+}
+
+pub(crate) fn has_automatic_label(label: &str) -> bool {
+    matches!(label, AUTOMATIC_LABEL_ZH | AUTOMATIC_LABEL_EN)
 }
 
 pub fn validate(conn: &Connection, input: &VersionInput) -> Result<(), String> {
@@ -79,23 +91,39 @@ pub(crate) fn validate_snapshot(
 ) -> Result<(), String> {
     template(&input.template)?;
     if !(400..=4000).contains(&input.page_width) || !(400..=4000).contains(&input.page_height) {
-        return Err("画册页宽高需在 400–4000 之间".into());
+        return Err(tr(
+            "画册页宽高需在 400–4000 之间",
+            "Page width and height must be between 400 and 4,000",
+        )
+        .into());
     }
     if input.label.trim().is_empty() || input.label.chars().count() > 200 {
-        return Err("画册内部名称应为 1–200 个字符".into());
+        return Err(tr(
+            "画册内部名称应为 1–200 个字符",
+            "The photo book layout name must be 1–200 characters",
+        )
+        .into());
     }
     let mut chapters = HashSet::new();
     let mut selected = HashMap::new();
     for chapter in &input.chapters {
         if chapter.id.is_empty() || !chapters.insert(&chapter.id) {
-            return Err("章节标识缺失或重复".into());
+            return Err(tr("章节标识缺失或重复", "Missing or duplicate chapter ID").into());
         }
         if chapter.title.chars().count() > 200 {
-            return Err("章节标题不能超过 200 个字符".into());
+            return Err(tr(
+                "章节标题不能超过 200 个字符",
+                "Chapter titles can be up to 200 characters",
+            )
+            .into());
         }
         for id in &chapter.photo_ids {
             if selected.insert(id, &chapter.id).is_some() {
-                return Err("同一照片不能重复选入画册".into());
+                return Err(tr(
+                    "同一照片不能重复选入画册",
+                    "A photo can only be added once to the photo book",
+                )
+                .into());
             }
             let exists: bool = conn
                 .query_row(
@@ -106,31 +134,38 @@ pub(crate) fn validate_snapshot(
                 )
                 .map_err(|e| e.to_string())?;
             if !exists {
-                return Err(format!("选片不存在：{id}"));
+                return Err(display_format!(
+                    "选片不存在：{id}",
+                    "Selected photo not found: {id}"
+                ));
             }
         }
     }
     if selected.is_empty() {
-        return Err("请至少选择一张照片".into());
+        return Err(tr("请至少选择一张照片", "Select at least one photo").into());
     }
     let mut page_ids = HashSet::new();
     let mut used = HashSet::new();
     for page in &input.pages {
         if page.id.is_empty() || !page_ids.insert(&page.id) || !chapters.contains(&page.chapter_id)
         {
-            return Err("页面或章节标识无效".into());
+            return Err(tr("页面或章节标识无效", "Invalid page or chapter ID").into());
         }
         if page.items.is_empty() || page.items.len() > 2 {
-            return Err("每页需要 1–2 张照片".into());
+            return Err(tr("每页需要 1–2 张照片", "Each page needs one or two photos").into());
         }
         if page.title.chars().count() > 200 || page.caption.chars().count() > 5000 {
-            return Err("页面文字过长".into());
+            return Err(tr("页面文字过长", "The page text is too long").into());
         }
         for item in &page.items {
             if selected.get(&item.photo_id) != Some(&&page.chapter_id)
                 || !used.insert(&item.photo_id)
             {
-                return Err("页面选片与章节不一致或照片重复".into());
+                return Err(tr(
+                    "页面选片与章节不一致或照片重复",
+                    "The page photos do not match the chapter or include duplicates",
+                )
+                .into());
             }
             let numbers = [
                 item.x,
@@ -150,15 +185,23 @@ pub(crate) fn validate_snapshot(
                 || !(0.0..=100.0).contains(&item.crop_x)
                 || !(0.0..=100.0).contains(&item.crop_y)
             {
-                return Err("照片位置、尺寸或裁切超出页面范围".into());
+                return Err(tr(
+                    "照片位置、尺寸或裁切超出页面范围",
+                    "Photo placement, size, or crop exceeds the page bounds",
+                )
+                .into());
             }
             if item.fit != "cover" && item.fit != "contain" {
-                return Err("无效照片适配方式".into());
+                return Err(tr("无效照片适配方式", "Invalid photo fit").into());
             }
         }
     }
     if used.len() != selected.len() {
-        return Err("布局没有包含全部选片".into());
+        return Err(tr(
+            "布局没有包含全部选片",
+            "The layout is missing selected photos",
+        )
+        .into());
     }
     let expected: Vec<&str> = input
         .chapters
@@ -171,7 +214,11 @@ pub(crate) fn validate_snapshot(
         .flat_map(|page| page.items.iter().map(|item| item.photo_id.as_str()))
         .collect();
     if expected != actual {
-        return Err("页面顺序必须与章节选片顺序一致".into());
+        return Err(tr(
+            "页面顺序必须与章节选片顺序一致",
+            "Page order must match the chapter photo order",
+        )
+        .into());
     }
     Ok(())
 }

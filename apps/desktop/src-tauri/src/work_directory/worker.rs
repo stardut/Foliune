@@ -1,4 +1,5 @@
 use super::{emit, wake_monitor, Cache, RootDirectory, RootStamp, WorkDirectoryMonitor};
+use crate::locale::tr;
 use crate::{
     db::{self, Store},
     work_directory::sync::{self, SyncDelta},
@@ -17,6 +18,7 @@ const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 mod tests;
 
 pub(super) fn run_jobs(app: AppHandle, pending: Receiver<()>) {
+    crate::locale::preserve_sync_messages();
     let store = app.state::<Store>();
     let manager = app.state::<WorkDirectoryMonitor>();
     while pending.recv().is_ok() {
@@ -64,7 +66,11 @@ fn process_next(
         notify(&library_id, None);
         let observed_source = cache.stamp.and_then(RootStamp::durable);
         let validated = if job.source.is_some() && job.source != observed_source {
-            Err("作品目录来源已变化，请重新定位后查看待同步内容".into())
+            Err(tr(
+                "作品目录来源已变化，请重新定位后查看待同步内容",
+                "The work folder source changed. Relocate it and review the items to sync.",
+            )
+            .into())
         } else {
             sync::validate_job(&conn, &root, &job.candidate)
         };
@@ -95,7 +101,9 @@ fn process_next(
                     || cache.offline_epoch != offline_epoch
                     || !cache.queue.progress(id, processed)
                 {
-                    return Err("图库或作品目录已变化".into());
+                    return Err(
+                        tr("图库或作品目录已变化", "The library or work folder changed").into(),
+                    );
                 }
             }
             if last.elapsed() >= PROGRESS_INTERVAL || processed == job.state.file_count {
@@ -110,13 +118,17 @@ fn process_next(
             || cache.context_id != context_id
             || !cache.queue.is_running(id)
         {
-            return Err("图库或作品目录已切换".into());
+            return Err(tr("图库或作品目录已切换", "The library or work folder changed").into());
         }
         if !cache.scan.connected
             || cache.stamp != prepared.identity
             || cache.offline_epoch != offline_epoch
         {
-            return Err("作品目录已变化，请确认连接后重试".into());
+            return Err(tr(
+                "作品目录已变化，请确认连接后重试",
+                "The work folder changed. Check the connection and try again.",
+            )
+            .into());
         }
         let delta = sync::commit(
             &mut conn,

@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use crate::models::{AlbumCover, Group, Membership, Photo, Snapshot};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row};
 use std::{
@@ -81,14 +82,27 @@ fn installed_library(root: &Path) -> Result<PathBuf, String> {
         Err(error) => return Err(error.to_string()),
     };
     let id: String = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    uuid::Uuid::parse_str(&id).map_err(|_| "图库位置配置无效")?;
+    uuid::Uuid::parse_str(&id).map_err(|_| {
+        tr(
+            "图库位置配置无效",
+            "The library location configuration is invalid",
+        )
+    })?;
     let library = root.join("libraries").join(id);
     let database = library.join("library.sqlite");
     if !fs::symlink_metadata(&database).is_ok_and(|metadata| metadata.is_file()) {
-        return Err("当前图库数据库不存在或路径无效".into());
+        return Err(tr(
+            "当前图库数据库不存在或路径无效",
+            "The current library database is missing or has an invalid path",
+        )
+        .into());
     }
     if database.canonicalize().map_err(|e| e.to_string())? != database {
-        return Err("当前图库数据库路径无效".into());
+        return Err(tr(
+            "当前图库数据库路径无效",
+            "The current library database path is invalid",
+        )
+        .into());
     }
     Ok(library)
 }
@@ -110,11 +124,18 @@ pub(crate) fn open_existing(root: &Path, writable: bool) -> Result<Connection, S
 
 pub(crate) const REVISION_CONFLICT: &str = "记录已被修改，请重新读取后再保存";
 
+pub(crate) fn revision_conflict() -> &'static str {
+    tr(
+        REVISION_CONFLICT,
+        "This record has changed. Reload it before saving.",
+    )
+}
+
 pub(crate) fn check_revision(current: &str, expected: &str) -> Result<(), String> {
     if current == expected {
         Ok(())
     } else {
-        Err(REVISION_CONFLICT.into())
+        Err(revision_conflict().into())
     }
 }
 
@@ -153,7 +174,7 @@ pub(crate) fn migrate_photos(conn: &Connection) -> Result<(), String> {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|e| e.to_string())?;
-    if version >= 3 {
+    if version >= 4 {
         return Ok(());
     }
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
@@ -161,10 +182,16 @@ pub(crate) fn migrate_photos(conn: &Connection) -> Result<(), String> {
         tx.execute_batch("ALTER TABLE photos ADD COLUMN regions TEXT NOT NULL DEFAULT '[]';")
             .map_err(|e| e.to_string())?;
     }
+    if version < 3 {
+        tx.execute_batch(
+            "ALTER TABLE photos ADD COLUMN hidden_after_album_delete INTEGER NOT NULL DEFAULT 0
+               CHECK(hidden_after_album_delete IN (0,1));",
+        )
+        .map_err(|e| e.to_string())?;
+    }
     tx.execute_batch(
-        "ALTER TABLE photos ADD COLUMN hidden_after_album_delete INTEGER NOT NULL DEFAULT 0
-           CHECK(hidden_after_album_delete IN (0,1));
-         PRAGMA user_version=3;",
+        "ALTER TABLE photos ADD COLUMN location_region_id TEXT NOT NULL DEFAULT '';
+         PRAGMA user_version=4;",
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())
@@ -189,7 +216,7 @@ pub fn library_root(conn: &Connection) -> Result<PathBuf, String> {
     conn.path()
         .and_then(|path| std::path::Path::new(path).parent())
         .map(|path| path.to_path_buf())
-        .ok_or_else(|| "图库路径不可用".into())
+        .ok_or_else(|| tr("图库路径不可用", "The library path is unavailable").into())
 }
 
 pub fn snapshot(conn: &Connection) -> Result<Snapshot, String> {
@@ -243,10 +270,9 @@ pub(crate) fn find_group(conn: &Connection, id: &str) -> Result<Option<Group>, S
     .map_err(|error| error.to_string())
 }
 
-pub(crate) const PHOTO_SELECT: &str =
-    "SELECT p.id,p.library,p.title,p.original_name,p.original_path,p.thumbnail_path,p.width,p.height,
-            p.tags,p.annotation,p.source,p.captured_at,p.location,p.project,p.imported_at,p.regions
-     FROM photos p";
+pub(crate) const PHOTO_FIELDS: &str =
+    "p.id,p.library,p.title,p.original_name,p.original_path,p.thumbnail_path,p.width,p.height,
+     p.tags,p.annotation,p.source,p.captured_at,p.location,p.project,p.imported_at,p.regions";
 
 pub(crate) fn photo_from_row(row: &Row<'_>) -> rusqlite::Result<Photo> {
     let tags: String = row.get(8)?;
@@ -278,6 +304,7 @@ pub(crate) fn photo_from_row(row: &Row<'_>) -> rusqlite::Result<Photo> {
         source: row.get(10)?,
         captured_at: row.get(11)?,
         location: row.get(12)?,
+        location_region_id: row.get(16)?,
         project: row.get(13)?,
         imported_at: row.get(14)?,
     })
@@ -295,7 +322,8 @@ pub(crate) fn membership_from_row(row: &Row<'_>) -> rusqlite::Result<Membership>
 fn read_snapshot(conn: &Connection, include_hidden: bool) -> Result<Snapshot, String> {
     let mut statement = conn
         .prepare(&format!(
-            "{PHOTO_SELECT} WHERE ?1 OR p.hidden_after_album_delete=0 ORDER BY p.imported_at DESC,p.id"
+            "SELECT {PHOTO_FIELDS},p.location_region_id FROM photos p
+             WHERE ?1 OR p.hidden_after_album_delete=0 ORDER BY p.imported_at DESC,p.id"
         ))
         .map_err(|e| e.to_string())?;
     let photos = statement

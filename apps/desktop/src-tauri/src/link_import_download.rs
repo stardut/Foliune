@@ -2,6 +2,7 @@ use super::{
     input::{media_allowed, Platform},
     Session,
 };
+use crate::locale::{display_format, tr};
 use std::time::Duration;
 use tauri::Url;
 
@@ -18,14 +19,22 @@ pub(super) struct Download {
 impl Download {
     pub(super) fn new(images: Vec<String>, platform: Platform) -> Result<Self, String> {
         if images.is_empty() || images.len() > 100 {
-            return Err("帖子图片数量无效或超过 100 张限制。".into());
+            return Err(tr(
+                "帖子图片数量无效或超过 100 张限制。",
+                "The post contains an invalid number of photos or exceeds the limit of 100.",
+            )
+            .into());
         }
         let urls = images
             .into_iter()
             .map(|image| {
-                let url = Url::parse(&image).map_err(|_| "帖子图片地址无效")?;
+                let url = Url::parse(&image)
+                    .map_err(|_| tr("帖子图片地址无效", "Invalid photo URL in the post"))?;
                 if !media_allowed(&url, platform) {
-                    return Err("帖子图片地址不在该平台受限 CDN 范围内。");
+                    return Err(tr(
+                        "帖子图片地址不在该平台受限 CDN 范围内。",
+                        "The photo URL is outside the supported CDN for this platform.",
+                    ));
                 }
                 Ok(url)
             })
@@ -36,7 +45,12 @@ impl Download {
             .timeout(Duration::from_secs(25));
         #[cfg(target_os = "macos")]
         let client = with_system_proxy(client, &urls)?;
-        let client = client.build().map_err(|_| "无法初始化图片下载")?;
+        let client = client.build().map_err(|_| {
+            tr(
+                "无法初始化图片下载",
+                "Could not initialize the photo download",
+            )
+        })?;
         let referer = match platform {
             Platform::Xhs => "https://www.xiaohongshu.com/",
             Platform::Instagram => "https://www.instagram.com/",
@@ -64,10 +78,16 @@ impl Download {
             .header("Referer", self.referer)
             .send()
             .await
-            .map_err(|_| "图片下载失败或超时。")?;
+            .map_err(|_| {
+                tr(
+                    "图片下载失败或超时。",
+                    "The photo download failed or timed out.",
+                )
+            })?;
         if !response.status().is_success() {
-            return Err(format!(
+            return Err(display_format!(
                 "图片下载返回 HTTP {}，未导入任何图片。",
+                "The photo download returned HTTP {}. No photos were imported.",
                 response.status().as_u16()
             ));
         }
@@ -75,16 +95,28 @@ impl Download {
             .content_length()
             .is_some_and(|n| n > MAX_BYTES as u64)
         {
-            return Err("单张图片超过 40 MiB 限制。".into());
+            return Err(tr(
+                "单张图片超过 40 MiB 限制。",
+                "A photo is larger than 40 MiB.",
+            )
+            .into());
         }
         let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|_| "图片下载中断或超时。")?
-        {
+        while let Some(chunk) = response.chunk().await.map_err(|_| {
+            tr(
+                "图片下载中断或超时。",
+                "The photo download was interrupted or timed out.",
+            )
+        })? {
             session.check()?;
             if bytes.len() + chunk.len() > MAX_BYTES
                 || self.bytes_received + chunk.len() > MAX_TOTAL
             {
-                return Err("图片下载超过会话大小限制。".into());
+                return Err(tr(
+                    "图片下载超过会话大小限制。",
+                    "The photos exceed the total download size limit.",
+                )
+                .into());
             }
             self.bytes_received += chunk.len();
             bytes.extend_from_slice(&chunk);
@@ -115,11 +147,14 @@ fn with_system_proxy(
 
     let mut proxies = HashMap::new();
     for url in urls {
-        let host = url.host_str().ok_or("帖子图片地址无效")?;
+        let host = url
+            .host_str()
+            .ok_or(tr("帖子图片地址无效", "Invalid photo URL in the post"))?;
         let Entry::Vacant(entry) = proxies.entry(host.to_owned()) else {
             continue;
         };
-        let url = CString::new(url.as_str()).map_err(|_| "帖子图片地址无效")?;
+        let url = CString::new(url.as_str())
+            .map_err(|_| tr("帖子图片地址无效", "Invalid photo URL in the post"))?;
         let mut proxy_host = [0; 1024];
         let mut port = 0;
         // The native resolver writes a NUL-terminated host on successful proxy lookup.
@@ -138,10 +173,25 @@ fn with_system_proxy(
             }
             1 => "http",
             2 => "socks5h",
-            3 => return Err("图片下载暂不支持 macOS 自动代理配置（PAC）。".into()),
-            _ => return Err("无法读取 macOS 图片下载代理设置。".into()),
+            3 => {
+                return Err(tr(
+                    "图片下载暂不支持 macOS 自动代理配置（PAC）。",
+                    "Photo downloads do not support macOS automatic proxy configuration (PAC).",
+                )
+                .into())
+            }
+            _ => {
+                return Err(tr(
+                    "无法读取 macOS 图片下载代理设置。",
+                    "Could not read macOS proxy settings for photo downloads.",
+                )
+                .into())
+            }
         };
-        let invalid = "macOS 图片下载代理地址无效。";
+        let invalid = tr(
+            "macOS 图片下载代理地址无效。",
+            "The macOS proxy address for photo downloads is invalid.",
+        );
         let proxy_host = unsafe { CStr::from_ptr(proxy_host.as_ptr()) }
             .to_str()
             .map_err(|_| invalid)?;

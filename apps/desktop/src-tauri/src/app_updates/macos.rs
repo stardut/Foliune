@@ -1,4 +1,5 @@
-use super::{UpdateError, UpdateProgress, DISABLED};
+use super::{disabled, UpdateError, UpdateProgress};
+use crate::locale::{display_format, tr};
 use crate::{db::Store, restart_gate::RestartGate, work_directory::runtime};
 use std::{
     ffi::{c_void, OsStr},
@@ -11,7 +12,12 @@ use std::{
 use tauri::{async_runtime::Mutex, ipc::Channel, AppHandle, Manager};
 use tauri_plugin_updater::{Builder, Config, Error, Update, UpdaterExt};
 
-const BUSY: &str = "请等待图库处理完成后再更新。";
+fn busy() -> &'static str {
+    tr(
+        "请等待图库处理完成后再更新。",
+        "Wait for library operations to finish before updating.",
+    )
+}
 
 extern "C" {
     fn foliune_observe_update_termination(
@@ -72,8 +78,13 @@ pub(super) fn setup(app: &AppHandle) {
 }
 
 pub(super) async fn check(app: &AppHandle) -> Result<Option<String>, String> {
-    let state = app.try_state::<AppUpdates>().ok_or(DISABLED)?;
-    let mut pending = state.pending.try_lock().map_err(|_| "正在处理应用更新。")?;
+    let state = app.try_state::<AppUpdates>().ok_or_else(disabled)?;
+    let mut pending = state.pending.try_lock().map_err(|_| {
+        tr(
+            "正在处理应用更新。",
+            "An app update is already in progress.",
+        )
+    })?;
     let allow_http = state.allow_http;
     let mut update = app
         .updater_builder()
@@ -128,25 +139,37 @@ pub(super) async fn install_and_restart(
 ) -> Result<(), UpdateError> {
     let state = app
         .try_state::<AppUpdates>()
-        .ok_or_else(|| UpdateError::new("install", DISABLED))?;
-    let mut pending = state
-        .pending
-        .clone()
-        .try_lock_owned()
-        .map_err(|_| UpdateError::new("busy", "正在处理应用更新。"))?;
+        .ok_or_else(|| UpdateError::new("install", disabled()))?;
+    let mut pending = state.pending.clone().try_lock_owned().map_err(|_| {
+        UpdateError::new(
+            "busy",
+            tr(
+                "正在处理应用更新。",
+                "An app update is already in progress.",
+            ),
+        )
+    })?;
     let store = app.state::<Store>();
     // Keep native close and quit protection active through download and verification.
     let reservation = store
         .restart_gate
         .begin_install()
-        .ok_or_else(|| UpdateError::new("busy", BUSY))?;
+        .ok_or_else(|| UpdateError::new("busy", busy()))?;
     let result = async {
         let candidate = pending
             .as_mut()
             .filter(|item| item.update.version == version)
-            .ok_or_else(|| UpdateError::new("check", "更新版本已变化，请重新检查更新。"))?;
+            .ok_or_else(|| {
+                UpdateError::new(
+                    "check",
+                    tr(
+                        "更新版本已变化，请重新检查更新。",
+                        "The available version changed. Check for updates again.",
+                    ),
+                )
+            })?;
         if runtime::has_active_jobs(app).map_err(|error| UpdateError::new("busy", error))? {
-            return Err(UpdateError::new("busy", BUSY));
+            return Err(UpdateError::new("busy", busy()));
         }
         if candidate.package.is_none() && !candidate.installed {
             candidate.package = Some(download(&candidate.update, &progress).await?);
@@ -157,7 +180,7 @@ pub(super) async fn install_and_restart(
             let _connection = store
                 .connection
                 .try_lock()
-                .map_err(|_| UpdateError::new("busy", BUSY))?;
+                .map_err(|_| UpdateError::new("busy", busy()))?;
             let candidate = pending
                 .as_mut()
                 .expect("matched pending update remains locked");
@@ -187,8 +210,12 @@ pub(super) async fn install_and_restart(
 }
 
 fn installed_bundle(app: &AppHandle) -> Result<PathBuf, String> {
-    let binary = tauri::process::current_binary(&app.env())
-        .map_err(|error| format!("无法定位已安装的 Foliune：{error}"))?;
+    let binary = tauri::process::current_binary(&app.env()).map_err(|error| {
+        display_format!(
+            "无法定位已安装的 Foliune：{error}",
+            "Could not locate the Foliune installation: {error}"
+        )
+    })?;
     binary
         .parent()
         .filter(|directory| directory.ends_with("Contents/MacOS"))
@@ -196,7 +223,13 @@ fn installed_bundle(app: &AppHandle) -> Result<PathBuf, String> {
         .and_then(Path::parent)
         .filter(|bundle| bundle.extension() == Some(OsStr::new("app")))
         .map(Path::to_path_buf)
-        .ok_or_else(|| "请在已安装的 Foliune.app 中安装更新。".into())
+        .ok_or_else(|| {
+            tr(
+                "请在已安装的 Foliune.app 中安装更新。",
+                "Open your installed copy of Foliune to update.",
+            )
+            .into()
+        })
 }
 
 fn relaunch(app: &AppHandle, bundle: &Path) -> Result<(), UpdateError> {
@@ -217,7 +250,7 @@ fn relaunch(app: &AppHandle, bundle: &Path) -> Result<(), UpdateError> {
     eprintln!("无法重新启动更新后的 Foliune：{detail}");
     Err(UpdateError::new(
         "restart",
-        "更新已安装，无法重新启动。可重试，或退出后重新打开 Foliune。",
+        tr("更新已安装，无法重新启动。可重试，或退出后重新打开 Foliune。", "The update was installed, but Foliune could not restart. Retry or quit and reopen Foliune."),
     ))
 }
 
@@ -227,17 +260,29 @@ fn download_error(error: Error) -> String {
         | Error::Base64(_)
         | Error::SignatureUtf8(_)
         | Error::MissingSignedVersion
-        | Error::SignedVersionMismatch { .. } => "更新包的签名验证失败，请重试。".into(),
+        | Error::SignedVersionMismatch { .. } => tr(
+            "更新包的签名验证失败，请重试。",
+            "Could not verify the update signature. Try again.",
+        )
+        .into(),
         other => {
             eprintln!("下载更新失败：{other}");
-            "下载更新失败，请检查网络后重试。".into()
+            tr(
+                "下载更新失败，请检查网络后重试。",
+                "Could not download the update. Check your network connection and try again.",
+            )
+            .into()
         }
     }
 }
 
 fn check_error(error: Error) -> String {
     eprintln!("无法检查更新：{error}");
-    "暂时无法检查更新，请稍后重试。".into()
+    tr(
+        "暂时无法检查更新，请稍后重试。",
+        "Could not check for updates. Try again later.",
+    )
+    .into()
 }
 
 fn install_error(error: Error) -> UpdateError {
@@ -246,16 +291,16 @@ fn install_error(error: Error) -> UpdateError {
             if io.kind() == ErrorKind::PermissionDenied
                 || io.raw_os_error() == Some(libc::EROFS) =>
         {
-            "系统未允许安装。请检查应用位置的写入权限，或将 Foliune 移到「应用程序」后重新打开。"
+            tr("系统未允许安装。请检查应用位置的写入权限，或将 Foliune 移到「应用程序」后重新打开。", "The system denied installation. Check write permissions or move Foliune to Applications and reopen it.")
                 .into()
         }
         Error::TempDirNotOnSameMountPoint => {
-            "无法在应用所在磁盘准备更新。请将 Foliune 移到「应用程序」后重新打开。".into()
+            tr("无法在应用所在磁盘准备更新。请将 Foliune 移到「应用程序」后重新打开。", "Could not prepare the update on the current drive. Move Foliune to Applications and reopen it.").into()
         }
         Error::PreviousAppNotRestored(path) => {
-            format!("安装失败。原来的 Foliune 已保存在「{}」。", path.display())
+            display_format!("安装失败。原来的 Foliune 已保存在「{}」。", "Installation failed. Your previous copy of Foliune is saved at “{}”.", path.display())
         }
-        other => format!("无法安装更新：{other}"),
+        other => display_format!("无法安装更新：{other}", "Could not install the update: {other}"),
     };
     UpdateError::new("install", message)
 }

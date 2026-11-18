@@ -1,4 +1,5 @@
 use super::{recorded_filename, BackupResult, Manifest, ManifestFile, MAX_MANIFEST_BYTES};
+use crate::locale::{display_format, tr};
 use crate::{
     db::{self, Store},
     local_photo, work_directory,
@@ -38,11 +39,15 @@ pub(crate) fn create_with_mode(
     mode: BackupMode,
 ) -> Result<BackupResult, String> {
     if path.extension().and_then(|value| value.to_str()) != Some("zip") {
-        return Err("备份文件请使用 .zip 扩展名".into());
+        return Err(tr(
+            "备份文件请使用 .zip 扩展名",
+            "Use the .zip extension for backups",
+        )
+        .into());
     }
     let output = path
         .parent()
-        .ok_or("备份目录无效")?
+        .ok_or(tr("备份目录无效", "Invalid backup folder"))?
         .join(format!(".foliune-backup-{}.tmp", Uuid::new_v4()));
     let conn = store.connection.lock().map_err(|error| error.to_string())?;
     let root = db::library_root(&conn)?;
@@ -69,11 +74,17 @@ pub(crate) fn create_with_mode(
     let cleanup = fs::remove_dir_all(&temporary);
     if let (Err(error), true) = (&mut result, output_created) {
         if let Err(cleanup) = fs::remove_file(output) {
-            error.push_str(&format!("；清理未完成的备份失败：{cleanup}"));
+            error.push_str(&display_format!(
+                "；清理未完成的备份失败：{cleanup}",
+                ". Could not clean up the incomplete backup: {cleanup}"
+            ));
         }
     }
     match (result, cleanup) {
-        (Err(error), Err(cleanup)) => Err(format!("{error}；清理备份暂存失败：{cleanup}")),
+        (Err(error), Err(cleanup)) => Err(display_format!(
+            "{error}；清理备份暂存失败：{cleanup}",
+            "{error}. Could not clean up temporary backup files: {cleanup}"
+        )),
         (Ok(result), Err(cleanup)) => {
             eprintln!("备份已写入，清理备份暂存失败：{cleanup}");
             Ok(result)
@@ -102,7 +113,11 @@ fn write_archive(
             .pragma_update_and_check(None, "journal_mode", "DELETE", |row| row.get(0))
             .map_err(|error| error.to_string())?;
         if journal != "delete" {
-            return Err("无法将备份数据库保存为单个文件".into());
+            return Err(tr(
+                "无法将备份数据库保存为单个文件",
+                "Could not save the backup database as a single file",
+            )
+            .into());
         }
         work_directory::discard_sync_jobs(&copy)?;
         let tx = copy.transaction().map_err(|error| error.to_string())?;
@@ -141,7 +156,12 @@ fn write_archive(
                     &original,
                     external,
                 )
-                .map_err(|error| format!("无法备份「{title}」的原片：{error}"))?
+                .map_err(|error| {
+                    display_format!(
+                        "无法备份「{title}」的原片：{error}",
+                        "Could not back up the original for “{title}”: {error}"
+                    )
+                })?
             } else {
                 None
             };
@@ -163,7 +183,12 @@ fn write_archive(
                 }
                 Ok::<_, String>(())
             })();
-            thumbnail_entry.map_err(|error| format!("无法备份「{title}」的缩略图：{error}"))?;
+            thumbnail_entry.map_err(|error| {
+                display_format!(
+                    "无法备份「{title}」的缩略图：{error}",
+                    "Could not back up the thumbnail for “{title}”: {error}"
+                )
+            })?;
             count += usize::from(!hidden);
         }
         if mode == BackupMode::Full {
@@ -187,7 +212,7 @@ fn write_archive(
     )?);
     let manifest = serde_json::to_vec(&manifest).map_err(|error| error.to_string())?;
     if manifest.len() as u64 > MAX_MANIFEST_BYTES {
-        return Err("备份清单过大".into());
+        return Err(tr("备份清单过大", "The backup manifest is too large").into());
     }
     archive
         .start_file("manifest.json", zip_options())
@@ -214,9 +239,10 @@ fn write_original(
 ) -> Result<Option<String>, String> {
     let original = work_directory::original(conn, id, locator)?;
     let mut source = original.open()?;
-    let revision = work_directory::stat_signature(&source).ok_or("无法确认原件状态")?;
+    let revision = work_directory::stat_signature(&source)
+        .ok_or(tr("无法确认原件状态", "Could not verify the original file"))?;
     let name = if external {
-        let id = Uuid::parse_str(id).map_err(|_| "照片 ID 无效")?;
+        let id = Uuid::parse_str(id).map_err(|_| tr("照片 ID 无效", "Invalid photo ID"))?;
         let mut header = [0; 12];
         source
             .read_exact(&mut header)
@@ -226,7 +252,13 @@ fn write_original(
             Some("image/jpeg") => "jpg",
             Some("image/png") => "png",
             Some("image/webp") => "webp",
-            _ => return Err("照片原件格式无法识别".into()),
+            _ => {
+                return Err(tr(
+                    "照片原件格式无法识别",
+                    "Could not identify the original photo format",
+                )
+                .into())
+            }
         };
         format!("originals/{id}.{extension}")
     } else {
@@ -236,7 +268,11 @@ fn write_original(
         let entry = write_entry(archive, name.clone(), &mut source)?;
         original.verify_content_hash(&entry.sha256)?;
         if work_directory::stat_signature(&source).as_deref() != Some(&revision) {
-            return Err("备份时原件发生变化，请重试".into());
+            return Err(tr(
+                "备份时原件发生变化，请重试",
+                "The original photo changed during backup. Try again.",
+            )
+            .into());
         }
         manifest.files.push(entry);
     }
@@ -250,7 +286,7 @@ fn new_entry(
 ) -> Result<bool, String> {
     match written.get(name) {
         Some(previous) if previous == source => Ok(false),
-        Some(_) => Err("备份文件名重复".into()),
+        Some(_) => Err(tr("备份文件名重复", "Duplicate backup filename").into()),
         None => {
             written.insert(name.to_owned(), source.to_owned());
             Ok(true)
@@ -288,7 +324,11 @@ fn write_entry(
         hash.update(bytes);
     }
     if source.limit() != 0 {
-        return Err("备份时文件大小发生变化，请重试".into());
+        return Err(tr(
+            "备份时文件大小发生变化，请重试",
+            "A file changed size during backup. Try again.",
+        )
+        .into());
     }
     Ok(ManifestFile {
         path: name,

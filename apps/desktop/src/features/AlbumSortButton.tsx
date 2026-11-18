@@ -1,20 +1,21 @@
+import { t } from '../lib/i18n';
 import { ArrowDownAZ, ArrowDownWideNarrow, ArrowDownZA, ArrowUpWideNarrow, ListOrdered, type LucideIcon } from 'lucide-react';
 import { DropdownMenu } from '../components/DropdownMenu';
 import type { AlbumSort, PhotoSort } from './library-photo-order';
 
 export const albumSortLabels = {
-  'time-asc': '创建时间 · 由旧到新',
-  'time-desc': '创建时间 · 由新到旧',
-  'name-asc': '相簿名 · 升序',
-  'name-desc': '相簿名 · 降序',
+  'time-asc': t('创建时间 · 由旧到新', 'Created · Oldest First'),
+  'time-desc': t('创建时间 · 由新到旧', 'Created · Newest First'),
+  'name-asc': t('相簿名 · 升序', 'Album Name · Ascending'),
+  'name-desc': t('相簿名 · 降序', 'Album Name · Descending'),
 } satisfies Record<AlbumSort, string>;
 
 export const photoSortLabels = {
-  membership: '加入顺序',
-  'time-asc': '拍摄时间 · 由旧到新',
-  'time-desc': '拍摄时间 · 由新到旧',
-  'name-asc': '文件名 · 升序',
-  'name-desc': '文件名 · 降序',
+  membership: t('加入顺序', 'Order Added'),
+  'time-asc': t('拍摄时间 · 由旧到新', 'Date Taken · Oldest First'),
+  'time-desc': t('拍摄时间 · 由新到旧', 'Date Taken · Newest First'),
+  'name-asc': t('文件名 · 升序', 'File Name · Ascending'),
+  'name-desc': t('文件名 · 降序', 'File Name · Descending'),
 } satisfies Record<PhotoSort, string>;
 
 export const albumSortIcons: Record<PhotoSort, LucideIcon> = {

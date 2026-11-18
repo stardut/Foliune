@@ -1,3 +1,4 @@
+import { photoCount, t } from '../../lib/i18n';
 import { useEffect, useState } from 'react';
 import { Modal } from '../../components/ui';
 import { DropdownSelect } from '../../components/DropdownSelect';
@@ -17,16 +18,16 @@ export function AddPhotosToBook({ snapshot, photos, selectedIds, onSnapshot, onB
   async function append() { setBusy(true); setError(''); try { await api.appendPhotosToBook(target, selectedIds); done(); } catch (cause) { setError(message(cause)); } finally { setBusy(false); } }
   async function create(input: CreateBookInput) { setBusy(true); try { await api.createBook(input); done(); } finally { setBusy(false); } }
   if (creating) return <BookCreator snapshot={snapshot} onSnapshot={onSnapshot} onBusyChange={setSourceBusy} photos={photos} initialSelected={selectedIds} busy={busy} onClose={() => setCreating(false)} onCreate={create} />;
-  return <Modal title="加入画册" onClose={() => { if (!busy) onClose(); }}>
+  return <Modal title={t('加入画册', 'Add to Book')} onClose={() => { if (!busy) onClose(); }}>
     <div className="stack-form">
-      <p>已选 {selectedIds.length} 张照片</p>
-      {loading ? <p role="status">正在读取书架…</p> : books.length ? <DropdownSelect label="目标画册" field value={target}
-        onChange={setTarget} options={books.map((book) => ({ value: book.id, label: book.title }))} /> : <p className="muted">还没有画册</p>}
+      <p>{t(`已选 ${selectedIds.length} 张照片`, `${photoCount(selectedIds.length)} selected`)}</p>
+      {loading ? <p role="status">{t('正在读取书架…', 'Loading bookshelf…')}</p> : books.length ? <DropdownSelect label={t('目标画册', 'Choose a Book')} field value={target}
+        onChange={setTarget} options={books.map((book) => ({ value: book.id, label: book.title }))} /> : <p className="muted">{t('还没有画册', 'No Photo Books Yet')}</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="button" type="button" disabled={busy} onClick={() => setCreating(true)}>用所选照片创建画册</button>
+      <button className="button" type="button" disabled={busy} onClick={() => setCreating(true)}>{t('用所选照片创建画册', 'Create a Book from Selection')}</button>
       <div className="form-actions">
-        <button type="button" className="button" disabled={busy} onClick={onClose}>取消</button>
-        <button type="button" className="button button-primary" disabled={busy || !target || !selectedIds.length} onClick={() => void append()}>{busy ? '保存中…' : '加入画册'}</button>
+        <button type="button" className="button" disabled={busy} onClick={onClose}>{t('取消', 'Cancel')}</button>
+        <button type="button" className="button button-primary" disabled={busy || !target || !selectedIds.length} onClick={() => void append()}>{busy ? t('保存中…', 'Saving…') : t('加入画册', 'Add to Book')}</button>
       </div>
     </div>
   </Modal>;

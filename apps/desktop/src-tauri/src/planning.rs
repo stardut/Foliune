@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use crate::{
     content_refs,
     db::{self, Store},
@@ -114,9 +115,14 @@ fn encode(input: &ShootPlanInput) -> Result<String, String> {
 }
 
 fn decode(json: &str) -> Result<ShootPlanInput, String> {
-    let document: Document = serde_json::from_str(json).map_err(|_| "拍摄策划文档格式无效")?;
+    let document: Document = serde_json::from_str(json)
+        .map_err(|_| tr("拍摄策划文档格式无效", "Invalid shoot plan document format"))?;
     if document.version != 2 {
-        return Err("拍摄策划文档版本不支持".into());
+        return Err(tr(
+            "拍摄策划文档版本不支持",
+            "Unsupported shoot plan document version",
+        )
+        .into());
     }
     Ok(document.input)
 }
@@ -124,7 +130,7 @@ fn decode(json: &str) -> Result<ShootPlanInput, String> {
 pub fn init(conn: &Connection) -> Result<(), String> {
     let count: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('shoot_plans','shoot_plan_photos')", [], |row| row.get(0)).map_err(|e| e.to_string())?;
     if count != 0 && count != 2 {
-        return Err("拍摄策划数据表不完整".into());
+        return Err(tr("拍摄策划数据表不完整", "Shoot plan tables are incomplete").into());
     }
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     tx.execute_batch(
@@ -157,7 +163,7 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         "updated_at",
     ] {
         if !columns.contains(required) {
-            return Err("拍摄策划数据结构不完整".into());
+            return Err(tr("拍摄策划数据结构不完整", "Shoot plan data is incomplete").into());
         }
     }
     let photo_columns = table_columns(&tx, "PRAGMA table_info(shoot_plan_photos)")?;
@@ -165,7 +171,11 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         .iter()
         .any(|column| !photo_columns.contains(*column))
     {
-        return Err("拍摄策划照片引用结构不完整".into());
+        return Err(tr(
+            "拍摄策划照片引用结构不完整",
+            "Shoot plan photo references are incomplete",
+        )
+        .into());
     }
     // Absence of this column is the only v1 marker. A null or malformed v2 document is corruption.
     if !columns.contains("document_json") {
@@ -262,9 +272,13 @@ fn migrate_v1(conn: &Connection) -> Result<(), String> {
 }
 
 fn structural_id(id: &str, seen: &mut HashSet<String>) -> Result<(), String> {
-    content_refs::text(id, "结构标识", MAX_TITLE)?;
+    content_refs::text(id, tr("结构标识", "Structure ID"), MAX_TITLE)?;
     if id.trim().is_empty() || !seen.insert(id.to_owned()) {
-        return Err("拍摄组、画面和参考的标识不能为空或重复".into());
+        return Err(tr(
+            "拍摄组、画面和参考的标识不能为空或重复",
+            "Scene, shot, and reference IDs must be present and unique",
+        )
+        .into());
     }
     Ok(())
 }
@@ -292,7 +306,7 @@ fn photo_union(input: &ShootPlanInput) -> Vec<String> {
 
 fn validate(conn: &Connection, input: &ShootPlanInput) -> Result<(), String> {
     content_refs::name(&input.title)?;
-    content_refs::text(&input.title, "策划名称", MAX_TITLE)?;
+    content_refs::text(&input.title, tr("策划名称", "Plan name"), MAX_TITLE)?;
     let date = &input.execution_date;
     if !date.is_empty()
         && (date.len() != 10
@@ -300,9 +314,13 @@ fn validate(conn: &Connection, input: &ShootPlanInput) -> Result<(), String> {
             || !chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
                 .is_ok_and(|parsed| parsed.format("%Y-%m-%d").to_string() == *date))
     {
-        return Err("执行日期须为有效的 YYYY-MM-DD 日期".into());
+        return Err(tr(
+            "执行日期须为有效的 YYYY-MM-DD 日期",
+            "Enter a valid shoot date in YYYY-MM-DD format",
+        )
+        .into());
     }
-    content_refs::text(&input.shoot_date, "拍摄时间", MAX_DATE)?;
+    content_refs::text(&input.shoot_date, tr("拍摄时间", "Shoot time"), MAX_DATE)?;
     for value in [
         &input.concept,
         &input.location,
@@ -314,10 +332,13 @@ fn validate(conn: &Connection, input: &ShootPlanInput) -> Result<(), String> {
         &input.equipment,
         &input.preparation,
     ] {
-        content_refs::text(value, "策划内容", MAX_TEXT)?;
+        content_refs::text(value, tr("策划内容", "Plan content"), MAX_TEXT)?;
     }
     if input.parts.len() > MAX_PARTS {
-        return Err(format!("拍摄组最多 {MAX_PARTS} 组"));
+        return Err(display_format!(
+            "拍摄组最多 {MAX_PARTS} 组",
+            "A plan can contain up to {MAX_PARTS} scenes"
+        ));
     }
     if input
         .parts
@@ -326,16 +347,22 @@ fn validate(conn: &Connection, input: &ShootPlanInput) -> Result<(), String> {
         .sum::<usize>()
         > MAX_SHOTS
     {
-        return Err(format!("目标画面总数最多 {MAX_SHOTS} 个"));
+        return Err(display_format!(
+            "目标画面总数最多 {MAX_SHOTS} 个",
+            "A plan can contain up to {MAX_SHOTS} shots"
+        ));
     }
     if references(input).count() > MAX_REFERENCES {
-        return Err(format!("策划参考总数最多 {MAX_REFERENCES} 个"));
+        return Err(display_format!(
+            "策划参考总数最多 {MAX_REFERENCES} 个",
+            "A plan can contain up to {MAX_REFERENCES} references"
+        ));
     }
     let mut seen = HashSet::new();
     for part in &input.parts {
         structural_id(&part.id, &mut seen)?;
-        content_refs::text(&part.title, "拍摄组名称", MAX_TITLE)?;
-        content_refs::text(&part.time_window, "拍摄组时间", MAX_DATE)?;
+        content_refs::text(&part.title, tr("拍摄组名称", "Scene name"), MAX_TITLE)?;
+        content_refs::text(&part.time_window, tr("拍摄组时间", "Scene time"), MAX_DATE)?;
         for value in [
             &part.description,
             &part.shot_list,
@@ -345,11 +372,11 @@ fn validate(conn: &Connection, input: &ShootPlanInput) -> Result<(), String> {
             &part.focal_length,
             &part.mood,
         ] {
-            content_refs::text(value, "拍摄组内容", MAX_TEXT)?;
+            content_refs::text(value, tr("拍摄组内容", "Scene content"), MAX_TEXT)?;
         }
         for shot in &part.shots {
             structural_id(&shot.id, &mut seen)?;
-            content_refs::text(&shot.title, "画面名称", MAX_TITLE)?;
+            content_refs::text(&shot.title, tr("画面名称", "Shot name"), MAX_TITLE)?;
             for value in [
                 &shot.description,
                 &shot.pose,
@@ -357,14 +384,18 @@ fn validate(conn: &Connection, input: &ShootPlanInput) -> Result<(), String> {
                 &shot.lighting,
                 &shot.mood,
             ] {
-                content_refs::text(value, "画面内容", MAX_TEXT)?;
+                content_refs::text(value, tr("画面内容", "Shot content"), MAX_TEXT)?;
             }
         }
     }
     for reference in references(input) {
         structural_id(&reference.id, &mut seen)?;
-        content_refs::text(&reference.photo_id, "照片标识", MAX_TITLE)?;
-        content_refs::text(&reference.intent, "参考意图", MAX_TEXT)?;
+        content_refs::text(&reference.photo_id, tr("照片标识", "Photo ID"), MAX_TITLE)?;
+        content_refs::text(
+            &reference.intent,
+            tr("参考意图", "Reference note"),
+            MAX_TEXT,
+        )?;
     }
     content_refs::validate_photos(conn, &photo_union(input))
 }
@@ -381,7 +412,11 @@ fn read_plan(conn: &Connection, row: PlanRow) -> Result<ShootPlan, String> {
     content_refs::timestamps(&id, &created_at, &updated_at)?;
     validate(conn, &input)?;
     if read_photo_union(conn, &id)? != photo_union(&input) {
-        return Err("拍摄策划文档与照片引用不一致".into());
+        return Err(tr(
+            "拍摄策划文档与照片引用不一致",
+            "The shoot plan document and photo references do not match",
+        )
+        .into());
     }
     Ok(ShootPlan {
         id,
@@ -400,7 +435,7 @@ pub fn get(conn: &Connection, id: &str) -> Result<ShootPlan, String> {
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or("拍摄策划不存在")?;
+        .ok_or(tr("拍摄策划不存在", "This shoot plan no longer exists."))?;
     read_plan(conn, row)
 }
 
@@ -417,7 +452,11 @@ pub fn validate_all(conn: &Connection) -> Result<(), String> {
     list(conn)?;
     let orphan: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM shoot_plan_photos p LEFT JOIN shoot_plans s ON s.id=p.plan_id WHERE s.id IS NULL)", [], |row| row.get(0)).map_err(|e| e.to_string())?;
     if orphan {
-        return Err("拍摄策划照片引用缺少所属策划".into());
+        return Err(tr(
+            "拍摄策划照片引用缺少所属策划",
+            "A shoot plan photo reference has no matching plan",
+        )
+        .into());
     }
     Ok(())
 }
@@ -455,28 +494,28 @@ fn save_inner(
             )
             .optional()
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| "拍摄策划不存在".to_string())
+            .ok_or_else(|| tr("拍摄策划不存在", "This shoot plan no longer exists.").to_string())
         })
         .transpose()?;
     let previous = existing.as_ref().map(|(_, updated)| updated.as_str());
     if expected_revision.is_some() && expected_revision != previous {
-        return Err(db::REVISION_CONFLICT.into());
+        return Err(db::revision_conflict().into());
     }
     input.title = content_refs::name(&input.title)?;
     if input.execution_date.is_empty() {
-        return Err("请选择执行日期".into());
+        return Err(tr("请选择执行日期", "Choose a shoot date").into());
     }
     validate(&tx, &input)?;
     for (index, part) in input.parts.iter().enumerate() {
         if part.references.len() > MAX_SCENE_REFERENCES {
             let title = part.title.trim();
             let name = if title.is_empty() {
-                format!("场景 {}", index + 1)
+                display_format!("场景 {}", "Scene {}", index + 1)
             } else {
-                format!("场景 {}「{title}」", index + 1)
+                display_format!("场景 {}「{title}」", "Scene {} “{title}”", index + 1)
             };
-            return Err(format!(
-                "{name}最多 {MAX_SCENE_REFERENCES} 张参考图，请整理后保存"
+            return Err(display_format!(
+                "{name}最多 {MAX_SCENE_REFERENCES} 张参考图，请整理后保存", "{name} can have up to {MAX_SCENE_REFERENCES} reference photos. Remove extras before saving."
             ));
         }
     }
@@ -529,7 +568,7 @@ pub(crate) fn delete_record(conn: &Connection, id: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         == 0
     {
-        return Err("拍摄策划不存在".into());
+        return Err(tr("拍摄策划不存在", "This shoot plan no longer exists.").into());
     }
     content_refs::hide_unreferenced_photos(conn, candidates)
 }
@@ -550,7 +589,9 @@ pub async fn plans_save(
             Some(id) => update(
                 conn,
                 id,
-                expected_revision.as_deref().ok_or(db::REVISION_CONFLICT)?,
+                expected_revision
+                    .as_deref()
+                    .ok_or_else(db::revision_conflict)?,
                 input,
             ),
             None => save(conn, None, input),

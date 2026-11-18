@@ -1,4 +1,5 @@
 use super::{supported_file, valid_component, verification, Root, LOCATOR_PREFIX};
+use crate::locale::{display_format, tr};
 use crate::{db, local_photo};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -65,9 +66,16 @@ impl Eq for Original {}
 
 fn original_error(error: io::Error) -> String {
     if error.kind() == io::ErrorKind::NotFound {
-        "照片原件缺失，请重新定位照片".into()
+        tr(
+            "照片原件缺失，请重新定位照片",
+            "The original photo is missing. Relocate it and try again.",
+        )
+        .into()
     } else {
-        format!("读取照片原件失败：{error}")
+        display_format!(
+            "读取照片原件失败：{error}",
+            "Could not read the original photo: {error}"
+        )
     }
 }
 
@@ -84,11 +92,19 @@ impl Original {
             Storage::Managed { root, path } => {
                 let path = path.canonicalize().map_err(original_error)?;
                 if path.parent() != Some(root.join("originals").as_path()) {
-                    return Err("照片原件不在当前图库的管理目录中".into());
+                    return Err(tr(
+                        "照片原件不在当前图库的管理目录中",
+                        "The original photo is outside the current library’s managed folder",
+                    )
+                    .into());
                 }
                 let file = File::open(path).map_err(original_error)?;
                 if !file.metadata().map_err(original_error)?.is_file() {
-                    return Err("照片原件不是普通文件，请重新定位照片".into());
+                    return Err(tr(
+                        "照片原件不是普通文件，请重新定位照片",
+                        "The original photo is not a regular file. Relocate the photo.",
+                    )
+                    .into());
                 }
                 Ok(file)
             }
@@ -102,16 +118,26 @@ impl Original {
             return self.open_bound_with_signature(source);
         }
         let file = self.open()?;
-        let signature = stat_signature(&file).ok_or("无法确认照片原件状态")?;
+        let signature = stat_signature(&file).ok_or(tr(
+            "无法确认照片原件状态",
+            "Could not verify the original photo",
+        ))?;
         Ok((file, signature))
     }
 
     fn open_bound_with_signature(&self, source: &BoundSource) -> Result<(File, String), String> {
         let mut file = source.open()?;
-        let signature = stat_signature(&file).ok_or("无法确认作品原件状态")?;
+        let signature = stat_signature(&file).ok_or(tr(
+            "无法确认作品原件状态",
+            "Could not verify the original work photo",
+        ))?;
         self.verify_content_hash(&fingerprint(&mut file)?)?;
         if stat_signature(&file).as_deref() != Some(signature.as_str()) {
-            return Err(format!("作品原件在读取期间发生变化：{}", source.file_name));
+            return Err(display_format!(
+                "作品原件在读取期间发生变化：{}",
+                "The original work photo changed while it was being read: {}",
+                source.file_name
+            ));
         }
         file.rewind().map_err(original_error)?;
         Ok((file, signature))
@@ -120,7 +146,11 @@ impl Original {
     pub(crate) fn verify_content_hash(&self, sha256: &str) -> Result<(), String> {
         if let Storage::Bound(source) = &self.storage {
             if sha256 != source.sha256 {
-                return Err(format!("作品原件内容已变化：{}", source.file_name));
+                return Err(display_format!(
+                    "作品原件内容已变化：{}",
+                    "The original work photo changed: {}",
+                    source.file_name
+                ));
             }
         }
         Ok(())
@@ -143,24 +173,43 @@ impl Original {
                         // Earlier records have no fast stat signature. Check before allocating.
                         let size = file.metadata().map_err(original_error)?.len();
                         if fingerprint(&mut file)? != source.sha256 {
-                            return Err(format!("作品原件内容已变化：{}", source.file_name));
+                            return Err(display_format!(
+                                "作品原件内容已变化：{}",
+                                "The original work photo changed: {}",
+                                source.file_name
+                            ));
                         }
                         file.rewind().map_err(original_error)?;
                         size
                     }
                 };
-                let limit = size.checked_add(1).ok_or("作品原件大小无效")?;
+                let limit = size
+                    .checked_add(1)
+                    .ok_or(tr("作品原件大小无效", "Invalid original work photo size"))?;
                 let mut bytes = Vec::new();
                 bytes
-                    .try_reserve_exact(limit.try_into().map_err(|_| "作品原件过大")?)
-                    .map_err(|_| "内存不足，无法读取作品原件")?;
+                    .try_reserve_exact(
+                        limit.try_into().map_err(|_| {
+                            tr("作品原件过大", "The original work photo is too large")
+                        })?,
+                    )
+                    .map_err(|_| {
+                        tr(
+                            "内存不足，无法读取作品原件",
+                            "There is not enough memory to read the original work photo",
+                        )
+                    })?;
                 file.take(limit)
                     .read_to_end(&mut bytes)
                     .map_err(original_error)?;
                 if bytes.len() as u64 != size
                     || format!("{:x}", Sha256::digest(&bytes)) != source.sha256
                 {
-                    return Err(format!("作品原件内容已变化：{}", source.file_name));
+                    return Err(display_format!(
+                        "作品原件内容已变化：{}",
+                        "The original work photo changed: {}",
+                        source.file_name
+                    ));
                 }
                 Ok(bytes)
             }
@@ -193,7 +242,7 @@ fn bound_source(conn: &Connection, photo_id: &str, locator: &str) -> Result<Boun
     if locator.strip_prefix(LOCATOR_PREFIX) != Some(photo_id)
         || uuid::Uuid::parse_str(photo_id).is_err()
     {
-        return Err("作品原件引用无效".into());
+        return Err(tr("作品原件引用无效", "Invalid original work photo reference").into());
     }
     conn.prepare_cached(&format!(
         "SELECT {BOUND_SOURCE_COLUMNS}
@@ -203,7 +252,13 @@ fn bound_source(conn: &Connection, photo_id: &str, locator: &str) -> Result<Boun
     .and_then(|mut statement| statement.query_row([photo_id], BoundSource::from_row))
     .optional()
     .map_err(|e| e.to_string())?
-    .ok_or_else(|| "作品原件引用不存在".into())
+    .ok_or_else(|| {
+        tr(
+            "作品原件引用不存在",
+            "The original work photo reference is missing",
+        )
+        .into()
+    })
 }
 
 pub(crate) fn original_status(
@@ -281,14 +336,31 @@ impl BoundSource {
 
     fn open(&self) -> Result<File, String> {
         if !self.root.authorized {
-            return Err("作品目录尚未重新定位".into());
+            return Err(tr(
+                "作品目录尚未重新定位",
+                "Relocate the work folder to access its photos",
+            )
+            .into());
         }
-        let root = RootDirectory::open(&self.root.path).map_err(|_| "作品目录当前不可用")?;
-        let file = root
-            .photo(&self.folder, &self.file_name)
-            .map_err(|_| format!("作品原件缺失或无法读取：{}", self.file_name))?;
+        let root = RootDirectory::open(&self.root.path).map_err(|_| {
+            tr(
+                "作品目录当前不可用",
+                "The work folder is currently unavailable",
+            )
+        })?;
+        let file = root.photo(&self.folder, &self.file_name).map_err(|_| {
+            display_format!(
+                "作品原件缺失或无法读取：{}",
+                "The original work photo is missing or unreadable: {}",
+                self.file_name
+            )
+        })?;
         if !size_matches(&file, self.expected_size()) {
-            return Err(format!("作品原件内容已变化：{}", self.file_name));
+            return Err(display_format!(
+                "作品原件内容已变化：{}",
+                "The original work photo changed: {}",
+                self.file_name
+            ));
         }
         Ok(file)
     }
@@ -598,7 +670,10 @@ fn open_checked_file(path: &Path) -> io::Result<File> {
 }
 
 fn invalid_path() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, "目录路径或文件类型无效")
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        tr("目录路径或文件类型无效", "Invalid folder path or file type"),
+    )
 }
 
 #[cfg(unix)]

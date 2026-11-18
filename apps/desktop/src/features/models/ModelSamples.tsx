@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n';
 import { useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import { ImageOff } from 'lucide-react';
@@ -24,20 +25,20 @@ export function ModelSamples({ ids, coverId, photos, disabled, onChange, onCover
     const action = (key: string, text: string, run: () => void, unavailable = false): ContextMenuAction => ({ id: key, text, run, allowed, disabled: unavailable });
     function move(offset: number) { const next = [...ids]; [next[index], next[index + offset]] = [next[index + offset], next[index]]; onChange(next); }
     void menu([
-      action('preview', '查看大图', () => setPreview(id), !map.has(id)),
-      action('cover', id === coverId ? '当前封面' : '设为封面', () => onCover(id), id === coverId || !map.has(id)),
-      action('previous', '向前移动', () => move(-1), index <= 0),
-      action('next', '向后移动', () => move(1), index >= ids.length - 1),
-      action('remove', '移除样片', () => onChange(ids.filter((item) => item !== id))),
+      action('preview', t('查看大图', 'View Photo'), () => setPreview(id), !map.has(id)),
+      action('cover', id === coverId ? t('当前封面', 'Current Cover') : t('设为封面', 'Set as Cover'), () => onCover(id), id === coverId || !map.has(id)),
+      action('previous', t('向前移动', 'Move Earlier'), () => move(-1), index <= 0),
+      action('next', t('向后移动', 'Move Later'), () => move(1), index >= ids.length - 1),
+      action('remove', t('移除样片', 'Remove Photo'), () => onChange(ids.filter((item) => item !== id))),
     ], at, trigger);
   }
   return <>
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="model-samples">{ids.map((id, index) => {
       const photo = map.get(id);
-      const label = photo ? `查看 ${photo.title || photo.originalName}` : `第 ${index + 1} 张样片记录缺失`;
+      const label = photo ? t(`查看 ${photo.title || photo.originalName}`, `View ${photo.title || photo.originalName}`) : t(`第 ${index + 1} 张样片记录缺失`, `Portfolio photo ${index + 1} is missing`);
       const menuTrigger = {
-        'aria-label': id === coverId ? `${label}，当前封面` : label,
+        'aria-label': id === coverId ? t(`${label}，当前封面`, `${label}, current cover`) : label,
         'aria-haspopup': 'menu' as const,
         'aria-keyshortcuts': 'ContextMenu Shift+F10',
         onContextMenu(event: MouseEvent<HTMLElement>) {
@@ -57,10 +58,10 @@ export function ModelSamples({ ids, coverId, photos, disabled, onChange, onCover
         {photo ? <button type="button" className="model-sample-image" disabled={disabled} onClick={() => setPreview(id)} {...menuTrigger}>
           <PhotoImage photo={photo} lazy />
         </button> : <div className="model-sample-image model-missing" role="img" tabIndex={disabled ? -1 : 0} aria-disabled={disabled || undefined} {...menuTrigger}>
-          <ImageOff size={22} aria-hidden="true" />样片记录缺失
+          <ImageOff size={22} aria-hidden="true" />{t('样片记录缺失', 'Portfolio photo missing')}
         </div>}
       </article>;
     })}</div>
-    {preview && <PhotoReview photos={ordered} initialPhotoId={preview} context="模特样片" returnLabel="返回模特样片" busy={disabled} onClose={() => setPreview(null)} onRelink={onRelink ?? (async () => { throw new Error('请返回图库重新定位这张照片。'); })} />}
+    {preview && <PhotoReview photos={ordered} initialPhotoId={preview} context={t('模特样片', 'Model Portfolio')} returnLabel={t('返回模特样片', 'Back to Portfolio')} busy={disabled} onClose={() => setPreview(null)} onRelink={onRelink ?? (async () => { throw new Error(t('请返回图库重新定位这张照片。', 'Return to the library to relink this photo.')); })} />}
   </>;
 }

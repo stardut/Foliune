@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n';
 import type { ContextMenuPosition } from './use-context-menu';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { useReducedMotion } from 'motion/react';
@@ -145,14 +146,14 @@ export function SinglePhotoView({ photos, selected, initialCursor, rememberCurso
     return () => window.removeEventListener('keydown', navigate);
   }, [photos, photoIndices]);
 
-  return <section ref={view} className="album-single-view" aria-label="单张浏览">
+  return <section ref={view} className="album-single-view" aria-label={t('单张浏览', 'Single Photo View')}>
     <div className="album-single-stage" aria-busy={images.waiting} onContextMenu={(event) => {
       event.preventDefault(); event.stopPropagation();
       if (!images.outgoing && current && activeThumbnail.current) onMenu(current, { x: event.clientX, y: event.clientY, source: 'mouse' }, activeThumbnail.current);
     }}>
       <PhotoReviewImage state={images} controller={controller} onRelink={onRelink} busy={busy} allowZoom={false} />
     </div>
-    <div className="album-filmstrip" ref={strip} role="group" aria-label="照片缩略图" aria-keyshortcuts="ArrowLeft ArrowRight"
+    <div className="album-filmstrip" ref={strip} role="group" aria-label={t('照片缩略图', 'Photo Thumbnails')} aria-keyshortcuts="ArrowLeft ArrowRight"
       onFocus={(event) => {
         const target = thumbnailTarget(event.target);
         if (target) setFocusedThumbnailId(photos[Number(target.dataset.photoIndex)].id);
@@ -195,7 +196,7 @@ export function SinglePhotoView({ photos, selected, initialCursor, rememberCurso
         })}
       </div>
     </div>
-    {current && <span className="sr-only" role="status">第 {tabStopIndex + 1} / {photos.length} 张：{current.title || current.originalName}</span>}
+    {current && <span className="sr-only" role="status">{t(`第 ${tabStopIndex + 1} / ${photos.length} 张：${current.title || current.originalName}`, `Photo ${tabStopIndex + 1} of ${photos.length}: ${current.title || current.originalName}`)}</span>}
   </section>;
 }
 
@@ -210,7 +211,8 @@ const Thumbnail = memo(function Thumbnail({ photo, index, selected, current, act
   const name = photo.title || photo.originalName;
   const unavailable = photo.availability && (!photo.originalAvailable || !photo.thumbnailAvailable);
   return <button type="button" className="album-filmstrip-thumb" ref={activeRef} data-photo-index={index} style={{ '--filmstrip-index': index } as CSSProperties}
-    aria-current={current || undefined} aria-label={`第 ${index + 1} 张：${name}${selected ? '，已选择' : ''}${unavailable ? `，${photoUnavailableLabel(photo)}` : ''}`} title={name} tabIndex={activeRef ? 0 : -1}>
+    aria-current={current || undefined} aria-label={t(`第 ${index + 1} 张：${name}${selected ? '，已选择' : ''}${unavailable ? `，${photoUnavailableLabel(photo)}` : ''}`,
+      `Photo ${index + 1}: ${name}${selected ? ', selected' : ''}${unavailable ? `, ${photoUnavailableLabel(photo)}` : ''}`)} title={name} tabIndex={activeRef ? 0 : -1}>
     {!unavailable && photo.thumbnailAvailable && photo.thumbnailUrl !== failedUrl
       ? <img src={photo.thumbnailUrl} alt="" draggable={false} loading="lazy" decoding="async" onError={() => setFailedUrl(photo.thumbnailUrl)} />
       : <ImageOff size={18} strokeWidth={1.2} aria-hidden="true" />}

@@ -6,6 +6,7 @@ use super::{
     sync::{self, Candidate, Decision, SyncDelta},
     unbind, verification, Original, Root, Scan,
 };
+use crate::locale::{display_format, tr};
 use crate::{
     db::{self, Store},
     groups, local_photo,
@@ -27,6 +28,8 @@ const CHANGE_EVENT: &str = "work-directory-changed";
 const RECENT_BATCHES: usize = 8;
 #[path = "monitor.rs"]
 mod monitor;
+#[path = "sync_error.rs"]
+mod sync_error;
 #[path = "worker.rs"]
 mod worker;
 
@@ -92,8 +95,16 @@ impl Cache {
     }
 
     fn view(&self) -> WorkDirectoryState {
+        let mut jobs = self.queue.states();
+        if !crate::locale::current().is_chinese() {
+            for job in &mut jobs {
+                if let Some(error) = job.error.as_mut() {
+                    *error = sync_error::english(error).into_owned();
+                }
+            }
+        }
         WorkDirectoryState {
-            jobs: self.queue.states(),
+            jobs,
             ..self.state.clone()
         }
     }
@@ -114,7 +125,7 @@ impl Cache {
                 .transpose()?
                 .unwrap_or_default();
             self.state.library_id = library_id(&store.root, &library)
-                .ok_or("图库路径无效")?
+                .ok_or(tr("图库路径无效", "Invalid library path"))?
                 .into();
             self.context_id = uuid::Uuid::new_v4();
             self.queue = queue;
@@ -160,7 +171,7 @@ impl Cache {
 
     fn selected(&self, input: &ResolveInput) -> Result<Vec<Candidate>, String> {
         if input.candidate_ids.is_empty() {
-            return Err("请选择待同步内容".into());
+            return Err(tr("请选择待同步内容", "Select items to sync").into());
         }
         let mut seen = HashSet::new();
         input
@@ -174,9 +185,12 @@ impl Cache {
                     .find(|candidate| {
                         &candidate.id == id && !self.queue.reserves_folder(&candidate.folder_name)
                     })
-                    .ok_or("待同步内容已变化，请重新查看后确认")?;
+                    .ok_or(tr(
+                        "待同步内容已变化，请重新查看后确认",
+                        "The items to sync changed. Review the updated list before confirming.",
+                    ))?;
                 if !seen.insert(&candidate.folder_name) {
-                    return Err("待同步内容重复".into());
+                    return Err(tr("待同步内容重复", "Duplicate items to sync").into());
                 }
                 Ok(candidate.clone())
             })
@@ -184,7 +198,10 @@ impl Cache {
     }
 
     fn enqueue(&mut self, conn: &mut Connection, selected: Vec<Candidate>) -> Result<(), String> {
-        let root = self.root.as_ref().ok_or("当前图库未绑定作品目录")?;
+        let root = self.root.as_ref().ok_or(tr(
+            "当前图库未绑定作品目录",
+            "No work folder is connected to this library",
+        ))?;
         self.queue.enqueue(conn, root, selected, self.stamp)?;
         let visible = |candidate: &Candidate| !self.queue.reserves_folder(&candidate.folder_name);
         self.state.candidates.retain(visible);
@@ -230,7 +247,12 @@ pub(crate) fn start_monitor(app: &AppHandle) -> Result<(), String> {
     std::thread::Builder::new()
         .name("work-directory-sync".into())
         .spawn(move || worker::run_jobs(worker_app, pending))
-        .map_err(|e| format!("无法启动作品目录同步：{e}"))?;
+        .map_err(|e| {
+            display_format!(
+                "无法启动作品目录同步：{e}",
+                "Could not start work folder sync: {e}"
+            )
+        })?;
     let verify_app = app.clone();
     std::thread::Builder::new()
         .name("work-directory-verify".into())
@@ -242,12 +264,22 @@ pub(crate) fn start_monitor(app: &AppHandle) -> Result<(), String> {
                 }
             });
         })
-        .map_err(|e| format!("无法启动作品目录原件校验：{e}"))?;
+        .map_err(|e| {
+            display_format!(
+                "无法启动作品目录原件校验：{e}",
+                "Could not start work folder original verification: {e}"
+            )
+        })?;
     let app = app.clone();
     std::thread::Builder::new()
         .name("work-directory-monitor".into())
         .spawn(move || monitor::run(app, receiver, signal))
-        .map_err(|e| format!("无法启动作品目录监听：{e}"))?;
+        .map_err(|e| {
+            display_format!(
+                "无法启动作品目录监听：{e}",
+                "Could not start monitoring the work folder: {e}"
+            )
+        })?;
     Ok(())
 }
 
@@ -330,7 +362,7 @@ impl LocatedPath {
         update: fn(&Connection, &Path) -> Result<(), String>,
     ) -> Result<(), String> {
         if self.context_id != cache.context_id {
-            return Err("图库或作品目录已切换".into());
+            return Err(tr("图库或作品目录已切换", "The library or work folder changed").into());
         }
         update(conn, &self.path)?;
         // A relink can clear jobs even when the chosen path has not changed.
@@ -415,7 +447,11 @@ pub(crate) async fn relink_work_directory(
         true,
         Box::new(move |store, conn, cache| {
             if cache.source_locked() {
-                return Err("请等待作品目录同步完成后再重新定位".into());
+                return Err(tr(
+                    "请等待作品目录同步完成后再重新定位",
+                    "Wait for the work folder to finish syncing before relocating it",
+                )
+                .into());
             }
             selected.apply(store, conn, cache, relink)
         }),
@@ -430,7 +466,11 @@ pub(crate) async fn unbind_work_directory(app: AppHandle) -> Result<WorkDirector
         true,
         Box::new(|store, conn, cache| {
             if cache.source_locked() {
-                return Err("请等待作品目录同步完成后再解绑".into());
+                return Err(tr(
+                    "请等待作品目录同步完成后再解绑",
+                    "Wait for the work folder to finish syncing before disconnecting it",
+                )
+                .into());
             }
             unbind(conn)?;
             cache.ensure_context(store, conn)
@@ -448,12 +488,19 @@ pub(crate) async fn resolve_work_directory(
         app,
         false,
         Box::new(move |store, conn, cache| {
-            let root = cache.root.as_ref().ok_or("当前图库未绑定作品目录")?;
+            let root = cache.root.as_ref().ok_or(tr(
+                "当前图库未绑定作品目录",
+                "No work folder is connected to this library",
+            ))?;
             let selected = cache.selected(&input)?;
             match input.decision {
                 Decision::Sync => {
                     if !root.authorized || cache.state.status != Status::Connected {
-                        return Err("作品目录当前不可用".into());
+                        return Err(tr(
+                            "作品目录当前不可用",
+                            "The work folder is currently unavailable",
+                        )
+                        .into());
                     }
                     cache.enqueue(conn, selected)
                 }
@@ -489,7 +536,11 @@ pub(crate) async fn delete_group(app: AppHandle, id: String) -> Result<Snapshot,
         let mut cache = manager.cache.lock().map_err(|e| e.to_string())?;
         cache.ensure_context(&store, &conn)?;
         if cache.queue.has_active(Some(&id)) {
-            return Err("请等待该相簿同步完成后再删除".into());
+            return Err(tr(
+                "请等待该相簿同步完成后再删除",
+                "Wait for this album to finish syncing before deleting it",
+            )
+            .into());
         }
         drop(cache);
         let snapshot = delete_album(&mut conn, &id)?;
@@ -526,9 +577,9 @@ fn protocol_source(conn: &Connection, id: &str) -> Result<Original, String> {
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or("照片原件不存在")?;
+        .ok_or(tr("照片原件不存在", "The original photo does not exist"))?;
     if !super::is_locator(&locator) && !local_photo::is_locator(&locator) {
-        return Err("外部原件引用无效".into());
+        return Err(tr("外部原件引用无效", "Invalid external photo reference").into());
     }
     super::original(conn, id, &locator)
 }
@@ -590,11 +641,18 @@ pub(crate) fn serve(
                 (db::library_root(&conn)?, protocol_source(&conn, &id)?)
             };
             let bytes = source.read()?;
-            let mime = local_photo::image_content_type(&bytes).ok_or("不支持的照片原件格式")?;
+            let mime = local_photo::image_content_type(&bytes).ok_or(tr(
+                "不支持的照片原件格式",
+                "Unsupported original photo format",
+            ))?;
             // A switch or relink during a read must not serve pixels from the previous library.
             let conn = store.connection.lock().map_err(|e| e.to_string())?;
             if db::library_root(&conn)? != library || protocol_source(&conn, &id)? != source {
-                return Err("图库或照片原件已变化".into());
+                return Err(tr(
+                    "图库或照片原件已变化",
+                    "The library or original photo changed",
+                )
+                .into());
             }
             Ok((mime, bytes))
         })();

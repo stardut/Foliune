@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n';
 import { useEffect, useRef } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { LogicalPosition } from '@tauri-apps/api/dpi';
@@ -36,7 +37,7 @@ function setPopupOwner(owner: symbol | null) {
 }
 
 export function useContextMenu(scope: 'photo' | 'album' | 'book', context: string, onError: (message: string) => void) {
-  const label = { photo: '照片', album: '相簿', book: '画册' }[scope];
+  const label = { photo: t('照片', 'photo'), album: t('相簿', 'album'), book: t('画册', 'photo book') }[scope];
   const owner = useRef(Symbol(`${scope}-menu`));
   const generation = useRef(0);
   const mounted = useRef(true);
@@ -62,7 +63,7 @@ export function useContextMenu(scope: 'photo' | 'album' | 'book', context: strin
     const valid = () => mounted.current && request === generation.current && requestedContext === current.current.context;
     let acted = false;
     try {
-      if (!isTauri()) throw new Error(`请在桌面应用中使用${label}操作菜单`);
+      if (!isTauri()) throw new Error(t(`请在桌面应用中使用${label}操作菜单`, `Open the ${label} menu in the desktop app`));
       const previous = menu.current;
       menu.current = null;
       if (previous) {
@@ -91,7 +92,7 @@ export function useContextMenu(scope: 'photo' | 'album' | 'book', context: strin
       // Keep the root (which owns its raw children) until the next open or
       // unmount. The public API does not promise a separate dismissal event.
     } catch (cause) {
-      if (valid()) current.current.onError(`无法打开${label}操作菜单：${message(cause)}`);
+      if (valid()) current.current.onError(t(`无法打开${label}操作菜单：${message(cause)}`, `Could not open the ${label} menu: ${message(cause)}`));
     } finally {
       releaseContextMenu(owner.current);
       if (!acted && valid() && trigger.isConnected) trigger.focus({ preventScroll: true });

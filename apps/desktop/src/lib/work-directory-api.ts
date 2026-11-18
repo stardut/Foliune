@@ -1,3 +1,4 @@
+import { t } from './i18n.ts';
 import { open } from '@tauri-apps/plugin-dialog';
 import { call } from './api';
 import type { Group, Membership, Photo } from './types';
@@ -56,5 +57,5 @@ export const retryWorkDirectoryJob = (jobId: string) => call<WorkDirectoryState>
 export const selectWorkDirectory = (relink: boolean) => open({
   multiple: false,
   directory: true,
-  title: relink ? '选择原作品目录的新位置' : '选择作品目录（原件留在原处）',
+  title: relink ? t('选择原作品目录的新位置', 'Choose the New Location of the Work Folder') : t('选择作品目录（原件留在原处）', 'Choose a Work Folder (Originals Stay in Place)'),
 });

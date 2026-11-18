@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use std::time::Duration;
 use tauri::Url;
 
@@ -53,7 +54,11 @@ pub(super) fn media_allowed(url: &Url, platform: Platform) -> bool {
 }
 pub(super) fn input_url(input: &str) -> Result<Url, String> {
     if input.len() > 16_384 {
-        return Err("分享内容过长，请只粘贴单篇帖子链接。".into());
+        return Err(tr(
+            "分享内容过长，请只粘贴单篇帖子链接。",
+            "The shared text is too long. Paste a link to a single post.",
+        )
+        .into());
     }
     let mut urls = Vec::new();
     let mut rest = input;
@@ -67,7 +72,7 @@ pub(super) fn input_url(input: &str) -> Result<Url, String> {
             .find(|c: char| c.is_whitespace() || "<>\"'「」【】（）。，！；".contains(c))
             .unwrap_or(rest.len());
         let value = rest[..end].trim_end_matches(['.', ',', ')', ']', '!', ';']);
-        let mut url = Url::parse(value).map_err(|_| "链接格式无效")?;
+        let mut url = Url::parse(value).map_err(|_| tr("链接格式无效", "Invalid link format"))?;
         if url.scheme() == "http" && url.host_str().is_some_and(short_host) && url.port().is_none()
         {
             let _ = url.set_scheme("https");
@@ -78,21 +83,29 @@ pub(super) fn input_url(input: &str) -> Result<Url, String> {
         rest = &rest[end..];
     }
     if urls.len() != 1 {
-        return Err("请粘贴一个小红书或 Instagram 单篇帖子链接。".into());
+        return Err(tr(
+            "请粘贴一个小红书或 Instagram 单篇帖子链接。",
+            "Paste a link to a single Xiaohongshu or Instagram post.",
+        )
+        .into());
     }
     let url = urls.remove(0);
     if !(short_allowed(&url)
         || page_allowed(&url, Platform::Xhs)
         || page_allowed(&url, Platform::Instagram))
     {
-        return Err("仅支持 HTTPS 小红书或 Instagram 单篇帖子链接。".into());
+        return Err(tr(
+            "仅支持 HTTPS 小红书或 Instagram 单篇帖子链接。",
+            "Use an HTTPS link to a single Xiaohongshu or Instagram post.",
+        )
+        .into());
     }
     Ok(url)
 }
 pub(super) fn target(url: Url) -> Result<Target, String> {
     let parts: Vec<_> = url
         .path_segments()
-        .ok_or("帖子路径无效")?
+        .ok_or(tr("帖子路径无效", "Invalid post path"))?
         .filter(|s| !s.is_empty())
         .collect();
     let platform = if page_allowed(&url, Platform::Xhs) {
@@ -100,7 +113,11 @@ pub(super) fn target(url: Url) -> Result<Target, String> {
     } else if page_allowed(&url, Platform::Instagram) {
         Platform::Instagram
     } else {
-        return Err("短链接未指向受支持的帖子。".into());
+        return Err(tr(
+            "短链接未指向受支持的帖子。",
+            "The short link does not point to a supported post.",
+        )
+        .into());
     };
     let id = match platform {
         Platform::Xhs => match parts.as_slice() {
@@ -109,7 +126,13 @@ pub(super) fn target(url: Url) -> Result<Target, String> {
             {
                 (*id).to_string()
             }
-            _ => return Err("请使用小红书单篇笔记链接。".into()),
+            _ => {
+                return Err(tr(
+                    "请使用小红书单篇笔记链接。",
+                    "Use a link to a single Xiaohongshu post.",
+                )
+                .into())
+            }
         },
         Platform::Instagram => match parts.as_slice() {
             ["p", id] | [_, "p", id]
@@ -121,7 +144,13 @@ pub(super) fn target(url: Url) -> Result<Target, String> {
             {
                 (*id).to_string()
             }
-            _ => return Err("请使用 Instagram 单篇帖子链接（/p/ 链接）。".into()),
+            _ => {
+                return Err(tr(
+                    "请使用 Instagram 单篇帖子链接（/p/ 链接）。",
+                    "Use an Instagram post link containing /p/.",
+                )
+                .into())
+            }
         },
     };
     let canonical = match platform {
@@ -145,29 +174,52 @@ pub(super) async fn resolve(input: &str) -> Result<Target, String> {
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(15))
         .build()
-        .map_err(|_| "无法初始化链接解析")?;
+        .map_err(|_| {
+            tr(
+                "无法初始化链接解析",
+                "Could not initialize the link resolver",
+            )
+        })?;
     for _ in 0..5 {
-        let response = client
-            .get(url.clone())
-            .send()
-            .await
-            .map_err(|_| "短链接解析失败或超时，请使用笔记完整链接。")?;
+        let response = client.get(url.clone()).send().await.map_err(|_| {
+            tr(
+                "短链接解析失败或超时，请使用笔记完整链接。",
+                "Could not resolve the short link. Use the full post URL.",
+            )
+        })?;
         if response.status().is_redirection() {
             let location = response
                 .headers()
                 .get(reqwest::header::LOCATION)
                 .and_then(|v| v.to_str().ok())
-                .ok_or("短链接跳转缺少目标地址")?;
-            url = url.join(location).map_err(|_| "短链接跳转地址无效")?;
+                .ok_or(tr(
+                    "短链接跳转缺少目标地址",
+                    "The short link redirect is missing a destination",
+                ))?;
+            url = url
+                .join(location)
+                .map_err(|_| tr("短链接跳转地址无效", "The short link redirect is invalid"))?;
             if page_allowed(&url, Platform::Xhs) {
                 return target(url);
             }
             if !short_allowed(&url) {
-                return Err("短链接跳转到不受支持的地址，已停止。".into());
+                return Err(tr(
+                    "短链接跳转到不受支持的地址，已停止。",
+                    "The short link redirected to an unsupported URL. Import stopped.",
+                )
+                .into());
             }
         } else {
-            return Err("短链接未返回笔记跳转，请使用完整笔记链接。".into());
+            return Err(tr(
+                "短链接未返回笔记跳转，请使用完整笔记链接。",
+                "The short link did not redirect to a post. Use the full post URL.",
+            )
+            .into());
         }
     }
-    Err("短链接跳转次数过多。".into())
+    Err(tr(
+        "短链接跳转次数过多。",
+        "The short link redirected too many times.",
+    )
+    .into())
 }

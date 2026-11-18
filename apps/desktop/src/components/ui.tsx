@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n.ts';
 import { presentModal } from '../lib/modal-stack';
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { X, LoaderCircle } from 'lucide-react';
@@ -19,7 +20,7 @@ export function EmptyState({ title, description, action }: { title: string; desc
   return <div className="empty-state"><span className="empty-mark" aria-hidden="true">F.</span><h2>{title}</h2>{description && <p>{description}</p>}{action}</div>;
 }
 
-export function Busy({ label = '正在读取图库' }: { label?: string }) {
+export function Busy({ label = t('正在读取图库', 'Loading library') }: { label?: string }) {
   return <div className="busy" role="status"><LoaderCircle size={18} className="spin" />{label}</div>;
 }
 
@@ -34,6 +35,6 @@ export function Modal({ title, children, onClose, closeDisabled = false, wide = 
     return () => { dismissModal(); previous?.focus(); };
   }, []);
   return <dialog ref={ref} aria-labelledby={titleId} className={`modal${wide ? ' modal-wide' : ''}${surfaceClass}`} onCancel={(event) => event.preventDefault()}>
-    <div className="modal-header"><h2 id={titleId}>{title}</h2>{onClose && <IconButton label="关闭" onClick={onClose} disabled={closeDisabled}><X size={18} /></IconButton>}</div>{children}
+    <div className="modal-header"><h2 id={titleId}>{title}</h2>{onClose && <IconButton label={t('关闭', 'Close')} onClick={onClose} disabled={closeDisabled}><X size={18} /></IconButton>}</div>{children}
   </dialog>;
 }

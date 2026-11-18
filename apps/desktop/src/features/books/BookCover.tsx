@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { PhotoImage } from '../../components/PhotoImage';
 import type { Photo } from '../../lib/types';
@@ -67,21 +68,21 @@ export function BookCover({ title, photo, hasPhotos, busy }: { title: string; ph
           document.fonts.load('400 40px "Foliune Cover Latin"', title),
           document.fonts.load('italic 400 40px "Foliune Cover Latin"', title),
         ]);
-        if (loaded.some((fonts) => !fonts.length)) throw new Error('字体未加载');
-      } catch { fontError = '封面字体不可用'; }
+        if (loaded.some((fonts) => !fonts.length)) throw new Error(t('字体未加载', 'Font failed to load'));
+      } catch { fontError = t('封面字体不可用', 'Cover font unavailable'); }
       if (!active) return;
       let sample: CoverSample | undefined;
       let sampleError = '';
       if (available && source && !fontError) {
         try { sample = await loadCoverSample(source, controller.signal); }
-        catch { sampleError = '封面分析不可用'; }
+        catch { sampleError = t('封面分析不可用', 'Cover analysis unavailable'); }
       }
       if (!active) return;
       cancelDesign = scheduleDesign(() => {
         if (!active) return;
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
-        if (!context) { setDesign({ key, placement: safePlacement, error: '封面排版不可用' }); return; }
+        if (!context) { setDesign({ key, placement: safePlacement, error: t('封面排版不可用', 'Cover layout unavailable') }); return; }
         const measure = (text: string, size: number, italic: boolean) => {
           context.font = `${italic ? 'italic' : 'normal'} 400 ${size}px ${coverFontFamily}`;
           context.fontKerning = 'normal';
@@ -92,7 +93,7 @@ export function BookCover({ title, photo, hasPhotos, busy }: { title: string; ph
           const next = { key, layout: selected.layout, placement: selected.placement, error: fontError || sampleError || undefined };
           if (!next.error) rememberDesign(next);
           setDesign(next);
-        } catch { setDesign({ key, layout: fitCoverTitle(title, width, measure, .42), placement: safePlacement, error: '封面分析不可用' }); }
+        } catch { setDesign({ key, layout: fitCoverTitle(title, width, measure, .42), placement: safePlacement, error: t('封面分析不可用', 'Cover analysis unavailable') }); }
         finally { canvas.width = 0; canvas.height = 0; }
       });
     }
@@ -109,13 +110,13 @@ export function BookCover({ title, photo, hasPhotos, busy }: { title: string; ph
     color: failed ? safePlacement.color : placement.color,
     '--cover-title-outline': failed ? safePlacement.outline : placement.outline,
   } as CSSProperties;
-  return <button ref={button} type="button" className="book-cover" disabled={busy} aria-label={`打开画册 ${title}`} title={title}>
+  return <button ref={button} type="button" className="book-cover" disabled={busy} aria-label={t(`打开画册 ${title}`, `Open photo book ${title}`)} title={title}>
     <div className="book-cover-photo">
-      {photo ? validSize ? <PhotoImage photo={photo} lazy onUnavailable={() => setFailedSource(source ?? null)} /> : <span className="book-cover-unavailable" role="alert">封面照片尺寸不可用</span> : hasPhotos ? <span className="book-cover-unavailable" role="status">封面照片不可用</span> : null}
+      {photo ? validSize ? <PhotoImage photo={photo} lazy onUnavailable={() => setFailedSource(source ?? null)} /> : <span className="book-cover-unavailable" role="alert">{t('封面照片尺寸不可用', 'Cover photo dimensions unavailable')}</span> : hasPhotos ? <span className="book-cover-unavailable" role="status">{t('封面照片不可用', 'Cover photo unavailable')}</span> : null}
     </div>
     <span className={`book-cover-title${placement.reinforced || failed ? ' book-cover-title-reinforced' : ''}`} style={titleStyle} aria-hidden="true">
       {current?.layout ? current.layout.lines.map((line, index) => <span className="book-cover-title-line" key={index}>{line.map((run, runIndex) => <span key={runIndex} style={run.italic ? { fontStyle: 'italic' } : undefined}>{run.text}</span>)}</span>) : title}
     </span>
-    {current?.error ? <span className="book-cover-analysis-status" role="status">{current.error}</span> : available && !current && <span className="book-cover-analysis-status" role="status">封面排版中…</span>}
+    {current?.error ? <span className="book-cover-analysis-status" role="status">{current.error}</span> : available && !current && <span className="book-cover-analysis-status" role="status">{t('封面排版中…', 'Laying out cover…')}</span>}
   </button>;
 }

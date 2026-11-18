@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { movePhotoId, socialGridTarget } from './social-photo-order';
 
@@ -107,7 +108,7 @@ export function useSocialPhotoSort(ids: string[], onChange: (ids: string[]) => v
       const latestIds = current.current.ids;
       const unchangedSelection = latestIds.length === state.originalIds.length && latestIds.every((photoId) => state.originalIds.includes(photoId));
       if (cancelled && unchangedSelection) current.current.onChange(state.originalIds);
-      current.current.announce(cancelled ? '已取消排序' : `照片已移至第 ${state.ids.indexOf(id) + 1} 张，共 ${state.ids.length} 张`);
+      current.current.announce(cancelled ? t('已取消排序', 'Reordering canceled') : t(`照片已移至第 ${state.ids.indexOf(id) + 1} 张，共 ${state.ids.length} 张`, `Moved photo to position ${state.ids.indexOf(id) + 1} of ${state.ids.length}`));
     }
     function move(pointer: PointerEvent) {
       if (pointer.pointerId !== state.pointerId) return;

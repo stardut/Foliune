@@ -1,4 +1,5 @@
 use super::{emit, path_stamp, RootStamp, WorkDirectoryMonitor};
+use crate::locale::tr;
 use crate::{
     db::{self, Store},
     work_directory::{active, observe_path, valid_component, Root, Scan},
@@ -100,11 +101,15 @@ pub(super) fn run(app: AppHandle, receiver: Receiver<()>, signal: SyncSender<()>
             let (mut targets, changed, refresh_snapshot, library_id) = {
                 let conn = store.connection.lock().map_err(|e| e.to_string())?;
                 if db::library_root(&conn)? != library || active(&conn)? != root {
-                    return Err("图库或作品目录已切换".into());
+                    return Err(
+                        tr("图库或作品目录已切换", "The library or work folder changed").into(),
+                    );
                 }
                 let mut cache = manager.cache.lock().map_err(|e| e.to_string())?;
                 if cache.context_id != context_id {
-                    return Err("图库或作品目录已切换".into());
+                    return Err(
+                        tr("图库或作品目录已切换", "The library or work folder changed").into(),
+                    );
                 }
                 let old = cache.state.clone();
                 let old_scan = cache.scan.clone();

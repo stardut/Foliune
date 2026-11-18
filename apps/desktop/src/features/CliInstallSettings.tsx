@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n';
 import { useLayoutEffect, useRef } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import { cliExample, cliHelp, type useCliInstall } from './use-cli-install';
@@ -21,19 +22,19 @@ export function CliInstallSettings({ cli, blocked, onInstall }: {
   const busy = state.type === 'checking' || state.type === 'installing';
   const recheck = state.type === 'conflict' || state.type === 'checkError';
   const error = state.type === 'checkError' || state.type === 'installError' ? state.error : null;
-  const status = installed ? <>已安装 · <code>foliune-cli</code></>
-    : state.type === 'conflict' ? <><code>/usr/local/bin/foliune-cli</code> 已被占用</>
-    : state.type === 'available' && state.cancelled ? '已取消安装'
-    : state.type === 'checkError' ? '无法读取安装状态' : null;
-  const label = state.type === 'checking' ? '正在检查…'
-    : state.type === 'installing' ? '正在安装…'
-    : recheck ? '重新检查' : state.type === 'installError' ? '重试安装' : '安装';
+  const status = installed ? <>{t('已安装', 'Installed')} · <code>foliune-cli</code></>
+    : state.type === 'conflict' ? <><code>/usr/local/bin/foliune-cli</code> {t('已被占用', 'Path in use')}</>
+    : state.type === 'available' && state.cancelled ? t('已取消安装', 'Installation canceled')
+    : state.type === 'checkError' ? t('无法读取安装状态', 'Could not read installation status') : null;
+  const label = state.type === 'checking' ? t('正在检查…', 'Checking…')
+    : state.type === 'installing' ? t('正在安装…', 'Installing…')
+    : recheck ? t('重新检查', 'Check Again') : state.type === 'installError' ? t('重试安装', 'Retry Installation') : t('安装', 'Install');
 
   return <section className="settings-content settings-cli" aria-labelledby="settings-cli-title">
     <div className="settings-row">
       <div>
-        <h2 id="settings-cli-title">命令行工具</h2>
-        <p className="muted">在终端或通过支持调用终端的 AI 助手，查询和编辑照片、相簿、画册、拍摄策划和模特档案。</p>
+        <h2 id="settings-cli-title">{t('命令行工具', 'Command-Line Tool')}</h2>
+        <p className="muted">{t('在终端或通过支持调用终端的 AI 助手，查询和编辑照片、相簿、画册、拍摄策划和模特档案。', 'Browse and edit photos, albums, photo books, shoot plans, and model profiles from the terminal or an AI assistant with terminal access.')}</p>
       </div>
       {!installed && <button type="button" className="button" aria-disabled={busy || blocked}
         onClick={(event) => {
@@ -49,9 +50,9 @@ export function CliInstallSettings({ cli, blocked, onInstall }: {
     </div>
     <p className="muted" role="status" ref={statusText} tabIndex={-1} hidden={status === null}>{status}</p>
     {installed && <div className="settings-cli-example">
-      <p>试着对 AI 助手说</p>
+      <p>{t('试着对 AI 助手说', 'Try asking an AI assistant')}</p>
       <p className="settings-cli-copy">{cliExample}</p>
-      <p className="muted">终端帮助 <code className="settings-cli-copy">{cliHelp}</code></p>
+      <p className="muted">{t('终端帮助', 'Terminal Help')} <code className="settings-cli-copy">{cliHelp}</code></p>
     </div>}
     {error && <p className="form-error settings-error" role="alert">{error}</p>}
   </section>;

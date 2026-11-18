@@ -1,6 +1,7 @@
 import type { Photo } from '../lib/types';
 
 export const EXHIBITION_GAP = 4;
+export const EXHIBITION_LAYOUT_ERROR = '无法按照片比例生成展览布局';
 export interface ExhibitionTile { index: number; x: number; y: number; width: number; height: number }
 export interface ExhibitionBlock { start: number; height: number; tiles: ExhibitionTile[] }
 
@@ -119,7 +120,7 @@ export function exhibitionLayout(photos: Pick<Photo, 'width' | 'height'>[], widt
   const blocks: ExhibitionBlock[] = [];
   for (let start = 0; start < photos.length;) {
     const block = choices.get(start);
-    if (!block) throw new Error('无法按照片比例生成展览布局');
+    if (!block) throw new Error(EXHIBITION_LAYOUT_ERROR);
     blocks.push(block);
     start += block.tiles.length;
   }

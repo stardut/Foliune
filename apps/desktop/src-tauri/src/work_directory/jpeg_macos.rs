@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use crate::photos::THUMBNAIL_MAX_EDGE;
 use std::{
     ffi::{c_int, c_void},
@@ -37,7 +38,9 @@ impl PreparedJpeg {
             let data = self.encoded.as_ptr();
             slice::from_raw_parts(CFDataGetBytePtr(data), CFDataGetLength(data) as usize)
         };
-        fs::write(path, bytes).map_err(|e| format!("生成缩略图失败：{e}"))
+        fs::write(path, bytes).map_err(|e| {
+            display_format!("生成缩略图失败：{e}", "Could not create the thumbnail: {e}")
+        })
     }
 }
 
@@ -52,7 +55,10 @@ pub(super) fn prepare(
     mut reader: BufReader<fs::File>,
     orientation: u32,
 ) -> Result<PreparedJpeg, String> {
-    let too_large = "照片解码失败：JPEG 超出内存限制";
+    let too_large = tr(
+        "照片解码失败：JPEG 超出内存限制",
+        "Could not decode the photo: JPEG exceeds the memory limit",
+    );
     let len = reader
         .get_ref()
         .metadata()
@@ -94,9 +100,23 @@ pub(super) fn prepare(
                 dimensions,
                 encoded,
             })
-            .ok_or_else(|| "生成缩略图失败：Image I/O 未返回 JPEG".into()),
-        1 => Err("照片解码失败：Image I/O 无法完整解码 JPEG".into()),
-        _ => Err("生成缩略图失败：Image I/O 无法生成 JPEG".into()),
+            .ok_or_else(|| {
+                tr(
+                    "生成缩略图失败：Image I/O 未返回 JPEG",
+                    "Could not create the thumbnail: Image I/O returned no JPEG",
+                )
+                .into()
+            }),
+        1 => Err(tr(
+            "照片解码失败：Image I/O 无法完整解码 JPEG",
+            "Could not decode the photo: Image I/O could not decode the full JPEG",
+        )
+        .into()),
+        _ => Err(tr(
+            "生成缩略图失败：Image I/O 无法生成 JPEG",
+            "Could not create the thumbnail: Image I/O could not generate a JPEG",
+        )
+        .into()),
     }
 }
 
@@ -110,8 +130,11 @@ fn checked_dimensions(bytes: &[u8]) -> Result<(u32, u32), String> {
     let mut decoder = JpegDecoder::new_with_options(bytes, options);
     decoder
         .decode_headers()
-        .map_err(|e| format!("照片解码失败：{e}"))?;
-    let info = decoder.info().ok_or("照片解码失败：JPEG 缺少主图尺寸")?;
+        .map_err(|e| display_format!("照片解码失败：{e}", "Could not decode the photo: {e}"))?;
+    let info = decoder.info().ok_or(tr(
+        "照片解码失败：JPEG 缺少主图尺寸",
+        "Could not decode the photo: JPEG is missing its image dimensions",
+    ))?;
     let (width, height) = (u32::from(info.width), u32::from(info.height));
     let color = if info.components == 1 {
         image::ColorType::L8
@@ -120,9 +143,13 @@ fn checked_dimensions(bytes: &[u8]) -> Result<(u32, u32), String> {
     };
     image::Limits::default()
         .reserve_buffer(width, height, color)
-        .map_err(|e| format!("照片解码失败：{e}"))?;
+        .map_err(|e| display_format!("照片解码失败：{e}", "Could not decode the photo: {e}"))?;
     if info.sof.is_progressive() && !has_first_scan_boundary(bytes) {
-        return Err("照片解码失败：渐进 JPEG 缺少首个扫描结束标记".into());
+        return Err(tr(
+            "照片解码失败：渐进 JPEG 缺少首个扫描结束标记",
+            "Could not decode the photo: Progressive JPEG is missing the end of its first scan",
+        )
+        .into());
     }
     Ok((width, height))
 }

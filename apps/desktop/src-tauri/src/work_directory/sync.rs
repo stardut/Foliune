@@ -6,6 +6,7 @@ use super::{
     },
     staging, Root, Scan, LOCATOR_PREFIX,
 };
+use crate::locale::{display_format, tr};
 use crate::{
     db, groups,
     models::{Group, Membership, Photo},
@@ -78,7 +79,12 @@ pub(super) fn verify_relink(
     root: &Root,
     path: &Path,
 ) -> Result<Signatures, String> {
-    let directory = RootDirectory::open(path).map_err(|_| "所选作品目录不可读取")?;
+    let directory = RootDirectory::open(path).map_err(|_| {
+        tr(
+            "所选作品目录不可读取",
+            "Could not read the selected work folder",
+        )
+    })?;
     let mut stmt = conn
         .prepare(
             "SELECT folder,file_name,sha256,photo_id,stat_signature FROM work_directory_photos WHERE root_id=?1",
@@ -107,16 +113,21 @@ pub(super) fn verify_relink(
                     || fingerprint(&mut file)? != expected
                     || before != stat_signature(&file)
                 {
-                    return Err(format!("目录中的同名原件内容不同：{folder}/{name}"));
+                    return Err(display_format!("目录中的同名原件内容不同：{folder}/{name}", "An original with the same filename has different contents: {folder}/{name}"));
                 }
                 signatures.push((photo_id, before));
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(_) => return Err(format!("无法安全读取同名原件：{folder}/{name}")),
+            Err(_) => {
+                return Err(display_format!(
+                "无法安全读取同名原件：{folder}/{name}",
+                "Could not safely read the original with the matching filename: {folder}/{name}"
+            ))
+            }
         }
     }
     if existing && signatures.is_empty() && (!root.authorized || root.path != path) {
-        return Err("所选目录没有可核对的作品原件，请选择原目录或其完整副本".into());
+        return Err(tr("所选目录没有可核对的作品原件，请选择原目录或其完整副本", "The selected folder has no originals to verify. Choose the original folder or a complete copy.").into());
     }
     Ok(signatures)
 }
@@ -138,12 +149,16 @@ pub(super) fn validate_batch(
     candidates: &[Candidate],
 ) -> Result<(), String> {
     if candidates.is_empty() || active(conn)?.as_ref() != Some(root) || !root.authorized {
-        return Err("作品目录已变化，请重新查看待同步内容".into());
+        return Err(tr(
+            "作品目录已变化，请重新查看待同步内容",
+            "The work folder changed. Review the items to sync again.",
+        )
+        .into());
     }
     let mut folder_names = HashSet::new();
     for candidate in candidates {
         if !folder_names.insert(&candidate.folder_name) {
-            return Err("待同步内容重复或无效".into());
+            return Err(tr("待同步内容重复或无效", "Duplicate or invalid items to sync").into());
         }
         validate_candidate(conn, root, candidate)?;
     }
@@ -163,7 +178,11 @@ fn validate_candidate(conn: &Connection, root: &Root, candidate: &Candidate) -> 
         || matches!(album, Some(None))
         || candidate.file_names.is_empty()
     {
-        return Err("待同步内容已变化，请重新查看后确认".into());
+        return Err(tr(
+            "待同步内容已变化，请重新查看后确认",
+            "The items to sync changed. Review the updated list before confirming.",
+        )
+        .into());
     }
     let mut known = conn.prepare_cached(
         "SELECT EXISTS(
@@ -178,7 +197,11 @@ fn validate_candidate(conn: &Connection, root: &Root, candidate: &Candidate) -> 
             })
             .map_err(|e| e.to_string())?
         {
-            return Err("待同步内容已变化，请重新查看后确认".into());
+            return Err(tr(
+                "待同步内容已变化，请重新查看后确认",
+                "The items to sync changed. Review the updated list before confirming.",
+            )
+            .into());
         }
     }
     Ok(())
@@ -216,12 +239,16 @@ pub(super) fn validate_job(
     candidate: &Candidate,
 ) -> Result<(), String> {
     if active(conn)?.as_ref() != Some(root) || !root.authorized {
-        return Err("作品目录已变化，请重新查看待同步内容".into());
+        return Err(tr(
+            "作品目录已变化，请重新查看待同步内容",
+            "The work folder changed. Review the items to sync again.",
+        )
+        .into());
     }
     validate_candidate(conn, root, candidate)?;
     if let Some(id) = &candidate.album_id {
         if groups::group_library(conn, id)? != "work" {
-            return Err("相簿不属于作品图库".into());
+            return Err(tr("相簿不属于作品图库", "The album does not belong to Work").into());
         }
         groups::ensure_capacity(conn, id, candidate.file_names.len())?;
     }
@@ -290,13 +317,27 @@ pub(super) fn prepare(
     expected_root: Option<RootStamp>,
     mut progress: impl FnMut(usize) -> Result<(), String>,
 ) -> Result<PreparedAlbum, String> {
-    let directory = RootDirectory::open(&root.path).map_err(|_| "作品目录当前不可用")?;
+    let directory = RootDirectory::open(&root.path).map_err(|_| {
+        tr(
+            "作品目录当前不可用",
+            "The work folder is currently unavailable",
+        )
+    })?;
     let identity = directory.identity();
     if expected_root.is_some() && identity != expected_root {
-        return Err("作品目录已变化，请重新查看待同步内容".into());
+        return Err(tr(
+            "作品目录已变化，请重新查看待同步内容",
+            "The work folder changed. Review the items to sync again.",
+        )
+        .into());
     }
     let staging = staging::root(library).join(Uuid::new_v4().to_string());
-    fs::create_dir_all(&staging).map_err(|e| format!("无法创建作品目录同步暂存：{e}"))?;
+    fs::create_dir_all(&staging).map_err(|e| {
+        display_format!(
+            "无法创建作品目录同步暂存：{e}",
+            "Could not create temporary storage for work folder sync: {e}"
+        )
+    })?;
     let mut prepared = PreparedAlbum {
         identity,
         photos: Vec::new(),
@@ -305,21 +346,31 @@ pub(super) fn prepare(
     };
     for (index, name) in candidate.file_names.iter().enumerate() {
         let name_path = Path::new(name);
-        let mut file = directory
-            .photo(&candidate.folder_name, name)
-            .map_err(|e| format!("无法读取作品原件 {}/{name}：{e}", candidate.folder_name))?;
+        let mut file = directory.photo(&candidate.folder_name, name).map_err(|e| {
+            display_format!(
+                "无法读取作品原件 {}/{name}：{e}",
+                "Could not read the original work photo {}/{name}: {e}",
+                candidate.folder_name
+            )
+        })?;
         let signature = stat_signature(&file);
         let digest = fingerprint(&mut file)?;
         file.rewind().map_err(|e| e.to_string())?;
         let copy = file.try_clone().map_err(|e| e.to_string())?;
-        let cannot_sync = |e| format!("作品原件 {}/{name} 尚不能同步：{e}", candidate.folder_name);
+        let cannot_sync = |e| {
+            display_format!(
+                "作品原件 {}/{name} 尚不能同步：{e}",
+                "Could not sync the original work photo {}/{name}: {e}",
+                candidate.folder_name
+            )
+        };
         let input = photos::inspect_open_image(name_path, copy).map_err(cannot_sync)?;
         let (captured_at, location) = input.metadata();
         let thumbnail = Thumbnail::prepare(input).map_err(cannot_sync)?;
         file.rewind().map_err(|e| e.to_string())?;
         if fingerprint(&mut file)? != digest || signature != stat_signature(&file) {
-            return Err(format!(
-                "作品原件 {}/{name} 仍在写入，请完成后重试",
+            return Err(display_format!(
+                "作品原件 {}/{name} 仍在写入，请完成后重试", "The original work photo {}/{name} is still being written. Try again when it finishes.",
                 candidate.folder_name
             ));
         }
@@ -350,6 +401,7 @@ pub(super) fn prepare(
                 source: String::new(),
                 captured_at,
                 location,
+                location_region_id: String::new(),
                 project: String::new(),
                 imported_at: String::new(),
             },
@@ -360,23 +412,37 @@ pub(super) fn prepare(
     }
     // Re-open by path to catch a disconnected/replaced directory or a file changed
     // while a later photo was decoding. No external filesystem work occurs in commit.
-    let current = RootDirectory::open(&root.path).map_err(|_| "作品目录当前不可用")?;
+    let current = RootDirectory::open(&root.path).map_err(|_| {
+        tr(
+            "作品目录当前不可用",
+            "The work folder is currently unavailable",
+        )
+    })?;
     if current.identity() != identity {
-        return Err("作品目录已变化，请重新查看待同步内容".into());
+        return Err(tr(
+            "作品目录已变化，请重新查看待同步内容",
+            "The work folder changed. Review the items to sync again.",
+        )
+        .into());
     }
     for prepared in &prepared.photos {
         let name = &prepared.photo.original_name;
-        let mut file = current
-            .photo(&candidate.folder_name, name)
-            .map_err(|e| format!("无法读取作品原件 {}/{name}：{e}", candidate.folder_name))?;
+        let mut file = current.photo(&candidate.folder_name, name).map_err(|e| {
+            display_format!(
+                "无法读取作品原件 {}/{name}：{e}",
+                "Could not read the original work photo {}/{name}: {e}",
+                candidate.folder_name
+            )
+        })?;
         let unchanged = if let Some(expected) = &prepared.signature {
             stat_signature(&file).as_ref() == Some(expected)
         } else {
             fingerprint(&mut file)? == prepared.digest
         };
         if !unchanged {
-            return Err(format!(
+            return Err(display_format!(
                 "作品原件 {}/{name} 已变化，请重试",
+                "The original work photo {}/{name} changed. Try again.",
                 candidate.folder_name
             ));
         }
@@ -464,8 +530,12 @@ pub(super) fn commit(
     staging::record_publication(&prepared.staging, &names)?;
     for (photo, name) in prepared.photos.iter().zip(names) {
         let path = PathBuf::from(&photo.photo.thumbnail_path);
-        fs::rename(prepared.staging.join(name), &path)
-            .map_err(|e| format!("无法保存作品缩略图：{e}"))?;
+        fs::rename(prepared.staging.join(name), &path).map_err(|e| {
+            display_format!(
+                "无法保存作品缩略图：{e}",
+                "Could not save the work thumbnail: {e}"
+            )
+        })?;
         prepared.published.push(path);
     }
     tx.commit().map_err(|e| e.to_string())?;

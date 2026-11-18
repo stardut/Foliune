@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { isDesktop } from '../lib/api';
@@ -14,7 +15,7 @@ type Status = UpdateAttempt
   | { type: 'available'; version: string; checkError?: string };
 
 export const retryUpdateLabel: Record<FailureStage, string> = {
-  check: '重新检查', busy: '重试更新', download: '重试下载', install: '重试安装', restart: '重试启动',
+  check: t('重新检查', 'Check Again'), busy: t('重试更新', 'Retry Update'), download: t('重试下载', 'Retry Download'), install: t('重试安装', 'Retry Installation'), restart: t('重试启动', 'Retry Restart'),
 };
 
 export function useAppUpdate() {

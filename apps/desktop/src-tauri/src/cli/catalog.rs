@@ -11,6 +11,9 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{collections::HashSet, io::Read, path::Path};
 
+// The CLI does not expose the desktop's manual region assignment and can read older libraries.
+const PHOTO_REGION_PLACEHOLDER: &str = "''";
+
 #[derive(Serialize)]
 pub(super) struct Page<T> {
     items: Vec<T>,
@@ -162,12 +165,12 @@ pub(super) fn search_photos(
     let query = query.unwrap_or_default().trim().to_lowercase();
     let mut statement = conn
         .prepare(&format!(
-            "{}
+            "SELECT {},{PHOTO_REGION_PLACEHOLDER} FROM photos p
              LEFT JOIN memberships m ON m.photo_id=p.id AND m.group_id=?2 AND m.status='active'
              WHERE p.hidden_after_album_delete=0 AND (?1 IS NULL OR p.library=?1)
                AND (?2 IS NULL OR m.photo_id IS NOT NULL)
              ORDER BY m.position,p.imported_at DESC,p.id",
-            db::PHOTO_SELECT
+            db::PHOTO_FIELDS
         ))
         .map_err(|error| error.to_string())?;
     let rows = statement
@@ -196,8 +199,9 @@ pub(super) fn show_photo(conn: &Connection, id: &str) -> Result<PhotoResult, Str
     let photo = conn
         .query_row(
             &format!(
-                "{} WHERE p.id=?1 AND p.hidden_after_album_delete=0",
-                db::PHOTO_SELECT
+                "SELECT {},{PHOTO_REGION_PLACEHOLDER} FROM photos p
+                 WHERE p.id=?1 AND p.hidden_after_album_delete=0",
+                db::PHOTO_FIELDS
             ),
             [id],
             db::photo_from_row,
@@ -274,8 +278,10 @@ pub(super) fn update_photo(
     .map_err(|error| error.to_string())?
     .ok_or(NOT_FOUND)?;
     require_fields(&patch, "无效照片修改")?;
-    if patch.get("regions").is_some() {
-        return Err("不支持修改照片字段：regions".into());
+    for field in ["regions", "locationRegionId"] {
+        if patch.get(field).is_some() {
+            return Err(format!("不支持修改照片字段：{field}"));
+        }
     }
     photos::apply_patch(conn, id, patch)?;
     show_photo(conn, id)

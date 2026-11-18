@@ -1,3 +1,4 @@
+import { photoCount, t } from '../../lib/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeftRight, Plus, X } from 'lucide-react';
 import { PhotoImage } from '../../components/PhotoImage';
@@ -24,15 +25,15 @@ export function CollageSequence({ ids, photos, activeId, disabled, onActive, onC
     }
     onActive(id);
   }
-  return <section className="collage-sequence" aria-label="拼图选片" onKeyDown={(event) => { if (event.key === 'Escape' && swap) { event.preventDefault(); event.stopPropagation(); setSwap(null); } }}>
-    <div className="collage-sequence-heading"><span>{swap ? '选择另一张交换' : `${ids.length} 张照片`}</span><div>
-      <button type="button" className="text-button" disabled={disabled || ids.length < 2 || !activeId} aria-pressed={!!swap} onClick={() => setSwap(swap ? null : activeId)}><ArrowLeftRight size={14} />{swap ? '取消交换' : '交换'}</button>
-      <button type="button" className="text-button" disabled={disabled} onClick={onPick}><Plus size={15} />选片</button></div></div>
+  return <section className="collage-sequence" aria-label={t('拼图选片', 'Collage Photos')} onKeyDown={(event) => { if (event.key === 'Escape' && swap) { event.preventDefault(); event.stopPropagation(); setSwap(null); } }}>
+    <div className="collage-sequence-heading"><span>{swap ? t('选择另一张交换', 'Choose another photo to swap') : photoCount(ids.length)}</span><div>
+      <button type="button" className="text-button" disabled={disabled || ids.length < 2 || !activeId} aria-pressed={!!swap} onClick={() => setSwap(swap ? null : activeId)}><ArrowLeftRight size={14} />{swap ? t('取消交换', 'Cancel Swap') : t('交换', 'Swap')}</button>
+      <button type="button" className="text-button" disabled={disabled} onClick={onPick}><Plus size={15} />{t('选片', 'Choose Photos')}</button></div></div>
     <div className={`collage-sequence-scroll ${dragging ? 'is-sorting' : ''}`} ref={sequence} role="list" onKeyDown={(event) => { if (event.key === 'Escape' && swap) { event.preventDefault(); event.stopPropagation(); setSwap(null); } }}>
       {ids.map((id, index) => {
         const photo = photos.find((candidate) => candidate.id === id); if (!photo) return null;
         return <div key={id} role="listitem" className={`collage-sequence-item ${activeId === id ? 'is-active' : ''} ${target === index && dragging !== id ? 'is-drop-target' : ''} ${dragging === id ? 'is-dragging' : ''}`}>
-          <button type="button" className="collage-sequence-thumb" disabled={disabled} data-photo-id={id} aria-label={`第 ${index + 1} 张，${photo.title || photo.originalName}，Alt 加方向键排序`} aria-pressed={activeId === id} onClick={() => choose(id)}
+          <button type="button" className="collage-sequence-thumb" disabled={disabled} data-photo-id={id} aria-label={t(`第 ${index + 1} 张，${photo.title || photo.originalName}，Alt 加方向键排序`, `Photo ${index + 1}, ${photo.title || photo.originalName}, Alt and arrow keys to reorder`)} aria-pressed={activeId === id} onClick={() => choose(id)}
             onPointerDown={(event) => { if (event.button !== 0 || disabled || swap) return; pointer.current = { id, x: event.clientX, y: event.clientY, moved: false, target: index }; event.currentTarget.setPointerCapture(event.pointerId); }}
             onPointerMove={(event) => {
               const start = pointer.current; if (!start) return;
@@ -55,10 +56,10 @@ export function CollageSequence({ ids, photos, activeId, disabled, onActive, onC
               if (!event.altKey || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
               event.preventDefault(); onChange(movePhoto(ids, id, index + (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1))); onActive(id);
             }}><PhotoImage photo={photo} lazy /><span className="collage-sequence-number">{index + 1}</span></button>
-          <div className="collage-sequence-remove"><IconButton label={`移除第 ${index + 1} 张照片`} disabled={disabled} onClick={() => onChange(ids.filter((candidate) => candidate !== id))}><X size={12} /></IconButton></div>
+          <div className="collage-sequence-remove"><IconButton label={t(`移除第 ${index + 1} 张照片`, `Remove photo ${index + 1}`)} disabled={disabled} onClick={() => onChange(ids.filter((candidate) => candidate !== id))}><X size={12} /></IconButton></div>
         </div>;
       })}
-      {!ids.length && <button type="button" className="collage-empty-pick" onClick={onPick}><Plus size={20} />选择照片</button>}
+      {!ids.length && <button type="button" className="collage-empty-pick" onClick={onPick}><Plus size={20} />{t('选择照片', 'Choose Photos')}</button>}
     </div>
   </section>;
 }

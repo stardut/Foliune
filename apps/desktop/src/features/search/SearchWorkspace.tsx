@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, ArrowUpRight, Search, X } from 'lucide-react';
 import { EmptyState, IconButton, WorkspaceHeader } from '../../components/ui';
@@ -13,7 +14,7 @@ import { comparePlanExecutionDate, errorMessage, planSearchText } from '../plann
 import { bookSearchText, findSearchItems, indexSearchItems, modelSearchText, photoSearchText, planMatchLine, searchTerm } from './search-matches';
 import './search.css';
 
-const categories = { all: '全部', photos: '照片', books: '画册', models: '模特', planning: '策划' } as const;
+const categories = { all: t('全部', 'All'), photos: t('照片', 'Photos'), books: t('画册', 'Books'), models: t('模特', 'Models'), planning: t('策划', 'Shoot Plans') } as const;
 type Category = keyof typeof categories;
 type RemoteCategory = 'books' | 'models' | 'planning';
 const remoteCategories: RemoteCategory[] = ['books', 'models', 'planning'];
@@ -125,7 +126,7 @@ export function SearchWorkspace({ session, externalRevision = 0, workspaceVisibi
     const update = () => {
       const active = document.activeElement?.closest<HTMLElement>('.search-photo-preview [data-photo-index]');
       if (!media.matches && active && Number(active.dataset.photoIndex) >= PREVIEW_COUNT) {
-        rootRef.current?.querySelector<HTMLButtonElement>('[aria-label="查看全部照片"]')?.focus();
+        active.closest('.search-group')?.querySelector<HTMLButtonElement>('[data-search-view-all]')?.focus();
       }
       setWideWindow(media.matches);
     };
@@ -241,7 +242,7 @@ export function SearchWorkspace({ session, externalRevision = 0, workspaceVisibi
         onOpen={openResult} open={() => onOpenPlan(plan)} />);
   }
 
-  return <section ref={rootRef} className="global-search" aria-label="全局搜索" onWheelCapture={cancelRestore} onPointerDownCapture={cancelRestore} onKeyDownCapture={cancelRestore}
+  return <section ref={rootRef} className="global-search" aria-label={t('全局搜索', 'Global Search')} onWheelCapture={cancelRestore} onPointerDownCapture={cancelRestore} onKeyDownCapture={cancelRestore}
     onFocusCapture={(event) => {
       if (givingInitialFocus.current) return;
       cancelRestore();
@@ -250,23 +251,23 @@ export function SearchWorkspace({ session, externalRevision = 0, workspaceVisibi
       session.focusResult = target.dataset.searchResult ?? (photoId ? `photos:${photoId}` : undefined);
     }}>
     <div className="search-controls">
-      <WorkspaceHeader title="搜索" />
+      <WorkspaceHeader title={t('搜索', 'Search')} />
       <div className="search-field" role="search">
         <Search size={19} aria-hidden="true" />
-        <input id="global-search-input" ref={inputRef} aria-label="全局搜索" placeholder={`搜索${searchCategories.map((item) => categories[item]).join('、')}`}
+        <input id="global-search-input" ref={inputRef} aria-label={t('全局搜索', 'Global Search')} placeholder={t('搜索', 'Search ') + searchCategories.map((item) => categories[item]).join(t('、', ', '))}
           value={draft}
           onChange={(event) => { if (composing.current) setDraft(event.target.value); else changeQuery(event.target.value); }}
           onCompositionStart={() => { composing.current = true; }}
           onCompositionEnd={(event) => { composing.current = false; changeQuery(event.currentTarget.value); }} />
-        {draft && <IconButton label="清空搜索" onClick={() => { changeQuery(''); inputRef.current?.focus({ preventScroll: true }); }}><X size={16} /></IconButton>}
+        {draft && <IconButton label={t('清空搜索', 'Clear Search')} onClick={() => { changeQuery(''); inputRef.current?.focus({ preventScroll: true }); }}><X size={16} /></IconButton>}
       </div>
-      {term && <div className="segmented search-categories" role="group" aria-label="结果类别">
+      {term && <div className="segmented search-categories" role="group" aria-label={t('结果类别', 'Result Categories')}>
         {(['all', ...searchCategories] as const).map((item) => <button key={item} type="button" className={category === item ? 'active' : ''}
           data-search-category={item} aria-pressed={category === item} onClick={() => chooseCategory(item)}>{categories[item]}</button>)}
       </div>}
     </div>
     {term && <div className={resultsClass}>
-      {!!photoMatches.length && (category === 'all' ? <ResultGroup name="照片" count={photoMatches.length} onViewAll={() => chooseCategory('photos')}>
+      {!!photoMatches.length && (category === 'all' ? <ResultGroup name={t('照片', 'Photos')} count={photoMatches.length} onViewAll={() => chooseCategory('photos')}>
         {photoResults(true)}
       </ResultGroup> : category === 'photos' && photoResults(false))}
       {(hasRemoteMatches || hasLoading || hasFailure) && <div className="search-related-results">
@@ -275,17 +276,17 @@ export function SearchWorkspace({ session, externalRevision = 0, workspaceVisibi
           <ul className="search-result-list">{resultRows(item)}</ul>
         </ResultGroup>)}
         {(hasLoading || hasFailure) && <div className="search-source-states">
-          {hasLoading && <p className="search-loading" role="status">正在读取{visibleRemote.filter((item) => sources[item].status === 'loading').map((item) => categories[item]).join('、')}…</p>}
+          {hasLoading && <p className="search-loading" role="status">{t('正在读取', 'Loading ')}{visibleRemote.filter((item) => sources[item].status === 'loading').map((item) => categories[item]).join(t('、', ', '))}…</p>}
           {visibleRemote.map((item) => {
             const source = sources[item];
             return source.status === 'error' && <div className="search-source-error" key={item}>
-              <p className="form-error" role="alert">无法读取{categories[item]}：{source.message}</p>
-              <button className="button" type="button" aria-label={`重新读取${categories[item]}`} onClick={() => { chooseCategory(category); reload[item](); }}>重试</button>
+              <p className="form-error" role="alert">{t(`无法读取${categories[item]}：${source.message}`, `Could not load ${categories[item]}: ${source.message}`)}</p>
+              <button className="button" type="button" aria-label={t(`重新读取${categories[item]}`, `Reload ${categories[item]}`)} onClick={() => { chooseCategory(category); reload[item](); }}>{t('重试', 'Retry')}</button>
             </div>;
           })}
         </div>}
       </div>}
-      {!visibleCount && !hasLoading && !hasFailure && <div role="status"><EmptyState title={category === 'all' ? '没有匹配结果' : `没有匹配的${categories[category]}`} /></div>}
+      {!visibleCount && !hasLoading && !hasFailure && <div role="status"><EmptyState title={category === 'all' ? t('没有匹配结果', 'No matching results') : t(`没有匹配的${categories[category]}`, `No matching ${categories[category]}`)} /></div>}
     </div>}
   </section>;
 }
@@ -300,7 +301,7 @@ function ResultGroup({ name, count, onViewAll, children }: { name: string; count
   return <section className="search-group" aria-label={name}>
     <div className="search-group-heading">
       <h2>{name} <span className="photo-count">{count}</span></h2>
-      {onViewAll && <button type="button" className="text-button" aria-label={`查看全部${name}`} onClick={onViewAll}>查看全部<ArrowRight size={14} aria-hidden="true" /></button>}
+      {onViewAll && <button type="button" className="text-button" data-search-view-all aria-label={t(`查看全部${name}`, `View all ${name}`)} onClick={onViewAll}>{t('查看全部', 'View All')}<ArrowRight size={14} aria-hidden="true" /></button>}
     </div>
     {children}
   </section>;

@@ -380,6 +380,249 @@ fn metadata_patch_rolls_back_on_invalid_field() {
 }
 
 #[test]
+fn photo_location_region_is_independent_and_uses_compare_and_swap() {
+    let (root, store) = store();
+    let path = fixture(&root, "region.png");
+    let original = std::fs::read(&path).unwrap();
+    let imported = photos::import(&store, vec![path.clone()], "work", None).unwrap();
+    let photo = &imported.snapshot.photos[0];
+    assert_eq!(serde_json::to_value(photo).unwrap()["locationRegionId"], "");
+    let id = &photo.id;
+    let mut conn = store.connection.lock().unwrap();
+    let changed = photos::update_from_baseline(
+        &mut conn,
+        id,
+        json!({"locationRegionId":"FRA:Île-de-France"}),
+        json!({"locationRegionId":""}),
+    )
+    .unwrap();
+    assert_eq!(changed.photos[0].location_region_id, "FRA:Île-de-France");
+    assert!(changed.photos[0].location.is_empty());
+
+    let changed = photos::update_from_baseline(
+        &mut conn,
+        id,
+        json!({"location":"48.856600, 2.352200"}),
+        json!({"location":""}),
+    )
+    .unwrap();
+    assert_eq!(changed.photos[0].location_region_id, "FRA:Île-de-France");
+    assert_eq!(
+        photos::update_from_baseline(
+            &mut conn,
+            id,
+            json!({"locationRegionId":"DEU:DEU-1579", "annotation":"旧编辑"}),
+            json!({"locationRegionId":"", "annotation":""}),
+        )
+        .unwrap_err(),
+        crate::db::REVISION_CONFLICT,
+    );
+    for invalid in [
+        json!(null),
+        json!("   "),
+        json!("FRA:Île\nde-France"),
+        json!("France:Paris"),
+    ] {
+        assert!(photos::update_from_baseline(
+            &mut conn,
+            id,
+            json!({"locationRegionId":invalid, "annotation":"无效编辑"}),
+            json!({"locationRegionId":"FRA:Île-de-France", "annotation":""}),
+        )
+        .is_err());
+    }
+    let cleared = photos::update_from_baseline(
+        &mut conn,
+        id,
+        json!({"locationRegionId":""}),
+        json!({"locationRegionId":"FRA:Île-de-France"}),
+    )
+    .unwrap();
+    let photo = &cleared.photos[0];
+    assert!(photo.location_region_id.is_empty());
+    assert!(photo.annotation.is_empty());
+    assert_eq!(photo.location, "48.856600, 2.352200");
+    assert_eq!(std::fs::read(path).unwrap(), original);
+}
+
+#[test]
+fn bulk_photo_regions_atomically_save_active_work_album_members() {
+    let (root, store) = store();
+    let image = fixture(&root, "bulk-region.png");
+    let album = groups::insert(
+        &store.connection.lock().unwrap(),
+        GroupInput {
+            library: "work".into(),
+            name: "作品".into(),
+            description: String::new(),
+            capacity: None,
+        },
+    )
+    .unwrap();
+    let ids = photos::import(&store, vec![image; 3], "work", Some(&album))
+        .unwrap()
+        .imported_ids;
+    let [first, second, gps] = ids.as_slice() else {
+        panic!("three photographs should be imported");
+    };
+    let mut conn = store.connection.lock().unwrap();
+    photos::update(
+        &mut conn,
+        second,
+        json!({"location":"拍摄地笔记", "locationRegionId":"FRA:Île-de-France"}),
+    )
+    .unwrap();
+    photos::update(&mut conn, gps, json!({"location":"39.900000, 116.400000"})).unwrap();
+    let targets = [
+        photos::PhotoRegionBaseline {
+            id: first.clone(),
+            location: String::new(),
+            location_region_id: String::new(),
+        },
+        photos::PhotoRegionBaseline {
+            id: second.clone(),
+            location: "拍摄地笔记".into(),
+            location_region_id: "FRA:Île-de-France".into(),
+        },
+    ];
+    let saved =
+        photos::set_location_regions(&mut conn, &targets, "ESP:Castilla y León", Some(&album))
+            .unwrap();
+    for (id, location) in [(first, ""), (second, "拍摄地笔记"), (gps, "39.900000, 116.400000")] {
+        let photo = saved.photos.iter().find(|photo| &photo.id == id).unwrap();
+        assert_eq!(photo.location, location);
+        assert_eq!(
+            photo.location_region_id,
+            if id == gps { "" } else { "ESP:Castilla y León" }
+        );
+    }
+    assert_eq!(saved.memberships.len(), 3);
+}
+
+#[test]
+fn bulk_photo_regions_reject_gps_stale_or_ineligible_targets_without_partial_writes() {
+    let (root, store) = store();
+    let image = fixture(&root, "bulk-conflict.png");
+    let album = groups::insert(
+        &store.connection.lock().unwrap(),
+        GroupInput {
+            library: "work".into(),
+            name: "相簿".into(),
+            description: String::new(),
+            capacity: None,
+        },
+    )
+    .unwrap();
+    let ids = photos::import(&store, vec![image.clone(); 4], "work", Some(&album))
+        .unwrap()
+        .imported_ids;
+    let [first, gps, moved, hidden] = ids.as_slice() else {
+        panic!("four work photos should be imported");
+    };
+    let collection = photos::import(&store, vec![image], "collection", None)
+        .unwrap()
+        .imported_ids
+        .remove(0);
+    let mut conn = store.connection.lock().unwrap();
+    let gps_location = "\u{feff}+.75, -180";
+    photos::update(&mut conn, gps, json!({"location":gps_location})).unwrap();
+    groups::set_status(&mut conn, &album, moved, "discarded").unwrap();
+    conn.execute(
+        "DELETE FROM memberships WHERE photo_id=?1",
+        [hidden],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE photos SET hidden_after_album_delete=1 WHERE id=?1",
+        [hidden],
+    )
+    .unwrap();
+    let baseline = |id: &str, location: &str, region_id: &str| photos::PhotoRegionBaseline {
+        id: id.into(),
+        location: location.into(),
+        location_region_id: region_id.into(),
+    };
+    for (target, group_id) in [
+        (baseline(gps, gps_location, ""), Some(album.as_str())),
+        (baseline(gps, "", ""), Some(album.as_str())),
+        (baseline(moved, "", ""), Some(album.as_str())),
+        (baseline(hidden, "", ""), None),
+        (baseline(&collection, "", ""), None),
+        (baseline(first, "", ""), None),
+    ] {
+        assert!(photos::set_location_regions(
+            &mut conn,
+            &[baseline(first, "", ""), target],
+            "FRA:Île-de-France",
+            group_id,
+        )
+        .is_err());
+    }
+    let current = snapshot(&conn).unwrap();
+    let first_photo = current.photos.iter().find(|photo| &photo.id == first).unwrap();
+    assert!(first_photo.location_region_id.is_empty());
+
+    photos::update(&mut conn, moved, json!({"locationRegionId":"FRA:Île-de-France"}))
+        .unwrap();
+    assert_eq!(
+        photos::set_location_regions(
+            &mut conn,
+            &[baseline(first, "", ""), baseline(moved, "", "")],
+            "ESP:Castilla y León",
+            None,
+        )
+        .unwrap_err(),
+        crate::db::REVISION_CONFLICT,
+    );
+    let current = snapshot(&conn).unwrap();
+    assert!(current
+        .photos
+        .iter()
+        .find(|photo| &photo.id == first)
+        .unwrap()
+        .location_region_id
+        .is_empty());
+}
+
+#[test]
+fn opening_v3_library_migrates_region_without_changing_photo_metadata() {
+    let (root, store) = store();
+    let id = photos::import(&store, vec![fixture(&root, "old.png")], "work", None)
+        .unwrap()
+        .imported_ids[0]
+        .clone();
+    {
+        let mut conn = store.connection.lock().unwrap();
+        photos::update(
+            &mut conn,
+            &id,
+            json!({"location":"旧图库地点", "annotation":"备注"}),
+        )
+        .unwrap();
+        conn.execute_batch(
+            "ALTER TABLE photos DROP COLUMN location_region_id;
+             PRAGMA user_version=3;",
+        )
+        .unwrap();
+    }
+    drop(store);
+
+    for _ in 0..2 {
+        let reopened = Store::open(root.path().join("managed")).unwrap();
+        let conn = reopened.connection.lock().unwrap();
+        let version: i32 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 4);
+        let state = snapshot(&conn).unwrap();
+        assert_eq!(state.photos[0].id, id);
+        assert_eq!(state.photos[0].location, "旧图库地点");
+        assert_eq!(state.photos[0].annotation, "备注");
+        assert!(state.photos[0].location_region_id.is_empty());
+    }
+}
+
+#[test]
 fn exif_date_and_orientation_are_used_without_changing_original() {
     let (root, store) = store();
     let path = fixture(&root, "rotated.jpg");

@@ -7,6 +7,7 @@ typedef void (*FoliuneAirDropCompletion)(void *context, const char *error);
 @property (nonatomic, copy) NSArray<NSURL *> *files;
 @property (nonatomic, weak) NSWindow *sourceWindow;
 @property (nonatomic, assign) void *context;
+@property (nonatomic, assign) bool chinese;
 @property (nonatomic, assign) FoliuneAirDropCompletion completion;
 @end
 
@@ -43,13 +44,14 @@ static FoliuneAirDropSession *activeSession;
     if ([error.domain isEqualToString:NSCocoaErrorDomain] && error.code == NSUserCancelledError) {
         [self finishWithError:nil];
     } else {
-        [self finishWithError:[@"隔空投送失败：" stringByAppendingString:error.localizedDescription]];
+        NSString *prefix = self.chinese ? @"隔空投送失败：" : @"AirDrop failed: ";
+        [self finishWithError:[prefix stringByAppendingString:error.localizedDescription]];
     }
 }
 
 @end
 
-void foliune_share_airdrop(void *window, const char *const *paths, size_t count,
+void foliune_share_airdrop(void *window, const char *const *paths, size_t count, bool chinese,
                            void *context, FoliuneAirDropCompletion completion) {
     @autoreleasepool {
         NSMutableArray<NSURL *> *files = [NSMutableArray arrayWithCapacity:count];
@@ -61,7 +63,9 @@ void foliune_share_airdrop(void *window, const char *const *paths, size_t count,
 
         NSSharingService *service = [NSSharingService sharingServiceNamed:NSSharingServiceNameSendViaAirDrop];
         if (![service canPerformWithItems:files]) {
-            completion(context, "系统无法打开隔空投送，请检查 Wi-Fi、蓝牙及隔空投送设置后重试。");
+            completion(context, chinese
+                ? "系统无法打开隔空投送，请检查 Wi-Fi、蓝牙及隔空投送设置后重试。"
+                : "Could not open AirDrop. Check Wi-Fi, Bluetooth, and AirDrop settings and try again.");
             return;
         }
 
@@ -70,6 +74,7 @@ void foliune_share_airdrop(void *window, const char *const *paths, size_t count,
         session.files = files;
         session.sourceWindow = (__bridge NSWindow *)window;
         session.context = context;
+        session.chinese = chinese;
         session.completion = completion;
         activeSession = session;
         service.delegate = session;

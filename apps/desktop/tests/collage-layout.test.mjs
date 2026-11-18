@@ -1,3 +1,4 @@
+import './fixtures/chinese-interface.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { COLLAGE_MAX_EDGE, COLLAGE_MAX_PIXELS, collageLayout, collageReferenceLayout, collageOutputProblem, collageProblem, cropFor, initialCollage, movePhoto, recordHistory, redoHistory, resizeCollage, undoHistory } from '../src/features/collage/collage-layout.ts';

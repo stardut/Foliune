@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use serde::Serialize;
 #[cfg(target_os = "macos")]
 use tauri::Manager;
@@ -28,7 +29,11 @@ fn require_main(window: &Webview) -> Result<(), String> {
     if window.label() == "main" {
         Ok(())
     } else {
-        Err("请在主窗口操作命令行工具。".into())
+        Err(tr(
+            "请在主窗口操作命令行工具。",
+            "Manage the command-line tool from the main window.",
+        )
+        .into())
     }
 }
 
@@ -64,13 +69,18 @@ pub(crate) async fn install_cli(app: AppHandle, webview: Webview) -> Result<Outc
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
-        Err("此版本不支持安装命令行工具。".into())
+        Err(tr(
+            "此版本不支持安装命令行工具。",
+            "This version does not support installing the command-line tool.",
+        )
+        .into())
     }
 }
 
 #[cfg(target_os = "macos")]
 mod macos {
     use super::{AppHandle, Outcome, Status};
+    use crate::locale::{display_format, tr};
     use std::{
         ffi::CString,
         fs, io,
@@ -147,9 +157,18 @@ mod macos {
     }
 
     pub(super) fn install(app: &AppHandle) -> Result<Outcome, String> {
-        let _lock = INSTALL.try_lock().map_err(|_| "正在安装命令行工具。")?;
+        let _lock = INSTALL.try_lock().map_err(|_| {
+            tr(
+                "正在安装命令行工具。",
+                "The command-line tool is already being installed.",
+            )
+        })?;
         if !eligible(app) {
-            return Err("请从「应用程序」打开已安装的 Foliune。".into());
+            return Err(tr(
+                "请从「应用程序」打开已安装的 Foliune。",
+                "Open your installed copy of Foliune from Applications.",
+            )
+            .into());
         }
         install_link(Path::new(APP_CLI), Path::new(SYSTEM_CLI), authorize)
     }
@@ -161,7 +180,13 @@ mod macos {
     ) -> Result<Outcome, String> {
         match inspect(target, link).map_err(error_message)? {
             Status::Installed => return Ok(Outcome::Installed),
-            Status::Conflict => return Err(format!("{} 已被占用。", link.display())),
+            Status::Conflict => {
+                return Err(display_format!(
+                    "{} 已被占用。",
+                    "{} is already in use.",
+                    link.display()
+                ))
+            }
             _ => {}
         }
         let result = match create_link(target, link) {
@@ -179,8 +204,16 @@ mod macos {
         // Another install may have finished while the authorization dialog was open.
         match inspect(target, link).map_err(error_message)? {
             Status::Installed => Ok(Outcome::Installed),
-            Status::Conflict => Err(format!("{} 已被占用。", link.display())),
-            _ if result == Ok(Outcome::Installed) => Err("未找到已安装的命令链接。".into()),
+            Status::Conflict => Err(display_format!(
+                "{} 已被占用。",
+                "{} is already in use.",
+                link.display()
+            )),
+            _ if result == Ok(Outcome::Installed) => Err(tr(
+                "未找到已安装的命令链接。",
+                "Could not find the installed command link.",
+            )
+            .into()),
             _ => result,
         }
     }
@@ -242,17 +275,28 @@ mod macos {
             .map_err(error_message)?;
         if !output.status.success() {
             let detail = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("无法安装命令行工具。{}", detail.trim()));
+            return Err(display_format!(
+                "无法安装命令行工具。{}",
+                "Could not install the command-line tool. {}",
+                detail.trim()
+            ));
         }
         match String::from_utf8_lossy(&output.stdout).trim() {
             "installed" => Ok(Outcome::Installed),
             "cancelled" => Ok(Outcome::Cancelled),
-            _ => Err("无法确认命令行工具安装结果。".into()),
+            _ => Err(tr(
+                "无法确认命令行工具安装结果。",
+                "Could not verify command-line tool installation.",
+            )
+            .into()),
         }
     }
 
     fn error_message(error: io::Error) -> String {
-        format!("无法访问命令链接。{error}")
+        display_format!(
+            "无法访问命令链接。{error}",
+            "Could not access the command link. {error}"
+        )
     }
 
     #[cfg(test)]

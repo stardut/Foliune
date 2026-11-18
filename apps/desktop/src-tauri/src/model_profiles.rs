@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use crate::{
     content_refs,
     db::{self, Store},
@@ -74,45 +75,70 @@ pub fn init(conn: &Connection) -> Result<(), String> {
 fn validate(conn: &Connection, input: &ModelInput) -> Result<(), String> {
     content_refs::name(&input.name)?;
     for (value, label, max) in [
-        (input.contact.as_str(), "联系方式", 500),
-        (&input.city, "城市", 200),
-        (&input.notes, "备注", 20000),
-        (&input.gender, "性别", 40),
+        (
+            input.contact.as_str(),
+            tr("联系方式", "Contact information"),
+            500,
+        ),
+        (&input.city, tr("城市", "City"), 200),
+        (&input.notes, tr("备注", "Notes"), 20000),
+        (&input.gender, tr("性别", "Gender"), 40),
     ] {
         content_refs::text(value, label, max)?;
     }
     if input.tags.len() > 50 {
-        return Err("风格标签最多 50 个".into());
+        return Err(tr("风格标签最多 50 个", "You can select up to 50 style tags").into());
     }
     for tag in &input.tags {
         if tag.trim().is_empty() {
-            return Err("风格标签不能为空".into());
+            return Err(tr("风格标签不能为空", "A style tag cannot be empty").into());
         }
-        content_refs::text(tag, "风格标签", 80)?;
+        content_refs::text(tag, tr("风格标签", "Style tag"), 80)?;
     }
     if let Some(options) = &input.tag_options {
         if options.len() > 100 {
-            return Err("可选风格标签最多 100 个".into());
+            return Err(tr(
+                "可选风格标签最多 100 个",
+                "The style tag list can contain up to 100 tags",
+            )
+            .into());
         }
         for option in options {
             if option.trim().is_empty() {
-                return Err("可选风格标签不能为空".into());
+                return Err(tr(
+                    "可选风格标签不能为空",
+                    "An available style tag cannot be empty",
+                )
+                .into());
             }
-            content_refs::text(option, "可选风格标签", 80)?;
+            content_refs::text(option, tr("可选风格标签", "Available style tag"), 80)?;
         }
         if input.tags.iter().any(|tag| !options.contains(tag)) {
-            return Err("已选风格标签须来自当前可选标签".into());
+            return Err(tr(
+                "已选风格标签须来自当前可选标签",
+                "Select style tags from the current tag list",
+            )
+            .into());
         }
     }
     if !input.birthday.is_empty() {
-        let date = chrono::NaiveDate::parse_from_str(&input.birthday, "%Y-%m-%d")
-            .map_err(|_| "生日须为有效的 YYYY-MM-DD 日期")?;
+        let date =
+            chrono::NaiveDate::parse_from_str(&input.birthday, "%Y-%m-%d").map_err(|_| {
+                tr(
+                    "生日须为有效的 YYYY-MM-DD 日期",
+                    "Enter a valid date of birth in YYYY-MM-DD format",
+                )
+            })?;
         if date < chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("valid first date")
             || input.birthday.len() != 10
             || date.format("%Y-%m-%d").to_string() != input.birthday
             || date > chrono::Local::now().date_naive()
         {
-            return Err("生日须为有效的 YYYY-MM-DD 日期，且不能晚于今天".into());
+            return Err(tr(
+                "生日须为有效的 YYYY-MM-DD 日期，且不能晚于今天",
+                "Enter a valid date of birth in YYYY-MM-DD format on or before today",
+            )
+            .into());
         }
     }
     for value in [
@@ -125,14 +151,22 @@ fn validate(conn: &Connection, input: &ModelInput) -> Result<(), String> {
     .flatten()
     {
         if !value.is_finite() || value <= 0.0 || value > 300.0 {
-            return Err("身体数值须大于 0 且不超过 300 厘米".into());
+            return Err(tr(
+                "身体数值须大于 0 且不超过 300 厘米",
+                "Height must be greater than zero and at most 300 cm",
+            )
+            .into());
         }
     }
     if input
         .weight_kg
         .is_some_and(|value| !value.is_finite() || value <= 0.0)
     {
-        return Err("体重须为大于 0 的有效数值".into());
+        return Err(tr(
+            "体重须为大于 0 的有效数值",
+            "Weight must be a valid number greater than zero",
+        )
+        .into());
     }
     content_refs::validate_photos(conn, &input.photo_ids)?;
     if input
@@ -140,7 +174,11 @@ fn validate(conn: &Connection, input: &ModelInput) -> Result<(), String> {
         .as_ref()
         .is_some_and(|id| !input.photo_ids.contains(id))
     {
-        return Err("封面须来自当前样片".into());
+        return Err(tr(
+            "封面须来自当前样片",
+            "Choose a cover from the current sample photos",
+        )
+        .into());
     }
     Ok(())
 }
@@ -203,7 +241,7 @@ pub fn get(conn: &Connection, id: &str) -> Result<ModelProfile, String> {
         .query_row(&format!("{PROFILE_SELECT} WHERE id=?1"), [id], read)
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or("模特档案不存在")?;
+        .ok_or(tr("模特档案不存在", "Model profile not found"))?;
     with_photos(conn, profile)
 }
 
@@ -257,12 +295,12 @@ fn save_inner(
             )
             .optional()
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| "模特档案不存在".to_string())
+            .ok_or_else(|| tr("模特档案不存在", "Model profile not found").to_string())
         })
         .transpose()?;
     let previous = existing.as_ref().map(|(_, updated)| updated.as_str());
     if expected_revision.is_some() && expected_revision != previous {
-        return Err(db::REVISION_CONFLICT.into());
+        return Err(db::revision_conflict().into());
     }
     input.name = content_refs::name(&input.name)?;
     content_refs::deduplicate(&mut input.photo_ids);
@@ -327,7 +365,7 @@ pub(crate) fn delete_record(conn: &Connection, id: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         == 0
     {
-        return Err("模特档案不存在".into());
+        return Err(tr("模特档案不存在", "Model profile not found").into());
     }
     content_refs::hide_unreferenced_photos(conn, candidates)
 }
@@ -348,7 +386,9 @@ pub async fn models_save(
             Some(id) => update(
                 conn,
                 id,
-                expected_revision.as_deref().ok_or(db::REVISION_CONFLICT)?,
+                expected_revision
+                    .as_deref()
+                    .ok_or_else(db::revision_conflict)?,
                 input,
             ),
             None => save(conn, None, input),

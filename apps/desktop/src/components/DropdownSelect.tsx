@@ -3,7 +3,7 @@ import { Check, ChevronDown } from 'lucide-react';
 import { DropdownLayer, revealDropdownRow, stepDropdownIndex, useDropdown } from './dropdown-layer';
 
 type SelectValue = string | number;
-type SelectOption<Value extends SelectValue> = { value: Value; label: string; disabled?: boolean };
+type SelectOption<Value extends SelectValue> = { value: Value; label: string; lang?: string; disabled?: boolean };
 
 export function DropdownSelect<Value extends SelectValue>({ label, field = false, value, options, disabled = false, onChange }: {
   label: string;
@@ -91,7 +91,7 @@ export function DropdownSelect<Value extends SelectValue>({ label, field = false
     aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? id : undefined}
     aria-activedescendant={open && active >= 0 ? activeId : undefined} onKeyDown={onKeyDown} onBlur={onBlur}
     onClick={() => { if (open) closeAndFocus(); else show(); }}>
-    <span>{options[selected]?.label ?? ''}</span><ChevronDown size={13} aria-hidden="true" />
+    <span lang={options[selected]?.lang}>{options[selected]?.label ?? ''}</span><ChevronDown size={13} aria-hidden="true" />
   </button>;
   return <>
     {field ? <label>{label}{control}</label> : control}
@@ -99,7 +99,7 @@ export function DropdownSelect<Value extends SelectValue>({ label, field = false
       {options.map((option, index) => <div key={option.value} id={`${id}-${index}`} role="option" className="dropdown-row"
         aria-selected={index === selected} aria-disabled={option.disabled} data-active={index === active ? '' : undefined}
         onMouseDown={(event) => event.preventDefault()} onClick={() => choose(index)}>
-        <span className="dropdown-row-label" title={option.label}>{option.label}</span>
+        <span className="dropdown-row-label" title={option.label} lang={option.lang}>{option.label}</span>
         {index === selected && <Check className="dropdown-row-check" size={14} aria-hidden="true" />}
       </div>)}
     </DropdownLayer>}

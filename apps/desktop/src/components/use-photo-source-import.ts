@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n.ts';
 import { useEffect, useRef, useState } from 'react';
 import { cancelCuration, chooseLocalPhotoSources, commitCuration, prepareImportFiles } from '../lib/curation-api';
 import { cancelLinkImport, prepareLinkImport } from '../lib/photo-import-api';
@@ -36,8 +37,8 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
       const pendingDraft = currentDraft.current;
       request.current = null;
       currentDraft.current = null;
-      if (pendingRequest) void cancelLinkImport(pendingRequest).catch((cause) => console.error('取消链接获取失败', cause));
-      if (pendingDraft) void cancelCuration(pendingDraft.id).catch((cause) => console.error('清理照片候选失败', cause));
+      if (pendingRequest) void cancelLinkImport(pendingRequest).catch((cause) => console.error(t('取消链接获取失败', 'Could not cancel link download'), cause));
+      if (pendingDraft) void cancelCuration(pendingDraft.id).catch((cause) => console.error(t('清理照片候选失败', 'Could not clear the photo selection draft'), cause));
       busyCallback.current?.(false);
     };
   }, []);
@@ -62,7 +63,7 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
       return true;
     } catch (cause) {
       if (pendingRequest) request.current = pendingRequest;
-      const error = new Error(`取消失败：${messageOf(cause)}`);
+      const error = new Error(t(`取消失败：${messageOf(cause)}`, `Could not cancel: ${messageOf(cause)}`));
       if (mounted.current) setError(error.message);
       if (rethrow) throw error;
       return false;
@@ -114,7 +115,7 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
       return next;
     } catch (cause) {
       if (mounted.current && generation.current === ownGeneration) setError(messageOf(cause));
-      else console.error('过期照片候选请求或清理失败', cause);
+      else console.error(t('过期照片候选请求或清理失败', 'Stale photo selection request or cleanup failed'), cause);
     } finally {
       if (generation.current === ownGeneration) {
         request.current = null;
@@ -140,7 +141,7 @@ export function usePhotoSourceImport({ library, groupId, onBusyChange }: {
     } catch (cause) {
       if (mounted.current) {
         setDraft(null);
-        setError(`导入未完成：${messageOf(cause)}。请重新准备照片后再试。`);
+        setError(t(`导入未完成：${messageOf(cause)}。请重新准备照片后再试。`, `Import did not finish: ${messageOf(cause)}. Prepare the photos again and retry.`));
       }
       return null;
     } finally {

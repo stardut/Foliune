@@ -22,6 +22,8 @@ Keep track of the light, colors, and compositions that caught your eye with tags
 
 Import local photographs, or preview and select photos from individual Xiaohongshu and Instagram posts before adding them to your library. Link imports depend on platform access, save the static photos supplied by the platform, and skip videos and their cover images.
 
+Revisit geotagged work by province, state, or equivalent region on an offline map. Select a representative photograph or a point to see more work from that region.
+
 ### Photobooks
 
 Choose photographs from your collections and personal work. Start with an automatic layout, then decide which photographs belong side by side and which deserve a page of their own. Break the sequence into chapters and adjust the framing while keeping the originals intact.
@@ -82,10 +84,6 @@ Start with a series you’d like to see again and try arranging it into your fir
 ### AI assistance for photographers
 
 Connect to a model API of your choice to analyze light and shadow, color, and composition in your photographs. Use reference images to draft shoot plans and put together shot lists, and get help organizing model profiles and sample photographs.
-
-### A map of your work
-
-Browse your work by shooting location. See photographs from Xinjiang, Beijing, and elsewhere on the map, then select a place to revisit the work you made there.
 
 ## About the project
 

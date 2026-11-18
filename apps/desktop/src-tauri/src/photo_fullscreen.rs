@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use std::ffi::c_void;
 use tauri::{App, Emitter, EventTarget, Manager, WebviewWindow};
 
@@ -23,9 +24,9 @@ extern "C" fn release(context: *mut c_void) {
 }
 
 pub fn observe(app: &App) -> Result<(), Box<dyn std::error::Error>> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| std::io::Error::other("找不到主窗口"))?;
+    let window = app.get_webview_window("main").ok_or_else(|| {
+        std::io::Error::other(tr("找不到主窗口", "Could not find the main window"))
+    })?;
     let native_window = window.ns_window()?;
     unsafe {
         foliune_observe_fullscreen(

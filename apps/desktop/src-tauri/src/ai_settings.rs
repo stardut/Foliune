@@ -1,4 +1,5 @@
 use crate::credentials;
+use crate::locale::tr;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -28,7 +29,7 @@ pub fn provider(value: &str) -> Result<(), String> {
     if ["openai", "anthropic", "deepseek"].contains(&value) {
         Ok(())
     } else {
-        Err("未知 AI 服务".into())
+        Err(tr("未知 AI 服务", "Unknown AI provider").into())
     }
 }
 
@@ -81,9 +82,16 @@ pub fn settings(conn: &Connection, keys: &impl Credentials) -> Result<AiSettings
 }
 pub fn config(conn: &Connection, requested: &str) -> Result<(String, bool), String> {
     provider(requested)?;
-    let saved = connection(conn)?.ok_or("请先在设置中选择并保存一个 AI 接入")?;
+    let saved = connection(conn)?.ok_or(tr(
+        "请先在设置中选择并保存一个 AI 接入",
+        "Choose and save an AI provider in Settings first",
+    ))?;
     if saved.provider != requested {
-        return Err("AI 接入已变更，请重新打开照片后重试".into());
+        return Err(tr(
+            "AI 接入已变更，请重新打开照片后重试",
+            "Your AI connection changed. Reopen the photo and try again.",
+        )
+        .into());
     }
     Ok((saved.model, saved.vision))
 }
@@ -96,20 +104,28 @@ pub fn save(
     provider(&input.provider)?;
     let model = input.model.trim();
     if model.is_empty() || model.len() > 200 || model.contains(char::is_whitespace) {
-        return Err("请输入有效的模型标识".into());
+        return Err(tr("请输入有效的模型标识", "Enter a valid model ID").into());
     }
     let current = connection(conn)?;
     let new_key = input.api_key.as_deref();
     if let Some(key) = new_key {
         if key.trim().is_empty() || key.contains('\n') || key.contains('\r') {
-            return Err("API Key 不能为空或包含换行".into());
+            return Err(tr(
+                "API Key 不能为空或包含换行",
+                "The API key must not be empty or contain line breaks",
+            )
+            .into());
         }
     } else if !current
         .as_ref()
         .is_some_and(|saved| saved.provider == input.provider)
         || !keys.has(&input.provider)?
     {
-        return Err("请输入此提供方的 API Key".into());
+        return Err(tr(
+            "请输入此提供方的 API Key",
+            "Enter the API key for this provider",
+        )
+        .into());
     }
     let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     transaction.execute("INSERT INTO ai_connection(id,provider,model,vision) VALUES(1,?1,?2,?3) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider,model=excluded.model,vision=excluded.vision", params![input.provider, model, input.vision]).map_err(|e| e.to_string())?;

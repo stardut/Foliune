@@ -321,6 +321,7 @@ fn ignore_exact_shown_additions_and_delete_suppress_after_reopen() {
         &conn,
         &book.book.id,
         &book.book.current_version_id,
+        crate::locale::Locale::Chinese,
         &mut output,
     )
     .unwrap();

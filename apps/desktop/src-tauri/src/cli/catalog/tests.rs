@@ -75,6 +75,7 @@ fn search_and_patch_respect_active_members_and_editable_metadata() {
     for patch in [
         json!({"annotation":"应回滚", "unknown":true}),
         json!({"regions": []}),
+        json!({"locationRegionId":"FRA:Île-de-France"}),
         json!({"tags": "字符串不是数组"}),
         json!({}),
     ] {
@@ -120,6 +121,19 @@ fn search_and_patch_respect_active_members_and_editable_metadata() {
         .unwrap()
         .get("originalPath")
         .is_none());
+
+    conn.execute_batch(
+        "ALTER TABLE photos DROP COLUMN location_region_id;
+         PRAGMA user_version=3;",
+    )
+    .unwrap();
+    assert_eq!(show_photo(&conn, active).unwrap().photo.annotation, "桌面保存");
+    assert_eq!(
+        search_photos(&conn, None, Some(&album), Some("frame"), 1, 0)
+            .unwrap()
+            .total,
+        1
+    );
 }
 
 #[test]

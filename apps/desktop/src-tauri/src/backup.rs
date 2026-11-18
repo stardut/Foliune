@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use crate::{
     db::{self, Store},
     models::Snapshot,
@@ -68,9 +69,16 @@ fn safe_name(name: &str) -> bool {
 }
 
 fn recorded_filename(path: &str) -> Result<&str, String> {
-    let name = path.rsplit(['/', '\\']).next().ok_or("备份照片路径无效")?;
+    let name = path
+        .rsplit(['/', '\\'])
+        .next()
+        .ok_or(tr("备份照片路径无效", "Invalid path for a backed-up photo"))?;
     if name.is_empty() || !safe_name(&format!("originals/{name}")) {
-        return Err("备份照片文件名无效".into());
+        return Err(tr(
+            "备份照片文件名无效",
+            "Invalid filename for a backed-up photo",
+        )
+        .into());
     }
     Ok(name)
 }
@@ -105,7 +113,10 @@ pub fn restore(store: &Store, path: &Path) -> Result<RestoreResult, String> {
         restore_impl::merge(store, &root, &staging.join("library.sqlite"))
     })();
     match (result, fs::remove_dir_all(&staging)) {
-        (Err(error), Err(cleanup)) => Err(format!("{error}；清理恢复暂存失败：{cleanup}")),
+        (Err(error), Err(cleanup)) => Err(display_format!(
+            "{error}；清理恢复暂存失败：{cleanup}",
+            "{error}. Could not clean up temporary restore files: {cleanup}"
+        )),
         (Ok(result), Err(cleanup)) => {
             eprintln!("恢复已提交，清理恢复暂存失败：{cleanup}");
             Ok(result)
@@ -115,21 +126,31 @@ pub fn restore(store: &Store, path: &Path) -> Result<RestoreResult, String> {
 }
 
 fn unpack_archive(path: &Path, staging: &Path) -> Result<HashSet<String>, String> {
-    let mut archive = ZipArchive::new(fs::File::open(path).map_err(|e| e.to_string())?)
-        .map_err(|_| "不是有效的 Foliune ZIP 备份")?;
+    let mut archive =
+        ZipArchive::new(fs::File::open(path).map_err(|e| e.to_string())?).map_err(|_| {
+            tr(
+                "不是有效的 Foliune ZIP 备份",
+                "This is not a valid Foliune ZIP backup",
+            )
+        })?;
     let manifest: Manifest = {
         let mut file = archive
             .by_name("manifest.json")
-            .map_err(|_| "备份缺少清单")?;
+            .map_err(|_| tr("备份缺少清单", "The backup manifest is missing"))?;
         if file.size() > MAX_MANIFEST_BYTES {
-            return Err("备份清单过大".into());
+            return Err(tr("备份清单过大", "The backup manifest is too large").into());
         }
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-        serde_json::from_slice(&bytes).map_err(|_| "备份清单格式无效")?
+        serde_json::from_slice(&bytes).map_err(|_| {
+            tr(
+                "备份清单格式无效",
+                "The backup manifest has an invalid format",
+            )
+        })?
     };
     if manifest.format != "foliune-library" || manifest.version != 1 {
-        return Err("不支持的备份版本".into());
+        return Err(tr("不支持的备份版本", "Unsupported backup version").into());
     }
     let mut expected = HashSet::new();
     for entry in &manifest.files {
@@ -137,11 +158,19 @@ fn unpack_archive(path: &Path, staging: &Path) -> Result<HashSet<String>, String
             || !expected.insert(entry.path.clone())
             || entry.sha256.len() != 64
         {
-            return Err("备份包含非法或重复路径".into());
+            return Err(tr(
+                "备份包含非法或重复路径",
+                "The backup contains invalid or duplicate paths",
+            )
+            .into());
         }
     }
     if !expected.contains("library.sqlite") || archive.len() != expected.len() + 1 {
-        return Err("备份文件集合与清单不一致".into());
+        return Err(tr(
+            "备份文件集合与清单不一致",
+            "The backup files do not match the manifest",
+        )
+        .into());
     }
     let mut seen = HashSet::new();
     for index in 0..archive.len() {
@@ -154,27 +183,43 @@ fn unpack_archive(path: &Path, staging: &Path) -> Result<HashSet<String>, String
                 .unix_mode()
                 .is_some_and(|mode| !matches!(mode & 0o170000, 0 | 0o100000))
         {
-            return Err("备份包含非法路径、链接或额外文件".into());
+            return Err(tr(
+                "备份包含非法路径、链接或额外文件",
+                "The backup contains invalid paths, links, or extra files",
+            )
+            .into());
         }
     }
     for entry in &manifest.files {
         let mut source = archive.by_name(&entry.path).map_err(|e| e.to_string())?;
         if source.size() != entry.size {
-            return Err("备份文件大小与清单不符".into());
+            return Err(tr(
+                "备份文件大小与清单不符",
+                "A backup file size does not match the manifest",
+            )
+            .into());
         }
         let target = staging.join(&entry.path);
-        fs::create_dir_all(target.parent().ok_or("备份路径无效")?).map_err(|e| e.to_string())?;
+        fs::create_dir_all(
+            target
+                .parent()
+                .ok_or(tr("备份路径无效", "Invalid backup path"))?,
+        )
+        .map_err(|e| e.to_string())?;
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&target)
             .map_err(|e| e.to_string())?;
-        let limit = entry.size.checked_add(1).ok_or("备份文件大小无效")?;
+        let limit = entry
+            .size
+            .checked_add(1)
+            .ok_or(tr("备份文件大小无效", "Invalid backup file size"))?;
         let copied = std::io::copy(&mut source.by_ref().take(limit), &mut file)
             .map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
         if copied != entry.size || digest(&target)?.1 != entry.sha256 {
-            return Err("备份文件校验失败".into());
+            return Err(tr("备份文件校验失败", "Could not verify a backup file").into());
         }
     }
     Ok(expected)
@@ -188,7 +233,11 @@ fn prepare_database(staging: &Path) -> Result<(), String> {
         .query_row("PRAGMA integrity_check", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;
     if integrity != "ok" {
-        return Err("备份数据库完整性检查失败".into());
+        return Err(tr(
+            "备份数据库完整性检查失败",
+            "The backup database failed its integrity check",
+        )
+        .into());
     }
     if conn
         .prepare(
@@ -198,7 +247,11 @@ fn prepare_database(staging: &Path) -> Result<(), String> {
         .and_then(|mut statement| statement.exists([]))
         .map_err(|e| e.to_string())?
     {
-        return Err("备份数据库包含不支持的触发器、视图或虚拟表".into());
+        return Err(tr(
+            "备份数据库包含不支持的触发器、视图或虚拟表",
+            "The backup database contains unsupported triggers, views, or virtual tables",
+        )
+        .into());
     }
     // Only archives with none of these tables predate the corresponding module.
     // A partial schema can indicate lost records or references.
@@ -211,14 +264,22 @@ fn prepare_database(staging: &Path) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
     if editorial_tables != 0 && editorial_tables != 4 {
-        return Err("备份的模特或排版数据表不完整".into());
+        return Err(tr(
+            "备份的模特或排版数据表不完整",
+            "The backup is missing model profile or layout tables",
+        )
+        .into());
     }
     let planning_tables: i64 = conn.query_row(
         "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('shoot_plans','shoot_plan_photos')",
         [], |row| row.get(0),
     ).map_err(|e| e.to_string())?;
     if planning_tables != 0 && planning_tables != 2 {
-        return Err("备份的拍摄策划数据表不完整".into());
+        return Err(tr(
+            "备份的拍摄策划数据表不完整",
+            "The backup is missing shoot plan tables",
+        )
+        .into());
     }
     let (has_ai_settings, has_analyses): (bool, bool) = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name IN ('ai_settings','ai_connection')),
@@ -226,7 +287,11 @@ fn prepare_database(staging: &Path) -> Result<(), String> {
         [], |row| Ok((row.get(0)?, row.get(1)?)),
     ).map_err(|e| e.to_string())?;
     if has_ai_settings != has_analyses {
-        return Err("备份的 AI 数据表不完整".into());
+        return Err(tr(
+            "备份的 AI 数据表不完整",
+            "The backup is missing AI data tables",
+        )
+        .into());
     }
     db::migrate_photos(&conn)?;
     crate::groups::init_covers(&conn)?;
@@ -265,7 +330,11 @@ fn validate_database_files(staging: &Path, expected: &HashSet<String>) -> Result
         let mut path_for = |directory, old| {
             let relative = format!("{directory}/{}", recorded_filename(old)?);
             if !expected.contains(&relative) {
-                return Err("备份缺少照片文件".into());
+                return Err(tr(
+                    "备份缺少照片文件",
+                    "Photo files are missing from the backup",
+                )
+                .into());
             }
             let path = staging.join(&relative);
             if used.insert(relative) {
@@ -288,7 +357,11 @@ fn validate_database_files(staging: &Path, expected: &HashSet<String>) -> Result
         .map_err(|e| e.to_string())?;
     }
     if used != *expected {
-        return Err("备份包含数据库未引用的文件".into());
+        return Err(tr(
+            "备份包含数据库未引用的文件",
+            "The backup contains files with no database references",
+        )
+        .into());
     }
     db::snapshot_with_hidden(&tx)?;
     tx.commit().map_err(|e| e.to_string())
@@ -303,9 +376,18 @@ fn validate_image(path: &Path) -> Result<(), String> {
         reader.format(),
         Some(image::ImageFormat::Jpeg | image::ImageFormat::Png | image::ImageFormat::WebP)
     ) {
-        return Err("备份中照片格式不受支持".into());
+        return Err(tr(
+            "备份中照片格式不受支持",
+            "The backup contains an unsupported photo format",
+        )
+        .into());
     }
-    reader.decode().map_err(|_| "备份中照片无法解码")?;
+    reader.decode().map_err(|_| {
+        tr(
+            "备份中照片无法解码",
+            "Could not decode a photo in the backup",
+        )
+    })?;
     Ok(())
 }
 

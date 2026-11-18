@@ -30,6 +30,7 @@ export interface Photo {
   source: string;
   capturedAt: string | null;
   location: string;
+  locationRegionId?: string;
   project: string;
   importedAt: string;
 }
@@ -92,7 +93,14 @@ export interface PhotoPatch {
   source?: string;
   capturedAt?: string | null;
   location?: string;
+  locationRegionId?: string;
   project?: string;
+}
+
+export interface PhotoRegionBaseline {
+  id: string;
+  location: string;
+  locationRegionId: string;
 }
 
 export interface GroupInput {

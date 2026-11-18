@@ -1,3 +1,5 @@
+import { t } from '../../lib/i18n';
+import { modelGenderLabel } from './ModelFields';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { ModelProfile } from '../../lib/model-types';
@@ -23,11 +25,11 @@ export function ModelOverviewRow({ model, photos, onOpen, onDelete, disabled = f
     return () => observer.disconnect();
   }, []);
   const fit = width === undefined ? undefined : overviewSampleLayout(samples, width);
-  const basics = [model.gender, model.city].filter(Boolean).join(' · ');
+  const basics = [modelGenderLabel(model.gender), model.city].filter(Boolean).join(' · ');
   let photoIndex = 0;
   return <article className="model-overview-row"
     onClick={(event) => { if (!disabled && event.target === event.currentTarget) onOpen(); }}>
-    <button type="button" className="model-overview-open" disabled={disabled} onClick={onOpen} aria-label={`查看${model.name}的档案`}>
+    <button type="button" className="model-overview-open" disabled={disabled} onClick={onOpen} aria-label={t(`查看${model.name}的档案`, `View profile for ${model.name}`)}>
     <div className="model-overview-info">
       <h2 title={model.name}>{model.name}</h2>
       {basics && <p title={basics}>{basics}</p>}
@@ -41,9 +43,9 @@ export function ModelOverviewRow({ model, photos, onOpen, onDelete, disabled = f
             return <div className="model-overview-sample" key={photo.id} style={fit ? { width: fit.widths[index], height: fit.height } : { height: overviewSampleHeight, aspectRatio: `${photo.width}/${photo.height}` }}><PhotoImage photo={photo} lazy /></div>;
           })}
         </div>)}
-      </div> : <span className="model-overview-no-samples">{model.photoIds.length ? '样片记录缺失' : '暂无样片'}</span>}
+      </div> : <span className="model-overview-no-samples">{model.photoIds.length ? t('样片记录缺失', 'Portfolio photo missing') : t('暂无样片', 'No portfolio photos')}</span>}
     </div>
     </button>
-    <button type="button" className="icon-button model-overview-delete" aria-label={`删除${model.name}的档案`} title="删除档案" disabled={disabled} onClick={onDelete}><Trash2 size={16} /></button>
+    <button type="button" className="icon-button model-overview-delete" aria-label={t(`删除${model.name}的档案`, `Delete profile for ${model.name}`)} title={t('删除档案', 'Delete Profile')} disabled={disabled} onClick={onDelete}><Trash2 size={16} /></button>
   </article>;
 }

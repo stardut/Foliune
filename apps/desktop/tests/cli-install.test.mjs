@@ -1,3 +1,4 @@
+import './fixtures/chinese-interface.mjs';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';

@@ -3,6 +3,7 @@
 .settings-content h2 { font-size: 16px; font-weight: 500; margin: 0; }
 .settings-content > p { margin: 8px 0 16px; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.settings-language .dropdown-select { inline-size: 160px; }
 .settings-row p { margin: 5px 0 0; }
 .settings-update > p, .settings-cli > p { margin: 10px 0 0; }
 .settings-cli .settings-row > div { flex: 1 1 270px; }

@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use tauri::{menu::Menu, Manager, ResourceId, Webview};
 
 #[cfg(target_os = "macos")]
@@ -13,13 +14,17 @@ extern "C" {
 
 #[cfg(target_os = "macos")]
 pub fn observe(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| std::io::Error::other("找不到主窗口"))?;
+    let window = app.get_webview_window("main").ok_or_else(|| {
+        std::io::Error::other(tr("找不到主窗口", "Could not find the main window"))
+    })?;
     if unsafe { foliune_observe_context_menu(window.ns_window()?) } {
         Ok(())
     } else {
-        Err(std::io::Error::other("无法接收上下文菜单事件").into())
+        Err(std::io::Error::other(tr(
+            "无法接收上下文菜单事件",
+            "Could not listen for context menu events",
+        ))
+        .into())
     }
 }
 
@@ -36,11 +41,15 @@ pub async fn popup_context_menu(
     y: f64,
 ) -> Result<(), String> {
     if !x.is_finite() || !y.is_finite() {
-        return Err("菜单位置无效".into());
+        return Err(tr("菜单位置无效", "Invalid menu position").into());
     }
     let window = webview.window().clone();
     if window.label() != "main" {
-        return Err("当前窗口不支持操作菜单".into());
+        return Err(tr(
+            "当前窗口不支持操作菜单",
+            "This window does not support action menus",
+        )
+        .into());
     }
     let menu = webview
         .resources_table()
@@ -70,7 +79,11 @@ pub async fn popup_context_menu(
                             } {
                                 Ok(())
                             } else {
-                                Err("菜单请求已失效，请重新右键".into())
+                                Err(tr(
+                                    "菜单请求已失效，请重新右键",
+                                    "The menu request expired. Open the context menu again.",
+                                )
+                                .into())
                             }
                         });
                     let _ = send.send(result);

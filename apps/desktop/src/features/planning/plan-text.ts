@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n.ts';
 // Closing punctuation travels with its preceding grapheme when the next line can hold both.
 const lineStartPunctuation = new Set(Array.from('。，、；：！？）】》〉〕」』”’»％%,.;:!?)]}'));
 
@@ -17,7 +18,7 @@ export function wrapPlanText(context: Pick<CanvasRenderingContext2D, 'measureTex
         if (characters[end] === ' ' && end > start) lastSpace = end;
         candidate += characters[end++];
       }
-      if (end === start) throw new Error('策划包含超出长图行宽的字符，无法完整排版。');
+      if (end === start) throw new Error(t('策划包含超出长图行宽的字符，无法完整排版。', 'Some characters are too wide to fit in the exported PNG.'));
       const breakAtSpace = end < characters.length && lastSpace > start;
       let cut = breakAtSpace ? lastSpace : end;
       let nextStart = cut + (breakAtSpace ? 1 : 0);

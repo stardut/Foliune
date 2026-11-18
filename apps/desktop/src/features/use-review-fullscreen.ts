@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -72,7 +73,7 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
       if (target) direct = false;
       exitAfterEntry = undefined;
       operation = null;
-      setError(target ? '无法进入全屏。' : '无法退出全屏。');
+      setError(target ? t('无法进入全屏。', 'Could not enter full screen.') : t('无法退出全屏。', 'Could not exit full screen.'));
       settle(nativeFullscreen);
     }
     async function reconcile() {
@@ -87,7 +88,7 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
       } catch {
         if (!disposed && current === operation && id === checkId && (current?.deadlineReached || !current)) {
           if (current) fail(current.target);
-          else setError('无法读取窗口的全屏状态。');
+          else setError(t('无法读取窗口的全屏状态。', 'Could not read the window’s full-screen status.'));
         }
       }
     }
@@ -137,7 +138,7 @@ export function useReviewFullscreen(entry: 'direct' | 'available' | undefined, o
       },
     };
     if (direct) change(true);
-    else void ready.catch(() => { if (!disposed) setError('无法读取窗口的全屏状态。'); });
+    else void ready.catch(() => { if (!disposed) setError(t('无法读取窗口的全屏状态。', 'Could not read the window’s full-screen status.')); });
 
     return () => {
       disposed = true;

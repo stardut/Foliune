@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n.ts';
 import type { Photo } from '../../lib/types';
 import { isLocalPhoto } from '../../lib/photo-availability.ts';
 
@@ -116,20 +117,20 @@ export function collageLayout(state: CollageState, allPhotos: Photo[]): CollageL
 }
 
 export function collageOutputProblem(layout: CollageLayout): string {
-  if (![layout.width, layout.height].every((value) => Number.isSafeInteger(value) && value > 0)) return '请输入有效像素尺寸';
-  if (layout.width > COLLAGE_MAX_EDGE || layout.height > COLLAGE_MAX_EDGE || layout.width * layout.height > COLLAGE_MAX_PIXELS) return '单边最多 32,768 px，总像素最多 1.6 亿；请调整布局、选片或输出尺寸';
-  if (layout.items.some((item) => item.width < 1 || item.height < 1)) return '当前尺寸过小，请增加输出尺寸';
+  if (![layout.width, layout.height].every((value) => Number.isSafeInteger(value) && value > 0)) return t('请输入有效像素尺寸', 'Enter a valid size in pixels');
+  if (layout.width > COLLAGE_MAX_EDGE || layout.height > COLLAGE_MAX_EDGE || layout.width * layout.height > COLLAGE_MAX_PIXELS) return t('单边最多 32,768 px，总像素最多 1.6 亿；请调整布局、选片或输出尺寸', 'Maximum 32,768 px per side and 160 million pixels total. Adjust the layout, photos, or output size.');
+  if (layout.items.some((item) => item.width < 1 || item.height < 1)) return t('当前尺寸过小，请增加输出尺寸', 'Increase the output size. The current size is too small.');
   return '';
 }
 
 export function collageProblem(state: CollageState, photos: Photo[], layout: CollageLayout): string {
-  if (state.photoIds.length < 2) return '至少选择 2 张照片';
-  if (state.photoIds.length > COLLAGE_MAX_PHOTOS) return `拼图最多支持 ${COLLAGE_MAX_PHOTOS} 张照片`;
-  if (layout.items.length !== state.photoIds.length) return '部分照片记录缺失，请重新选片';
+  if (state.photoIds.length < 2) return t('至少选择 2 张照片', 'Select at least 2 photos');
+  if (state.photoIds.length > COLLAGE_MAX_PHOTOS) return t(`拼图最多支持 ${COLLAGE_MAX_PHOTOS} 张照片`, `Collages support up to ${COLLAGE_MAX_PHOTOS} photos`);
+  if (layout.items.length !== state.photoIds.length) return t('部分照片记录缺失，请重新选片', 'Some photo records are missing. Select photos again.');
   const missing = state.photoIds.map((id) => photos.find((photo) => photo.id === id)).filter((photo) => !photo?.originalAvailable);
-  if (missing.some(isLocalPhoto)) return '部分照片找不到源文件';
-  if (missing.length) return '请先重新定位缺失的原图';
-  if (layout.items.some((item) => item.width < 1 || item.height < 1 || item.x + item.width > layout.width || item.y + item.height > layout.height)) return '照片比例差异过大，请调整布局或选片';
+  if (missing.some(isLocalPhoto)) return t('部分照片找不到源文件', 'Some source files are missing');
+  if (missing.length) return t('请先重新定位缺失的原图', 'Relink the missing originals first');
+  if (layout.items.some((item) => item.width < 1 || item.height < 1 || item.x + item.width > layout.width || item.y + item.height > layout.height)) return t('照片比例差异过大，请调整布局或选片', 'Photo aspect ratios differ too much. Adjust the layout or photo selection.');
   return '';
 }
 

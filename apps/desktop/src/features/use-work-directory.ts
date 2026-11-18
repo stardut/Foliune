@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useToast } from '../components/ToastProvider';
@@ -84,7 +85,7 @@ export function useWorkDirectory(
           if (active && started === session.operation && pause === refreshPause.current) onAvailability(fresh);
         }
       } catch (cause) {
-        if (active && started === session.operation && pause === refreshPause.current) toast({ title: `无法读取作品目录：${message(cause)}`, status: 'error' });
+        if (active && started === session.operation && pause === refreshPause.current) toast({ title: t(`无法读取作品目录：${message(cause)}`, `Could not read the work folder: ${message(cause)}`), status: 'error' });
       } finally {
         reading = false;
         if (active && pause !== refreshPause.current) { pending = true; snapshotPending ||= refreshSnapshot; }
@@ -104,7 +105,7 @@ export function useWorkDirectory(
       schedule(payload.refreshSnapshot && !payload.synced);
     }).then((unlisten) => { if (active) { stop = unlisten; schedule(true); } else unlisten(); })
       .catch((cause) => {
-        if (active) { toast({ title: `无法监听作品目录：${message(cause)}`, status: 'error' }); schedule(false); }
+        if (active) { toast({ title: t(`无法监听作品目录：${message(cause)}`, `Could not watch the work folder: ${message(cause)}`), status: 'error' }); schedule(false); }
       });
     return () => { active = false; stop?.(); };
   }, [ready, onAvailability, receiveCommit, receiveState, session, toast]);
@@ -119,7 +120,7 @@ export function useWorkDirectory(
       if (!next || !receiveState(next)) return null;
       if (refreshSnapshot) {
         try { onAvailability(await loadSnapshot()); }
-        catch (cause) { toast({ title: `目录已更新，无法刷新图库：${message(cause)}`, status: 'error' }); }
+        catch (cause) { toast({ title: t(`目录已更新，无法刷新图库：${message(cause)}`, `Folder updated, but the library could not be refreshed: ${message(cause)}`), status: 'error' }); }
       }
       return next;
     } finally {

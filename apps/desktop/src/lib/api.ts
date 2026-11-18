@@ -1,7 +1,8 @@
+import { t } from './i18n.ts';
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { isLocalPhoto } from './photo-availability';
-import type { AlbumCover, GroupInput, GroupPatch, ImportResult, LibraryKind, LibrarySnapshot, MembershipStatus, Photo, PhotoMetadata, PhotoPatch } from './types';
+import type { AlbumCover, GroupInput, GroupPatch, ImportResult, LibraryKind, LibrarySnapshot, MembershipStatus, Photo, PhotoMetadata, PhotoPatch, PhotoRegionBaseline } from './types';
 
 export const isDesktop = () => isTauri();
 
@@ -22,7 +23,7 @@ export function withImageUrls(snapshot: LibrarySnapshot): LibrarySnapshot {
 }
 
 export async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  if (!isDesktop()) throw new Error('请在 Foliune 桌面应用中使用本地图库功能。');
+  if (!isDesktop()) throw new Error(t('请在 Foliune 桌面应用中使用本地图库功能。', 'Use the Foliune desktop app to access the local library.'));
   try { return await invoke<T>(command, args); }
   catch (error) { throw new Error(typeof error === 'string' ? error : String(error)); }
 }
@@ -48,9 +49,9 @@ export async function importPhotoFiles(paths: string[], library: LibraryKind, gr
 }
 
 export async function importPhotos(library: LibraryKind, groupId?: string): Promise<ImportResult | null> {
-  if (!isDesktop()) throw new Error('请在 Foliune 桌面应用中导入照片。');
-  const paths = await open({ multiple: true, directory: false, title: '导入照片',
-    filters: [{ name: '照片（JPEG / PNG / WebP）', extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
+  if (!isDesktop()) throw new Error(t('请在 Foliune 桌面应用中导入照片。', 'Use the Foliune desktop app to import photos.'));
+  const paths = await open({ multiple: true, directory: false, title: t('导入照片', 'Import Photos'),
+    filters: [{ name: t('照片（JPEG / PNG / WebP）', 'Photos (JPEG / PNG / WebP)'), extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
   });
   if (!paths || paths.length === 0) return null;
   return importPhotoFiles(Array.isArray(paths) ? paths : [paths], library, groupId);
@@ -69,6 +70,8 @@ export const shareAlbumAirDrop = (groupId: string, photoIds?: string[]) =>
   call<void>('share_album_airdrop', { groupId, photoIds: photoIds ?? null });
 export const updatePhoto = (id: string, patch: PhotoPatch, expected: PhotoPatch) =>
   mutate('update_photo', { id, patch, expected });
+export const setPhotoRegions = (photos: readonly PhotoRegionBaseline[], regionId: string, groupId?: string) =>
+  mutate('set_photo_regions', { photos, regionId, groupId: groupId ?? null });
 export const readPhotoMetadata = (photoId: string, expectedOriginalPath: string) =>
   call<PhotoMetadata>('read_photo_metadata', { photoId, expectedOriginalPath });
 export const addPhotosToGroup = (groupId: string, photoIds: string[]) => mutate('add_photos_to_group', { groupId, photoIds });
@@ -78,9 +81,9 @@ export const setMembershipStatuses = (groupId: string, photoIds: string[], statu
   mutate('set_membership_statuses', { groupId, photoIds, status });
 
 export async function relinkPhoto(photoId: string, confirm: (path: string) => Promise<boolean>): Promise<LibrarySnapshot | null> {
-  if (!isDesktop()) throw new Error('请在 Foliune 桌面应用中重新定位照片。');
-  const path = await open({ multiple: false, directory: false, title: '重新定位照片',
-    filters: [{ name: '照片（JPEG / PNG / WebP）', extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
+  if (!isDesktop()) throw new Error(t('请在 Foliune 桌面应用中重新定位照片。', 'Use the Foliune desktop app to relink photos.'));
+  const path = await open({ multiple: false, directory: false, title: t('重新定位照片', 'Relink Photo'),
+    filters: [{ name: t('照片（JPEG / PNG / WebP）', 'Photos (JPEG / PNG / WebP)'), extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
   });
   if (!path) return null;
   if (!await confirm(path)) return null;

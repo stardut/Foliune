@@ -1,3 +1,4 @@
+use crate::locale::{current, display_format, tr, Locale};
 use crate::{book_layout, books, db::Store};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use rusqlite::Connection;
@@ -21,17 +22,55 @@ pub fn document<W: Write>(
     conn: &Connection,
     book_id: &str,
     version_id: &str,
+    locale: Locale,
     output: &mut W,
 ) -> Result<(), String> {
     let detail = books::get(conn, book_id)?;
     if detail.book.current_version_id != version_id {
-        return Err("画册内容已更改，请重新打开后导出".into());
+        return Err(tr(
+            "画册内容已更改，请重新打开后导出",
+            "This photo book changed. Reopen it before exporting.",
+        )
+        .into());
     }
     let [version] = detail.versions;
     book_layout::validate(conn, &version.input)?;
-    writeln!(output, "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><style>{}</style></head><body><header><h1>{}</h1><p>{} · {} 页</p><button onclick=\"document.body.classList.toggle('spread')\">切换单页 / 双页</button></header><main>", escape(&detail.book.title), STYLE, escape(&detail.book.title), escape(&version.input.label), version.input.pages.len()).map_err(|e|e.to_string())?;
+    let lang = locale.text("zh-CN", "en");
+    let title = escape(&detail.book.title);
+    let page_count = version.input.pages.len();
+    let pages = if locale.is_chinese() {
+        format!("{page_count} 页")
+    } else if page_count == 1 {
+        "1 page".into()
+    } else {
+        format!("{page_count} pages")
+    };
+    let layout_label =
+        if version.kind == "automatic" && book_layout::has_automatic_label(&version.input.label) {
+            book_layout::automatic_label(locale)
+        } else {
+            &version.input.label
+        };
+    let layout_label = escape(layout_label);
+    let toggle = locale.text("切换单页 / 双页", "Toggle Single Page / Spread");
+    writeln!(
+        output,
+        r#"<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title><style>{STYLE}</style></head><body><header><h1>{title}</h1><p>{layout_label} · {pages}</p><button onclick="document.body.classList.toggle('spread')">{toggle}</button></header><main>"#,
+    )
+    .map_err(|e| e.to_string())?;
     for (index, page) in version.input.pages.iter().enumerate() {
-        writeln!(output,"<section class=\"book-page\" id=\"page-{}\" style=\"aspect-ratio:{}/{}\" aria-label=\"第 {} 页\">",index+1,version.input.page_width,version.input.page_height,index+1).map_err(|e|e.to_string())?;
+        let number = index + 1;
+        let page_label = if locale.is_chinese() {
+            format!("第 {number} 页")
+        } else {
+            format!("Page {number}")
+        };
+        writeln!(
+            output,
+            r#"<section class="book-page" id="page-{number}" style="aspect-ratio:{}/{}" aria-label="{page_label}">"#,
+            version.input.page_width, version.input.page_height,
+        )
+        .map_err(|e| e.to_string())?;
         for item in &page.items {
             let (path, name): (String, String) = conn
                 .query_row(
@@ -42,14 +81,22 @@ pub fn document<W: Write>(
                 .map_err(|e| e.to_string())?;
             let bytes = crate::work_directory::original(conn, &item.photo_id, &path)?
                 .read()
-                .map_err(|e| format!("原图缺失或无法读取，不能导出：{name}（{e}）"))?;
-            let mime = match image::guess_format(&bytes)
-                .map_err(|e| format!("原图格式无效：{name}（{e}）"))?
-            {
+                .map_err(|e| display_format!("原图缺失或无法读取，不能导出：{name}（{e}）", "Could not export because the original for “{name}” is missing or unreadable ({e})"))?;
+            let mime = match image::guess_format(&bytes).map_err(|e| {
+                display_format!(
+                    "原图格式无效：{name}（{e}）",
+                    "The original for “{name}” has an invalid format ({e})"
+                )
+            })? {
                 image::ImageFormat::Jpeg => "image/jpeg",
                 image::ImageFormat::Png => "image/png",
                 image::ImageFormat::WebP => "image/webp",
-                _ => return Err(format!("原图格式不支持：{name}")),
+                _ => {
+                    return Err(display_format!(
+                        "原图格式不支持：{name}",
+                        "The original for “{name}” has an unsupported format"
+                    ))
+                }
             };
             writeln!(output,"<img alt=\"{}\" src=\"data:{};base64,{}\" style=\"left:{}%;top:{}%;width:{}%;height:{}%;object-fit:{};object-position:{}% {}%\">",escape(&name),mime,STANDARD.encode(bytes),item.x,item.y,item.width,item.height,item.fit,item.crop_x,item.crop_y).map_err(|e|e.to_string())?;
         }
@@ -69,6 +116,7 @@ pub fn export(
     conn: &Connection,
     book_id: &str,
     version_id: &str,
+    locale: Locale,
     path: &Path,
 ) -> Result<(), String> {
     if path
@@ -77,9 +125,11 @@ pub fn export(
         .map(|v| v.eq_ignore_ascii_case("html"))
         != Some(true)
     {
-        return Err("请选择 .html 文件路径".into());
+        return Err(tr("请选择 .html 文件路径", "Choose an .html file").into());
     }
-    let parent = path.parent().ok_or("导出目录无效")?;
+    let parent = path
+        .parent()
+        .ok_or(tr("导出目录无效", "Invalid export folder"))?;
     let temp = parent.join(format!(".foliune-{}.tmp", uuid::Uuid::new_v4()));
     let result = (|| {
         let file = fs::OpenOptions::new()
@@ -88,11 +138,12 @@ pub fn export(
             .open(&temp)
             .map_err(|e| e.to_string())?;
         let mut writer = BufWriter::new(file);
-        document(conn, book_id, version_id, &mut writer)?;
+        document(conn, book_id, version_id, locale, &mut writer)?;
         writer.flush().map_err(|e| e.to_string())?;
         writer.get_ref().sync_all().map_err(|e| e.to_string())?;
         drop(writer);
-        fs::rename(&temp, path).map_err(|e| format!("保存导出文件失败：{e}"))
+        fs::rename(&temp, path)
+            .map_err(|e| display_format!("保存导出文件失败：{e}", "Could not save the export: {e}"))
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temp);
@@ -111,7 +162,7 @@ pub async fn books_export(
         let store = app.state::<Store>();
         let _active = store.restart_gate.require_work()?;
         let conn = store.connection.lock().map_err(|e| e.to_string())?;
-        export(&conn, &book_id, &version_id, Path::new(&path))
+        export(&conn, &book_id, &version_id, current(), Path::new(&path))
     })
     .await
     .map_err(|e| e.to_string())?

@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n.ts';
 import { createContext, useContext, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatedToastStack, useAnimatedToastStack } from './beui/animated-toast-stack';
@@ -25,12 +26,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, [host, visibleToasts.length]);
   return <ToastContext.Provider value={showToast}>
     {children}
-    {!!visibleToasts.length && createPortal(<ol ref={viewport} popover={supportsPopover ? 'manual' : undefined} className={`toast-viewport ${supportsPopover ? '' : 'toast-viewport-legacy'}`} aria-label="操作提示"><AnimatedToastStack toasts={visibleToasts} onDismiss={dismissToast} /></ol>, host)}
+    {!!visibleToasts.length && createPortal(<ol ref={viewport} popover={supportsPopover ? 'manual' : undefined} className={`toast-viewport ${supportsPopover ? '' : 'toast-viewport-legacy'}`} aria-label={t('操作提示', 'Notifications')}><AnimatedToastStack toasts={visibleToasts} onDismiss={dismissToast} /></ol>, host)}
   </ToastContext.Provider>;
 }
 
 export function useToast() {
   const showToast = useContext(ToastContext);
-  if (!showToast) throw new Error('useToast 必须在 ToastProvider 内使用');
+  if (!showToast) throw new Error(t('useToast 必须在 ToastProvider 内使用', 'useToast must be used inside ToastProvider'));
   return showToast;
 }

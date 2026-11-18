@@ -3,13 +3,14 @@
 
 void foliune_choose_local_photo_sources(
     void *parent,
+    bool chinese,
     void *context,
     void (*complete)(void *, const char *const *, size_t)
 ) {
     NSWindow *window = (__bridge NSWindow *)parent;
     NSOpenPanel *panel = [NSOpenPanel openPanel];
-    panel.title = @"选择照片或文件夹";
-    panel.prompt = @"选择";
+    panel.title = chinese ? @"选择照片或文件夹" : @"Choose Photos or Folders";
+    panel.prompt = chinese ? @"选择" : @"Choose";
     panel.canChooseFiles = YES;
     panel.canChooseDirectories = YES;
     panel.allowsMultipleSelection = YES;

@@ -1,3 +1,4 @@
+import { getLocale, t } from '../../lib/i18n';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { ArrowLeft, Redo2, Undo2 } from 'lucide-react';
@@ -92,13 +93,13 @@ export function CollageWorkspace({ snapshot, library, initialPhotoIds, onExit, o
   async function exportImage(title: string, longEdge: number) {
     if (busyRef.current) return;
     const output = resizeCollage(layout, longEdge);
-    const sizeProblem = !Number.isInteger(longEdge) || longEdge < 1 ? '请输入有效像素尺寸' : collageOutputProblem(output);
+    const sizeProblem = !Number.isInteger(longEdge) || longEdge < 1 ? t('请输入有效像素尺寸', 'Enter a valid size in pixels') : collageOutputProblem(output);
     if (problem || sizeProblem) { setError(problem || sizeProblem); return; }
     busyRef.current = true;
     // Dismiss the WebView modal before presenting the native folder panel.
     flushSync(() => { setBusy('directory'); setError(''); });
     try {
-      const directory = await selectExportDirectory('选择拼图导出目录');
+      const directory = await selectExportDirectory(t('选择拼图导出目录', 'Choose a Collage Export Folder'));
       if (!directory || !mounted.current) return;
       setBusy('export');
       const path = await exportCollagePng(directory, { library, title, width: output.width, height: output.height, background: state.background, items: output.items.map((item) => ({ ...item, ...cropFor(state, item.photoId) })) });
@@ -110,17 +111,17 @@ export function CollageWorkspace({ snapshot, library, initialPhotoIds, onExit, o
       if (mounted.current) setBusy(null);
     }
   }
-  return <section ref={workspace} className="collage-workspace" style={{ height }} aria-label="拼图工作台" aria-busy={blocked}>
-    <header className="collage-workspace-header"><div><IconButton label="返回相簿" disabled={blocked} onClick={() => setLeaving(true)}><ArrowLeft size={17} /></IconButton><h1>拼图</h1></div><div className="collage-header-actions"><IconButton label="撤销 · ⌘Z / Ctrl Z" disabled={blocked || !history.past.length} onClick={undo}><Undo2 size={16} /></IconButton><IconButton label="重做 · ⇧⌘Z / Ctrl Shift Z" disabled={blocked || !history.future.length} onClick={redo}><Redo2 size={16} /></IconButton><button type="button" className="button button-primary" disabled={blocked || !!problem} onClick={() => { setExporting(true); setEditing(false); setError(''); }}>导出 PNG</button></div></header>
+  return <section ref={workspace} className="collage-workspace" style={{ height }} aria-label={t('拼图工作台', 'Collage Workspace')} aria-busy={blocked}>
+    <header className="collage-workspace-header"><div><IconButton label={t('返回相簿', 'Back to Album')} disabled={blocked} onClick={() => setLeaving(true)}><ArrowLeft size={17} /></IconButton><h1>{t('拼图', 'Collage')}</h1></div><div className="collage-header-actions"><IconButton label={t('撤销 · ⌘Z / Ctrl Z', 'Undo · ⌘Z / Ctrl Z')} disabled={blocked || !history.past.length} onClick={undo}><Undo2 size={16} /></IconButton><IconButton label={t('重做 · ⇧⌘Z / Ctrl Shift Z', 'Redo · ⇧⌘Z / Ctrl Shift Z')} disabled={blocked || !history.future.length} onClick={redo}><Redo2 size={16} /></IconButton><button type="button" className="button button-primary" disabled={blocked || !!problem} onClick={() => { setExporting(true); setEditing(false); setError(''); }}>{t('导出 PNG', 'Export PNG')}</button></div></header>
     <div className="collage-editor-layout"><div className="collage-preview-region">
       <CollagePreview state={state} layout={previewLayout} photos={photos} activeId={activeId} editing={editing} disabled={blocked} onSelect={(id) => { if (id !== activeId) setEditing(false); setActiveId(id); }} onEdit={editPhoto} onCrop={changeCrop} onSwap={(first, second) => { const photoIds = [...state.photoIds]; const a = photoIds.indexOf(first), b = photoIds.indexOf(second); if (a < 0 || b < 0) return; [photoIds[a], photoIds[b]] = [photoIds[b], photoIds[a]]; update({ ...state, photoIds }); setActiveId(first); }} />
-      <div className="collage-preview-meta"><span>{problem || `${layout.width.toLocaleString()} × ${layout.height.toLocaleString()} px`}</span>{missingManaged && <button type="button" className="text-button" disabled={blocked} onClick={() => void onRelink(missingManaged).catch((cause) => setError(message(cause)))}>重新定位</button>}</div>
+      <div className="collage-preview-meta"><span>{problem || `${layout.width.toLocaleString(getLocale())} × ${layout.height.toLocaleString(getLocale())} px`}</span>{missingManaged && <button type="button" className="text-button" disabled={blocked} onClick={() => void onRelink(missingManaged).catch((cause) => setError(message(cause)))}>{t('重新定位', 'Relink')}</button>}</div>
       <CollageSequence ids={state.photoIds} photos={photos} activeId={activeId} disabled={blocked} onActive={(id) => { setActiveId(id); setEditing(false); }} onChange={(photoIds) => update({ ...state, photoIds })} onPick={() => setPicking(true)} />
     </div><CollageTools state={state} activeId={activeId} editing={editing} disabled={blocked} onChange={update} onEditing={setEditing} /></div>
     {error && !exporting && <p className="form-error" role="alert">{error}</p>}
-    {picking && <PhotoPicker title="拼图选片" snapshot={snapshot} allowedLibraries={[library]} selectedIds={state.photoIds} maxSelection={COLLAGE_MAX_PHOTOS} onConfirm={(photoIds) => { update({ ...state, photoIds }); setPicking(false); }} onClose={() => setPicking(false)} />}
+    {picking && <PhotoPicker title={t('拼图选片', 'Collage Photos')} snapshot={snapshot} allowedLibraries={[library]} selectedIds={state.photoIds} maxSelection={COLLAGE_MAX_PHOTOS} onConfirm={(photoIds) => { update({ ...state, photoIds }); setPicking(false); }} onClose={() => setPicking(false)} />}
     {exporting && <CollageExportDialog layout={layout} busy={busy} error={error} onClose={() => { setExporting(false); setError(''); }} onExport={exportImage} />}
-    {leaving && <Modal title="放弃拼图并返回？" onClose={() => setLeaving(false)}><p className="replacement-copy">拼图尚未导出，返回将放弃当前编辑。</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setLeaving(false)}>继续编辑</button><button type="button" className="button" onClick={onExit}>放弃并返回</button></div></Modal>}
+    {leaving && <Modal title={t('放弃拼图并返回？', 'Discard Collage and Go Back?')} onClose={() => setLeaving(false)}><p className="replacement-copy">{t('拼图尚未导出，返回将放弃当前编辑。', 'The collage has not been exported. Going back discards your edits.')}</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setLeaving(false)}>{t('继续编辑', 'Keep Editing')}</button><button type="button" className="button" onClick={onExit}>{t('放弃并返回', 'Discard and Go Back')}</button></div></Modal>}
   </section>;
 }
 function message(cause: unknown) { return cause instanceof Error ? cause.message : String(cause); }

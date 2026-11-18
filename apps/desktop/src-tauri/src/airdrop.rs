@@ -18,7 +18,11 @@ pub async fn share_album_airdrop(
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (window, group_id, photo_ids);
-        Err("隔空投送仅在 macOS 上可用".into())
+        Err(crate::locale::tr(
+            "隔空投送仅在 macOS 上可用",
+            "AirDrop is only available on macOS",
+        )
+        .into())
     }
 }
 
@@ -26,6 +30,7 @@ pub async fn share_album_airdrop(
 mod macos {
     use crate::{
         db::{self, Store},
+        locale::{current, display_format, tr},
         work_directory::{self, Original},
     };
     use rusqlite::Connection;
@@ -58,7 +63,9 @@ mod macos {
         group_id: &str,
         photo_ids: Option<&[String]>,
     ) -> Result<Vec<Photo>, String> {
-        let sql_error = |error: rusqlite::Error| format!("无法读取相簿：{error}");
+        let sql_error = |error: rusqlite::Error| {
+            display_format!("无法读取相簿：{error}", "Could not read the album: {error}")
+        };
         if !conn
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM groups WHERE id=?1)",
@@ -67,7 +74,11 @@ mod macos {
             )
             .map_err(sql_error)?
         {
-            return Err("相簿已不存在，请返回相簿首页后重试".into());
+            return Err(tr(
+                "相簿已不存在，请返回相簿首页后重试",
+                "This album no longer exists. Return to the album list and try again.",
+            )
+            .into());
         }
         let mut query = conn
             .prepare(
@@ -99,7 +110,7 @@ mod macos {
                 .map(|id| {
                     let (name, path) = by_id
                         .remove(id)
-                        .ok_or("部分选片已不在当前相簿，请重新选择后投送")?;
+                        .ok_or(tr("部分选片已不在当前相簿，请重新选择后投送", "Some selected photos are no longer in this album. Select the photos again."))?;
                     Ok((id.clone(), name, path))
                 })
                 .collect::<Result<Vec<_>, &str>>()?
@@ -107,7 +118,7 @@ mod macos {
             members
         };
         if members.is_empty() {
-            return Err("没有可隔空投送的照片".into());
+            return Err(tr("没有可隔空投送的照片", "There are no photos to AirDrop").into());
         }
         members
             .into_iter()
@@ -120,7 +131,10 @@ mod macos {
     }
 
     fn photo_error(name: &str, error: impl std::fmt::Display) -> String {
-        format!("无法准备「{name}」用于隔空投送：{error}")
+        display_format!(
+            "无法准备「{name}」用于隔空投送：{error}",
+            "Could not prepare “{name}” for AirDrop: {error}"
+        )
     }
 
     struct Staging(PathBuf);
@@ -135,14 +149,21 @@ mod macos {
         fn copy(&self, photo: &Photo) -> Result<CString, String> {
             let name = Path::new(&photo.name);
             if name.file_name().and_then(|name| name.to_str()) != Some(photo.name.as_str()) {
-                return Err(photo_error(&photo.name, "原始文件名无效"));
+                return Err(photo_error(
+                    &photo.name,
+                    tr("原始文件名无效", "The original filename is invalid"),
+                ));
             }
             let mut input = photo
                 .original
                 .open()
                 .map_err(|e| photo_error(&photo.name, e))?;
-            let revision = work_directory::stat_signature(&input)
-                .ok_or_else(|| photo_error(&photo.name, "无法确认原件状态"))?;
+            let revision = work_directory::stat_signature(&input).ok_or_else(|| {
+                photo_error(
+                    &photo.name,
+                    tr("无法确认原件状态", "Could not verify the original file"),
+                )
+            })?;
             let mut path = self.0.join(name);
             let mut number = 2;
             let mut output = loop {
@@ -162,7 +183,13 @@ mod macos {
             };
             io::copy(&mut input, &mut output).map_err(|e| photo_error(&photo.name, e))?;
             if work_directory::stat_signature(&input).as_deref() != Some(&revision) {
-                return Err(photo_error(&photo.name, "复制时原件发生变化，请重试"));
+                return Err(photo_error(
+                    &photo.name,
+                    tr(
+                        "复制时原件发生变化，请重试",
+                        "The original file changed while it was copying. Try again.",
+                    ),
+                ));
             }
             CString::new(path.as_os_str().as_bytes()).map_err(|e| photo_error(&photo.name, e))
         }
@@ -204,14 +231,19 @@ mod macos {
                 selection(&conn, group_id, photo_ids)?,
             )
         };
-        let staging = Staging::new(parent).map_err(|e| format!("无法创建隔空投送临时目录：{e}"))?;
+        let staging = Staging::new(parent).map_err(|e| {
+            display_format!(
+                "无法创建隔空投送临时目录：{e}",
+                "Could not create a temporary folder for AirDrop: {e}"
+            )
+        })?;
         let paths = photos
             .iter()
             .map(|photo| staging.copy(photo))
             .collect::<Result<_, _>>()?;
         let conn = store.connection.lock().map_err(|e| e.to_string())?;
         if db::library_root(&conn)? != root || selection(&conn, group_id, photo_ids)? != photos {
-            return Err("图库、相簿或照片原件已更改，请确认后重新投送".into());
+            return Err(tr("图库、相簿或照片原件已更改，请确认后重新投送", "The library, album, or original photos have changed. Review the photos and try again.").into());
         }
         Ok((staging, paths))
     }
@@ -225,7 +257,13 @@ mod macos {
             SHARING
                 .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
                 .map(|_| Self)
-                .map_err(|_| "已有隔空投送正在进行".into())
+                .map_err(|_| {
+                    tr(
+                        "已有隔空投送正在进行",
+                        "An AirDrop transfer is already in progress",
+                    )
+                    .into()
+                })
         }
     }
 
@@ -256,6 +294,7 @@ mod macos {
             window: *mut c_void,
             paths: *const *const c_char,
             count: usize,
+            chinese: bool,
             context: *mut c_void,
             complete: extern "C" fn(*mut c_void, *const c_char),
         );
@@ -302,7 +341,9 @@ mod macos {
         window
             .run_on_main_thread(move || {
                 let Ok(native_window) = source.ns_window() else {
-                    completion.finish(Err("无法打开隔空投送窗口".into()));
+                    completion.finish(Err(
+                        tr("无法打开隔空投送窗口", "Could not open AirDrop").into()
+                    ));
                     return;
                 };
                 let pointers: Vec<_> = paths.iter().map(|path| path.as_ptr()).collect();
@@ -313,13 +354,19 @@ mod macos {
                         native_window,
                         pointers.as_ptr(),
                         pointers.len(),
+                        current().is_chinese(),
                         Box::into_raw(Box::new(completion)).cast(),
                         complete,
                     );
                 }
             })
-            .map_err(|e| format!("无法打开隔空投送窗口：{e}"))?;
-        finished.recv().await.ok_or("无法读取隔空投送结果")?
+            .map_err(|e| {
+                display_format!("无法打开隔空投送窗口：{e}", "Could not open AirDrop: {e}")
+            })?;
+        finished.recv().await.ok_or(tr(
+            "无法读取隔空投送结果",
+            "Could not read the AirDrop result",
+        ))?
     }
 
     #[cfg(test)]

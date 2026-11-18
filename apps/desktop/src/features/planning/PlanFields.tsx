@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n';
 import { useLayoutEffect, useRef, type TextareaHTMLAttributes } from 'react';
 import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react';
 import { PLAN_MAX_TEXT } from '../../lib/planning-types';
@@ -27,5 +28,5 @@ export function PlanField({ label, value, onChange, rows = 1, maxLength = PLAN_M
 export function PlanOrder({ label, index, length, disabled, move, remove }: {
   label: string; index: number; length: number; disabled: boolean; move: (offset: number) => void; remove: () => void;
 }) {
-  return <div className="plan-order"><IconButton label={`前移${label}`} disabled={disabled || index === 0} onClick={() => move(-1)}><ArrowUp size={14} /></IconButton><IconButton label={`后移${label}`} disabled={disabled || index === length - 1} onClick={() => move(1)}><ArrowDown size={14} /></IconButton><IconButton label={`删除${label}`} disabled={disabled} onClick={remove}><Trash2 size={14} /></IconButton></div>;
+  return <div className="plan-order"><IconButton label={t(`前移${label}`, `Move ${label} Earlier`)} disabled={disabled || index === 0} onClick={() => move(-1)}><ArrowUp size={14} /></IconButton><IconButton label={t(`后移${label}`, `Move ${label} Later`)} disabled={disabled || index === length - 1} onClick={() => move(1)}><ArrowDown size={14} /></IconButton><IconButton label={t(`删除${label}`, `Delete ${label}`)} disabled={disabled} onClick={remove}><Trash2 size={14} /></IconButton></div>;
 }

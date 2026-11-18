@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n';
 import type { ContextMenuPosition } from './use-context-menu';
 import { presentModal } from '../lib/modal-stack';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
@@ -21,9 +22,9 @@ export interface ReviewPhotoMenu {
   leaveReview: (action: () => void, allowed?: () => boolean) => void;
 }
 
-export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, onRelink, entrySource, fullscreen, onPhotoMenu, returnLabel = '返回照片墙' }: {
+export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, onRelink, entrySource, fullscreen, onPhotoMenu, returnLabel = t('返回照片墙', 'Back to Photo Wall') }: {
   photos: Photo[]; initialPhotoId: string; context: string; busy: boolean;
-  onClose: (visiblePhotoId: string | undefined) => void; onRelink: (photo: Photo) => Promise<void>; entrySource?: ReviewEntrySource; returnLabel?: string;
+  onClose: (visiblePhotoId: string | undefined) => void; onRelink?: (photo: Photo) => Promise<void>; entrySource?: ReviewEntrySource; returnLabel?: string;
   fullscreen?: 'direct' | 'available';
   onPhotoMenu?: (photo: Photo, at: ContextMenuPosition, trigger: HTMLElement, review: ReviewPhotoMenu) => void;
 }) {
@@ -61,7 +62,7 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
   const requestedIndex = photos.findIndex((photo) => photo.id === requestedId);
   const current = images.current?.photo || photos[requestedIndex];
   const index = current ? photos.findIndex((photo) => photo.id === current.id) : -1;
-  const name = current?.title || current?.originalName || '照片不在当前结果中';
+  const name = current?.title || current?.originalName || t('照片不在当前结果中', 'Photo unavailable in these results');
   const snapshotPhoto = photos[index];
   // A replacement can enter the snapshot while the previous image is still on screen.
   const infoPhoto = current && snapshotPhoto?.originalPath === current.originalPath
@@ -266,7 +267,7 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
         </div>
         <div className="photo-review-actions" data-tauri-drag-region="false">
           <div className="photo-review-info-scope" ref={infoScope} data-tauri-drag-region="false">
-            <button type="button" className="photo-review-info-button" ref={infoTrigger} aria-label="照片信息" title="照片信息" disabled={!infoKey} aria-haspopup="dialog" aria-expanded={infoOpen} aria-controls={infoOpen ? infoId : undefined}
+            <button type="button" className="photo-review-info-button" ref={infoTrigger} aria-label={t('照片信息', 'Photo Info')} title={t('照片信息', 'Photo Info')} disabled={!infoKey} aria-haspopup="dialog" aria-expanded={infoOpen} aria-controls={infoOpen ? infoId : undefined}
               onClick={() => {
                 stopEntry();
                 if (visibleInfoKey.current) { closeInfo(); infoTrigger.current?.focus({ preventScroll: true }); }
@@ -277,14 +278,15 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
               <PhotoReviewInfo photo={infoPhoto} titleId={`${infoId}-title`} />
             </div>}
           </div>
-          {screen.available && <button type="button" className="photo-review-fullscreen-button" data-tauri-drag-region="false" aria-label="全屏查看"
-            aria-keyshortcuts="F" title="全屏查看" onClick={toggleFullscreen}>
+          {screen.available && <button type="button" className="photo-review-fullscreen-button" data-tauri-drag-region="false" aria-label={t('全屏查看', 'View Full Screen')}
+            aria-keyshortcuts="F" title={t('全屏查看', 'View Full Screen')} onClick={toggleFullscreen}>
             <Maximize size={16} data-tauri-drag-region="false" />
           </button>}
         </div>
       </header>
     </div>}
-    <div ref={stage} className="photo-review-stage" role={onPhotoMenu ? 'group' : undefined} tabIndex={onPhotoMenu ? 0 : -1} aria-label={`${context}，照片预览，左右键切换，${screen.fullscreen ? 'F 或 Esc 退出全屏' : '使用返回按钮返回'}`} aria-busy={images.waiting}
+    <div ref={stage} className="photo-review-stage" role={onPhotoMenu ? 'group' : undefined} tabIndex={onPhotoMenu ? 0 : -1} aria-label={t(`${context}，照片预览，左右键切换，${screen.fullscreen ? 'F 或 Esc 退出全屏' : '使用返回按钮返回'}`,
+      `${context}. Photo preview. Use the arrow keys to browse. ${screen.fullscreen ? 'Press F or Escape to exit full screen.' : 'Use the Back button to return.'}`)} aria-busy={images.waiting}
       aria-keyshortcuts={onPhotoMenu ? 'ContextMenu Shift+F10' : undefined}
       onContextMenu={onPhotoMenu ? (event) => {
         event.preventDefault(); event.stopPropagation();
@@ -298,13 +300,13 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
         const rect = event.currentTarget.getBoundingClientRect();
         openPhotoMenu({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, source: 'position' }, event.currentTarget);
       } : undefined}>
-      {current ? <PhotoReviewImage state={images} controller={controller} onRelink={onRelink} busy={busy} onEntryZoom={entrySource ? stopEntry : undefined} fullscreen={screen.fullscreen} /> : !screen.fullscreen && <p role="status">当前结果中没有这张照片，请返回照片墙。</p>}
+      {current ? <PhotoReviewImage state={images} controller={controller} onRelink={onRelink} busy={busy} onEntryZoom={entrySource ? stopEntry : undefined} fullscreen={screen.fullscreen} /> : !screen.fullscreen && <p role="status">{t('当前结果中没有这张照片，请返回照片墙。', 'This photo is unavailable in these results. Return to the photo wall.')}</p>}
     </div>
     {!screen.fullscreen && <footer className="photo-review-footer" inert={!awake} aria-hidden={!awake} {...toolbarEvents} data-tauri-drag-region="false">
-      <nav className="photo-review-navigation" aria-label="照片切换" data-tauri-drag-region="false">
-        <IconButton label="上一张" disabled={requestedIndex <= 0} onClick={() => navigateFromControl(-1)}><ArrowLeft size={16} data-tauri-drag-region="false" /></IconButton>
+      <nav className="photo-review-navigation" aria-label={t('照片切换', 'Photo Navigation')} data-tauri-drag-region="false">
+        <IconButton label={t('上一张', 'Previous Photo')} disabled={requestedIndex <= 0} onClick={() => navigateFromControl(-1)}><ArrowLeft size={16} data-tauri-drag-region="false" /></IconButton>
         <span className="photo-review-position" aria-live="polite">{index < 0 ? 0 : index + 1}<span> / {photos.length}</span></span>
-        <IconButton label="下一张" disabled={requestedIndex < 0 || requestedIndex >= photos.length - 1} onClick={() => navigateFromControl(1)}><ArrowRight size={16} data-tauri-drag-region="false" /></IconButton>
+        <IconButton label={t('下一张', 'Next Photo')} disabled={requestedIndex < 0 || requestedIndex >= photos.length - 1} onClick={() => navigateFromControl(1)}><ArrowRight size={16} data-tauri-drag-region="false" /></IconButton>
       </nav>
     </footer>}
     {!screen.fullscreen && screen.error && <p className="photo-review-screen-error" role="alert">{screen.error}</p>}

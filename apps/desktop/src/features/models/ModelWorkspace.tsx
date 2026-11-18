@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n';
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Plus, Search, X } from 'lucide-react';
 import type { ModelProfile } from '../../lib/model-types';
@@ -59,7 +60,7 @@ export function ModelWorkspace({ initialModel, onBackToSearch, externalRevision 
         const current = items.find((item) => item.id === view.model.id);
         if (current && current.updatedAt !== view.model.updatedAt) navigate({ type: 'open', model: current });
         else if (!current) {
-          setDeleteError('模特档案已删除');
+          setDeleteError(t('模特档案已删除', 'This model profile has been deleted'));
           navigate({ type: 'deleted' });
         }
       }
@@ -95,21 +96,21 @@ export function ModelWorkspace({ initialModel, onBackToSearch, externalRevision 
     onClose={() => navigate({ type: 'back' })}
     onSaved={(saved) => { setModels((items) => [saved, ...items.filter((item) => item.id !== saved.id)]); navigate({ type: 'saved', model: saved }); }} />;
   else if (view.page === 'detail') content = <ModelDetail model={view.model} photos={props.photos} onRelink={props.onRelink} disabled={deleteBusy}
-    backLabel={onBackToSearch ? '返回搜索' : undefined} onBack={onBackToSearch ?? (() => navigate({ type: 'back' }))}
+    backLabel={onBackToSearch ? t('返回搜索', 'Back to Search') : undefined} onBack={onBackToSearch ?? (() => navigate({ type: 'back' }))}
     onEdit={() => navigate({ type: 'edit' })} onDelete={() => requestDelete(view.model)} />;
-  else content = <section className="model-home" aria-label="模特档案">
-    <WorkspaceHeader title="模特" count={`${models.length} 份档案`}>
-      <button type="button" className="button" disabled={loading} onClick={() => navigate({ type: 'new' })}><Plus size={15} />新建档案</button>
+  else content = <section className="model-home" aria-label={t('模特档案', 'Model Profiles')}>
+    <WorkspaceHeader title={t('模特', 'Models')} count={t(`${models.length} 份档案`, `${models.length} ${models.length === 1 ? 'profile' : 'profiles'}`)}>
+      <button type="button" className="button" disabled={loading} onClick={() => navigate({ type: 'new' })}><Plus size={15} />{t('新建档案', 'New Profile')}</button>
     </WorkspaceHeader>
     <div className="model-workspace">
-      {loading ? <Busy label="正在读取模特档案" /> : error ? <div className="model-load-error"><p className="form-error" role="alert">{error}</p><button type="button" className="button" onClick={() => setRevision((value) => value + 1)}>重新读取</button></div> : <>
-        {!!models.length && <div className="search-field"><Search size={17} /><input aria-label="搜索模特" placeholder="搜索姓名、城市或风格" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <IconButton label="清空搜索" onClick={() => setQuery('')}><X size={15} /></IconButton>}</div>}
-        {!models.length ? <EmptyState title="建立第一份模特档案" action={<button type="button" className="button" onClick={() => navigate({ type: 'new' })}><Plus size={15} />新建档案</button>} /> : !filtered.length ? <EmptyState title="没有找到模特" /> : <div className="model-overview-list">{filtered.map((model) => <ModelOverviewRow key={model.id} model={model} photos={photoMap} disabled={deleteBusy} onOpen={() => navigate({ type: 'open', model })} onDelete={() => requestDelete(model)} />)}</div>}
+      {loading ? <Busy label={t('正在读取模特档案', 'Loading model profiles')} /> : error ? <div className="model-load-error"><p className="form-error" role="alert">{error}</p><button type="button" className="button" onClick={() => setRevision((value) => value + 1)}>{t('重新读取', 'Reload')}</button></div> : <>
+        {!!models.length && <div className="search-field"><Search size={17} /><input aria-label={t('搜索模特', 'Search Models')} placeholder={t('搜索姓名、城市或风格', 'Search by name, city, or style')} value={query} onChange={(event) => setQuery(event.target.value)} />{query && <IconButton label={t('清空搜索', 'Clear Search')} onClick={() => setQuery('')}><X size={15} /></IconButton>}</div>}
+        {!models.length ? <EmptyState title={t('建立第一份模特档案', 'Create Your First Model Profile')} action={<button type="button" className="button" onClick={() => navigate({ type: 'new' })}><Plus size={15} />{t('新建档案', 'New Profile')}</button>} /> : !filtered.length ? <EmptyState title={t('没有找到模特', 'No Models Found')} /> : <div className="model-overview-list">{filtered.map((model) => <ModelOverviewRow key={model.id} model={model} photos={photoMap} disabled={deleteBusy} onOpen={() => navigate({ type: 'open', model })} onDelete={() => requestDelete(model)} />)}</div>}
       </>}
     </div>
   </section>;
   return <div className="model-workspace-view" ref={viewRoot}>{content}
     {deleteError && !deleting && <p className="form-error model-error" role="alert">{deleteError}</p>}
-    {deleting && <Modal title="删除模特档案？" onClose={closeDelete}><p>将删除“{deleting.name}”的资料。仅在此档案使用的样片将从全局搜索和图库选片中移除，照片文件会保留。</p>{deleteError && <p className="form-error" role="alert">{deleteError}</p>}<div className="form-actions"><button type="button" className="button" autoFocus disabled={deleteBusy} onClick={closeDelete}>取消</button><button type="button" className="button button-danger" disabled={deleteBusy} onClick={() => void remove()}>{deleteBusy ? '删除中…' : '删除档案'}</button></div></Modal>}
+    {deleting && <Modal title={t('删除模特档案？', 'Delete Model Profile?')} onClose={closeDelete}><p>{t(`将删除“${deleting.name}”的资料。仅在此档案使用的样片将从全局搜索和图库选片中移除，照片文件会保留。`, `Delete the profile for “${deleting.name}”? Photos used only in this profile will be removed from global search and the photo picker. The photo files will be kept.`)}</p>{deleteError && <p className="form-error" role="alert">{deleteError}</p>}<div className="form-actions"><button type="button" className="button" autoFocus disabled={deleteBusy} onClick={closeDelete}>{t('取消', 'Cancel')}</button><button type="button" className="button button-danger" disabled={deleteBusy} onClick={() => void remove()}>{deleteBusy ? t('删除中…', 'Deleting…') : t('删除档案', 'Delete Profile')}</button></div></Modal>}
   </div>;
 }

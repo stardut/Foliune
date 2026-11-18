@@ -1,3 +1,4 @@
+import './fixtures/chinese-interface.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
@@ -93,13 +94,13 @@ const require = createRequire(resolve('apps/desktop/package.json'));
 const { build } = createRequire(require.resolve('vite/package.json'))('esbuild');
 const compiled = await build({ entryPoints: [resolve('apps/desktop/src/features/models/ModelDetail.tsx')], bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external', write: false, logLevel: 'silent', loader: { '.css': 'empty' } });
 const module = { exports: {} };
-vm.runInNewContext(compiled.outputFiles[0].text, { module, exports: module.exports, require });
+vm.runInNewContext(compiled.outputFiles[0].text, { module, exports: module.exports, require, navigator });
 const { createElement } = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
 const photo = id => ({ id, title: `样片${id}`, originalName: `${id}.jpg`, width: 800, height: 1200, originalUrl: `https://example.test/${id}.jpg`, thumbnailUrl: `https://example.test/${id}-thumb.jpg`, originalAvailable: true, thumbnailAvailable: true });
 const overviewCompiled = await build({ entryPoints: [resolve('apps/desktop/src/features/models/ModelOverviewRow.tsx')], bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external', write: false, logLevel: 'silent' });
 const overviewModule = { exports: {} };
-vm.runInNewContext(overviewCompiled.outputFiles[0].text, { module: overviewModule, exports: overviewModule.exports, require });
+vm.runInNewContext(overviewCompiled.outputFiles[0].text, { module: overviewModule, exports: overviewModule.exports, require, navigator });
 function overview(profile, photos = model.photoIds.map(photo)) {
   return renderToStaticMarkup(createElement(overviewModule.exports.ModelOverviewRow, { model: profile, photos: new Map(photos.map(item => [item.id, item])), onOpen() {} }));
 }
@@ -205,7 +206,7 @@ test('列表和详情共用删除确认，取消不请求，失败保留目标�
     useLayoutEffect(fn, deps) { react.useEffect(fn, deps); },
   };
   const exports = { exports: {} };
-  vm.runInNewContext(workspaceCompiled.outputFiles[0].text, { module: exports, exports: exports.exports, HTMLElement: { prototype: {} }, require(name) {
+  vm.runInNewContext(workspaceCompiled.outputFiles[0].text, { module: exports, exports: exports.exports, HTMLElement: { prototype: {} }, navigator, require(name) {
     if (name === 'react') return react;
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
     if (name === 'react-dom') return { createPortal: node => node };

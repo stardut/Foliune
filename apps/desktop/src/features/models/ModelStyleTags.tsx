@@ -1,9 +1,10 @@
+import { t } from '../../lib/i18n';
 import { useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, Settings2, X } from 'lucide-react';
 import { IconButton, Modal } from '../../components/ui';
 
-export const defaultModelStyles = ['自然', '清新', '复古', '胶片', '日系', '法式', '时尚', '街头', '电影感', '情绪', '黑白', '极简', '古风', '运动', '生活感', '杂志感'];
+export const defaultModelStyles = [t('自然', 'Natural'), t('清新', 'Fresh'), t('复古', 'Vintage'), t('胶片', 'Film'), t('日系', 'Japanese-Inspired'), t('法式', 'French-Inspired'), t('时尚', 'Fashion'), t('街头', 'Street'), t('电影感', 'Cinematic'), t('情绪', 'Moody'), t('黑白', 'Black and White'), t('极简', 'Minimal'), t('古风', 'Traditional Chinese'), t('运动', 'Sports'), t('生活感', 'Lifestyle'), t('杂志感', 'Editorial')];
 
 export function ModelStyleTags({ value, options, onChange, disabled }: {
   value: string[]; options: string[]; onChange: (tags: string[], options: string[]) => void; disabled: boolean;
@@ -20,12 +21,12 @@ export function ModelStyleTags({ value, options, onChange, disabled }: {
     </button>;
   }
   return <div className="model-style-tags">
-    <span id={titleId}>风格标签</span>
+    <span id={titleId}>{t('风格标签', 'Style Tags')}</span>
     <div className="model-style-options" role="group" aria-labelledby={titleId}>
       {options.slice(0, -1).map(renderOption)}
       <span className="model-style-tail">
         {lastOption !== undefined && renderOption(lastOption)}
-        <IconButton label="管理风格标签" disabled={disabled} onClick={() => setManaging(true)}><Settings2 size={14} /></IconButton>
+        <IconButton label={t('管理风格标签', 'Manage Style Tags')} disabled={disabled} onClick={() => setManaging(true)}><Settings2 size={14} /></IconButton>
       </span>
     </div>
     {managing && createPortal(<TagManager options={options} selected={selected} disabled={disabled} onClose={() => setManaging(false)}
@@ -44,28 +45,28 @@ function TagManager({ options, selected, disabled, onAdd, onRemove, onClose }: {
   const composing = useRef(false);
   const [pending, setPending] = useState('');
   const tag = pending.trim();
-  const error = [...tag].length > 80 ? '风格标签最多 80 个字符' : tag.includes('\0') ? '风格标签不能包含空字符'
-    : tag && !options.includes(tag) && options.length >= 100 ? '可选风格标签最多 100 个，请先删除不需要的标签'
-    : tag && !selected.includes(tag) && selected.length >= 50 ? '已选风格标签最多 50 个' : '';
+  const error = [...tag].length > 80 ? t('风格标签最多 80 个字符', 'Style tags can have up to 80 characters') : tag.includes('\0') ? t('风格标签不能包含空字符', 'Style tags cannot contain null characters')
+    : tag && !options.includes(tag) && options.length >= 100 ? t('可选风格标签最多 100 个，请先删除不需要的标签', 'Remove an unused tag before adding more than 100 style tags')
+    : tag && !selected.includes(tag) && selected.length >= 50 ? t('已选风格标签最多 50 个', 'Select up to 50 style tags') : '';
   function add() {
     if (disabled || !tag || error || composing.current) return;
     onAdd(tag);
     setPending('');
   }
-  return <Modal title="管理风格标签" onClose={onClose}>
+  return <Modal title={t('管理风格标签', 'Manage Style Tags')} onClose={onClose}>
     <div className="model-style-manager">
       <div className="model-style-add">
-        <input id={inputId} aria-label="自定义风格标签" placeholder="自定义标签" value={pending} disabled={disabled} maxLength={80} aria-invalid={!!error} aria-describedby={error ? `${inputId}-error` : undefined}
+        <input id={inputId} aria-label={t('自定义风格标签', 'Custom Style Tag')} placeholder={t('自定义标签', 'Custom Tag')} value={pending} disabled={disabled} maxLength={80} aria-invalid={!!error} aria-describedby={error ? `${inputId}-error` : undefined}
           onChange={(event) => setPending(event.target.value)} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
           onKeyDown={(event) => {
             if (event.key !== 'Enter' || composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
             event.preventDefault();
             add();
           }} />
-        <button type="button" className="button" disabled={disabled || !tag || !!error} onClick={add}><Plus size={13} />添加</button>
+        <button type="button" className="button" disabled={disabled || !tag || !!error} onClick={add}><Plus size={13} />{t('添加', 'Add')}</button>
       </div>
       {error && <p id={`${inputId}-error`} className="form-error" role="alert">{error}</p>}
-      {options.length ? <ul className="model-style-custom-list">{options.map((option) => <li key={option}><span>{option}</span><IconButton label={`删除标签“${option}”`} disabled={disabled} onClick={() => { if (!disabled) onRemove(option); }}><X size={14} /></IconButton></li>)}</ul> : <p className="model-style-empty">暂无风格标签</p>}
+      {options.length ? <ul className="model-style-custom-list">{options.map((option) => <li key={option}><span>{option}</span><IconButton label={t(`删除标签“${option}”`, `Delete tag “${option}”`)} disabled={disabled} onClick={() => { if (!disabled) onRemove(option); }}><X size={14} /></IconButton></li>)}</ul> : <p className="model-style-empty">{t('暂无风格标签', 'No Style Tags')}</p>}
     </div>
   </Modal>;
 }

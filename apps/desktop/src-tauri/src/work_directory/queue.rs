@@ -3,6 +3,7 @@ use super::{
     sync::Candidate,
     Root,
 };
+use crate::locale::tr;
 use rusqlite::{params, Connection, Transaction};
 use serde::Serialize;
 use std::{
@@ -274,7 +275,9 @@ impl Queue {
     }
 
     pub fn fail(&mut self, conn: &Connection, id: &str, error: String) -> Result<(), String> {
-        let job = self.running(id).ok_or("同步任务已变化")?;
+        let job = self
+            .running(id)
+            .ok_or(tr("同步任务已变化", "The sync job changed"))?;
         let changed = conn
             .execute(
                 "UPDATE work_directory_jobs SET error=?2,processed=?3 WHERE id=?1 AND error IS NULL",
@@ -282,7 +285,7 @@ impl Queue {
             )
             .map_err(|e| e.to_string())?;
         if changed != 1 {
-            return Err("同步任务已变化".into());
+            return Err(tr("同步任务已变化", "The sync job changed").into());
         }
         job.state.status = JobStatus::Failed;
         job.state.error = Some(error);
@@ -299,7 +302,10 @@ impl Queue {
             .0
             .iter()
             .position(|job| job.state.id == id && job.state.status == JobStatus::Failed)
-            .ok_or("该同步任务已变化，请重新查看作品目录")?;
+            .ok_or(tr(
+                "该同步任务已变化，请重新查看作品目录",
+                "The sync job changed. Review the work folder and try again.",
+            ))?;
         let changed = conn
             .execute(
                 "UPDATE work_directory_jobs SET error=NULL,processed=0,
@@ -309,9 +315,12 @@ impl Queue {
             )
             .map_err(|e| e.to_string())?;
         if changed != 1 {
-            return Err("同步任务已变化".into());
+            return Err(tr("同步任务已变化", "The sync job changed").into());
         }
-        let mut job = self.0.remove(index).ok_or("同步任务不存在")?;
+        let mut job = self
+            .0
+            .remove(index)
+            .ok_or(tr("同步任务不存在", "Sync job not found"))?;
         job.state.status = JobStatus::Queued;
         job.state.processed = 0;
         job.state.error = None;
@@ -335,7 +344,7 @@ pub(super) fn finish(tx: &Transaction<'_>, root: &Root, id: &str) -> Result<(), 
         )
         .map_err(|e| e.to_string())?;
     if changed != 1 {
-        return Err("同步任务已变化".into());
+        return Err(tr("同步任务已变化", "The sync job changed").into());
     }
     Ok(())
 }
@@ -368,7 +377,11 @@ pub(super) fn remove_album(conn: &Connection, id: &str) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
     if active {
-        return Err("请等待该相簿同步完成后再删除".into());
+        return Err(tr(
+            "请等待该相簿同步完成后再删除",
+            "Wait for this album to finish syncing before deleting it",
+        )
+        .into());
     }
     conn.execute("DELETE FROM work_directory_jobs WHERE album_id=?1", [id])
         .map_err(|e| e.to_string())?;

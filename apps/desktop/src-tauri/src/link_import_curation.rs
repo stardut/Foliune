@@ -1,4 +1,5 @@
 use super::*;
+use crate::locale::{display_format, tr};
 
 pub fn prepare_import_files(
     store: &Store,
@@ -21,8 +22,12 @@ pub fn prepare_import_files(
         Ok(imported) => imported,
         Err(message) => {
             if staging.exists() {
-                fs::remove_dir_all(&staging)
-                    .map_err(|e| format!("{message}；清理候选失败：{e}"))?;
+                fs::remove_dir_all(&staging).map_err(|e| {
+                    display_format!(
+                        "{message}；清理候选失败：{e}",
+                        "{message}. Could not clean up candidate photos: {e}"
+                    )
+                })?;
             }
             return Err(message);
         }
@@ -40,7 +45,11 @@ pub fn prepare_import_files(
     let conn = store.connection.lock().map_err(|e| e.to_string())?;
     if crate::db::library_root(&conn)? != draft.library_root {
         cleanup(store, &draft)?;
-        return Err("图库已切换，本次候选已取消。".into());
+        return Err(tr(
+            "图库已切换，本次候选已取消。",
+            "The library changed. This selection was canceled.",
+        )
+        .into());
     }
     drafts.register(draft)
 }
@@ -66,29 +75,46 @@ fn expand_import_paths(paths: Vec<String>) -> (Vec<String>, Vec<ImportFailure>) 
 }
 
 fn import_folder_files(source: &Path) -> Result<Vec<String>, String> {
-    let folder_error = |error| format!("无法读取文件夹：{error}");
+    let folder_error = |error| {
+        display_format!(
+            "无法读取文件夹：{error}",
+            "Could not read the folder: {error}"
+        )
+    };
     let entries = fs::read_dir(source).map_err(folder_error)?;
     let mut photos = Vec::new();
     for entry in entries {
         let entry = entry.map_err(folder_error)?;
         let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|error| format!("无法读取「{}」：{error}", path.display()))?;
+        let file_type = entry.file_type().map_err(|error| {
+            display_format!(
+                "无法读取「{}」：{error}",
+                "Could not read “{}”: {error}",
+                path.display()
+            )
+        })?;
         if file_type.is_file() && photos::supported_extension(&path) {
             photos.push(path);
         }
     }
     photos.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
     if photos.is_empty() {
-        return Err("文件夹当前层级没有 JPEG、PNG 或 WebP 照片。".into());
+        return Err(tr(
+            "文件夹当前层级没有 JPEG、PNG 或 WebP 照片。",
+            "This folder has no JPEG, PNG, or WebP photos at its top level.",
+        )
+        .into());
     }
     photos
         .into_iter()
         .map(|path| {
-            path.into_os_string()
-                .into_string()
-                .map_err(|_| "文件夹含无法读取路径的照片".into())
+            path.into_os_string().into_string().map_err(|_| {
+                tr(
+                    "文件夹含无法读取路径的照片",
+                    "The folder contains a photo with an unreadable path",
+                )
+                .into()
+            })
         })
         .collect()
 }
@@ -102,7 +128,11 @@ fn import_draft(conn: &Connection, library: &str, group_id: Option<&str>) -> Res
             .as_ref()
             .is_none_or(|group| group.library != library)
         {
-            return Err("目标分组不属于该图库".into());
+            return Err(tr(
+                "目标分组不属于该图库",
+                "The selected album belongs to a different library section",
+            )
+            .into());
         }
         Ok(draft)
     } else {
@@ -110,7 +140,7 @@ fn import_draft(conn: &Connection, library: &str, group_id: Option<&str>) -> Res
             view: CurationDraft {
                 id: uuid::Uuid::new_v4().to_string(),
                 group_id: None,
-                group_name: "全部照片".into(),
+                group_name: tr("全部照片", "All Photos").into(),
                 capacity: None,
                 candidates: Vec::new(),
                 active_ids: Vec::new(),
@@ -142,7 +172,11 @@ pub(crate) fn prepare_link_import_draft(
     photos: Vec<Photo>,
 ) -> Result<PreparedLinkImport, String> {
     if photos.is_empty() {
-        return Err("未能准备帖子图片。".into());
+        return Err(tr(
+            "未能准备帖子图片。",
+            "Could not prepare photos from the post.",
+        )
+        .into());
     }
     let mut draft = import_draft(conn, library, group_id)?;
     draft.view.id = id.into();

@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use std::{
     fs::{self, File, OpenOptions},
     io::{BufWriter, ErrorKind, Write},
@@ -56,7 +57,11 @@ pub(crate) fn write_png(
     write: impl FnOnce(&mut BufWriter<&mut File>) -> Result<(), String>,
 ) -> Result<PathBuf, String> {
     if !directory.is_absolute() || !directory.is_dir() {
-        return Err("导出目录无效，请重新选择目录".into());
+        return Err(tr(
+            "导出目录无效，请重新选择目录",
+            "The export folder is invalid. Choose a different folder.",
+        )
+        .into());
     }
     let stem = file_stem(title, default_title);
     let mut number = 1u64;
@@ -72,7 +77,12 @@ pub(crate) fn write_png(
             Ok(file) => break (path, file),
             Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
             Err(error) if error.kind() == ErrorKind::PermissionDenied && path.is_dir() => {}
-            Err(error) => return Err(format!("无法在所选目录创建 PNG：{error}")),
+            Err(error) => {
+                return Err(display_format!(
+                    "无法在所选目录创建 PNG：{error}",
+                    "Could not create a PNG in the selected folder: {error}"
+                ))
+            }
         }
         number += 1;
     };
@@ -86,12 +96,15 @@ pub(crate) fn write_png(
     drop(file);
     if let Err(error) = result {
         fs::remove_file(&path).map_err(|cleanup| {
-            format!(
-                "写入 PNG 失败：{error}。无法清理未完成的文件 {}：{cleanup}",
+            display_format!(
+                "写入 PNG 失败：{error}。无法清理未完成的文件 {}：{cleanup}", "Could not write the PNG: {error}. Could not clean up the incomplete file {}: {cleanup}",
                 path.display()
             )
         })?;
-        return Err(format!("写入 PNG 失败：{error}"));
+        return Err(display_format!(
+            "写入 PNG 失败：{error}",
+            "Could not write the PNG: {error}"
+        ));
     }
     Ok(path)
 }

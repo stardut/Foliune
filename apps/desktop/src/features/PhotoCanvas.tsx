@@ -1,3 +1,4 @@
+import { photoCount, t } from '../lib/i18n';
 import type { ContextMenuPosition } from './use-context-menu';
 import { memo, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { flushSync } from 'react-dom';
@@ -219,10 +220,10 @@ export function PhotoCanvas({ ref, photos, sections, selected, onSelect, onPrevi
       }
     }
   }, [deferredFocus, queuedFocus, queuedUnit, wall.layout]);
-  if (!photos.length) return <EmptyState title="暂无照片" action={emptyAction} />;
+  if (!photos.length) return <EmptyState title={t('暂无照片', 'No photos yet')} action={emptyAction} />;
   const lastIndex = wall.layout?.units.at(-1)?.tiles.at(-1)?.index ?? -1;
   const message = wall.error ? <p className="form-error photo-wall-message" role="alert">{wall.error}</p>
-    : (!wall.layout || wall.partial) && <span className="photo-wall-message" role="status">正在准备照片…</span>;
+    : (!wall.layout || wall.partial) && <span className="photo-wall-message" role="status">{t('正在准备照片…', 'Preparing photos…')}</span>;
   return <><div ref={canvasRef} className={`photo-canvas virtual-photo-wall ${layout}`} style={{ height: wall.layout?.height || 240 }} aria-busy={!wall.layout && !wall.error}
     data-layout-pending={wall.pending && !wall.error || undefined}
     onFocusCapture={(event) => {
@@ -293,7 +294,7 @@ const PhotoTile = memo(function PhotoTile({ photo, tile, selected, selecting, on
     <div className="photo-image">
       <PhotoImage photo={photo} softReveal onRelink={onRelink} busy={busy} />
       <button type="button" className="photo-interaction-target"
-        aria-label={`${selecting ? selected ? '取消选择' : '选择' : '预览'} ${photo.title || photo.originalName}`}
+        aria-label={`${selecting ? selected ? t('取消选择', 'Deselect') : t('选择', 'Select') : t('预览', 'Preview')} ${photo.title || photo.originalName}`}
         aria-pressed={selecting ? selected : undefined}
         onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); if (selecting) onSelect(photo.id); else onPreview(photo, event.currentTarget); }} />
       {selecting && <span className="photo-check" aria-hidden="true"><Check size={13} /></span>}
@@ -304,5 +305,5 @@ const PhotoTile = memo(function PhotoTile({ photo, tile, selected, selecting, on
 export function SelectionBar({ count, busy, onClear, onBook, onMore, onSocial, onCollage }: { count: number; busy: boolean; onClear: () => void; onBook: () => void; onSocial?: () => void; onCollage?: () => void; onMore: (at: ContextMenuPosition, trigger: HTMLElement) => void }) {
   const reduce = useReducedMotion();
   if (count === 0) return null;
-  return <motion.div className="selection-bar" initial={false} animate={{ opacity: 1 }} transition={{ duration: reduce ? 0 : 0.15 }} role="toolbar" aria-label="照片操作"><span aria-live="polite">已选 {count} 张</span><button type="button" className="text-button selection-book" onClick={onBook} disabled={busy}><BookPlus size={15} />加入画册</button>{onCollage && <button type="button" className="text-button" onClick={onCollage} disabled={busy}><Grid2X2 size={15} />拼图</button>}{onSocial && <button type="button" className="text-button selection-social" onClick={onSocial} disabled={busy}><LayoutTemplate size={15} />模拟排版</button>}<button type="button" className="icon-button" aria-label={`所选 ${count} 张照片的更多操作`} title="更多操作" aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMore({ x: rect.left, y: rect.top, source: 'position' }, event.currentTarget); }}><MoreHorizontal size={18} /></button><IconButton label="取消全选" onClick={onClear}><X size={16} /></IconButton></motion.div>;
+  return <motion.div className="selection-bar" initial={false} animate={{ opacity: 1 }} transition={{ duration: reduce ? 0 : 0.15 }} role="toolbar" aria-label={t('照片操作', 'Photo Actions')}><span aria-live="polite">{t(`已选 ${count} 张`, `${count} selected`)}</span><button type="button" className="text-button selection-book" onClick={onBook} disabled={busy}><BookPlus size={15} />{t('加入画册', 'Add to Photo Book')}</button>{onCollage && <button type="button" className="text-button" onClick={onCollage} disabled={busy}><Grid2X2 size={15} />{t('拼图', 'Collage')}</button>}{onSocial && <button type="button" className="text-button selection-social" onClick={onSocial} disabled={busy}><LayoutTemplate size={15} />{t('模拟排版', 'Preview Post')}</button>}<button type="button" className="icon-button" aria-label={t(`所选 ${count} 张照片的更多操作`, `More actions for ${photoCount(count)} selected`)} title={t('更多操作', 'More Actions')} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMore({ x: rect.left, y: rect.top, source: 'position' }, event.currentTarget); }}><MoreHorizontal size={18} /></button><IconButton label={t('取消全选', 'Deselect All')} onClick={onClear}><X size={16} /></IconButton></motion.div>;
 }

@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use crate::{
     ai_settings::{self, AiSettings, SettingsInput, SystemCredentials},
     credentials,
@@ -58,7 +59,7 @@ fn response_text(provider: &str, value: &Value) -> Result<String, String> {
     };
     if truncated {
         return Err(
-            "AI 输出未完整结束，请缩短分析方向或选择适合的模型重试；本次结果未保存。".into(),
+            tr("AI 输出未完整结束，请缩短分析方向或选择适合的模型重试；本次结果未保存。", "The AI response was cut short. Try a shorter prompt or a different model. The result was not saved.").into(),
         );
     }
     let text = match provider {
@@ -88,9 +89,16 @@ fn response_text(provider: &str, value: &Value) -> Result<String, String> {
             .and_then(Value::as_str)
             .map(str::to_string),
     }
-    .ok_or("AI 服务未返回可读取文本")?;
+    .ok_or(tr(
+        "AI 服务未返回可读取文本",
+        "The AI service did not return readable text",
+    ))?;
     if text.trim().is_empty() {
-        return Err("AI 服务返回空内容或拒绝回答，请检查请求".into());
+        return Err(tr(
+            "AI 服务返回空内容或拒绝回答，请检查请求",
+            "The AI service returned no answer. Check the request.",
+        )
+        .into());
     }
     Ok(text)
 }
@@ -103,14 +111,23 @@ async fn request(
     image: Option<&str>,
 ) -> Result<String, String> {
     if prompt.trim().is_empty() || prompt.chars().count() > 12000 {
-        return Err("提示词应为 1–12000 个字符".into());
+        return Err(tr(
+            "提示词应为 1–12000 个字符",
+            "The prompt must be 1–12,000 characters",
+        )
+        .into());
     }
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(90))
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|_| "无法创建 AI 网络客户端")?;
+        .map_err(|_| {
+            tr(
+                "无法创建 AI 网络客户端",
+                "Could not initialize the AI network client",
+            )
+        })?;
     let endpoint = match provider {
         "openai" => "https://api.openai.com/v1/responses",
         "anthropic" => "https://api.anthropic.com/v1/messages",
@@ -128,25 +145,41 @@ async fn request(
     };
     let mut response = builder.send().await.map_err(|error| {
         if error.is_timeout() {
-            "AI 请求超时，请稍后重试"
+            tr(
+                "AI 请求超时，请稍后重试",
+                "The AI request timed out. Try again later.",
+            )
         } else {
-            "AI 网络请求失败，请检查网络"
+            tr(
+                "AI 网络请求失败，请检查网络",
+                "The AI request failed. Check your network connection.",
+            )
         }
     })?;
     if !response.status().is_success() {
-        return Err(format!(
+        return Err(display_format!(
             "AI 服务返回 HTTP {}，请检查 Key、模型、额度或服务状态。",
+            "The AI service returned HTTP {}. Check your API key, model, quota, or service status.",
             response.status().as_u16()
         ));
     }
     let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| "读取 AI 响应失败")? {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| tr("读取 AI 响应失败", "Could not read the AI response"))?
+    {
         if bytes.len() + chunk.len() > 4 * 1024 * 1024 {
-            return Err("AI 响应超过大小限制".into());
+            return Err(tr(
+                "AI 响应超过大小限制",
+                "The AI response exceeds the size limit",
+            )
+            .into());
         }
         bytes.extend_from_slice(&chunk);
     }
-    let value: Value = serde_json::from_slice(&bytes).map_err(|_| "AI 响应不是有效 JSON")?;
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| tr("AI 响应不是有效 JSON", "The AI response is not valid JSON"))?;
     response_text(provider, &value)
 }
 
@@ -221,7 +254,11 @@ pub async fn ai_analyze_photo(
         let conn = state.connection.lock().map_err(|e| e.to_string())?;
         let (model, vision) = config(&conn, &service)?;
         if !vision {
-            return Err("当前模型未启用图像输入，请修改设置或使用文本任务".into());
+            return Err(tr(
+                "当前模型未启用图像输入，请修改设置或使用文本任务",
+                "Image input is disabled for this model. Update Settings or use a text task.",
+            )
+            .into());
         }
         let path: String = conn
             .query_row(
@@ -229,8 +266,13 @@ pub async fn ai_analyze_photo(
                 [selected],
                 |row| row.get(0),
             )
-            .map_err(|_| "照片不存在")?;
-        let bytes = fs::read(&path).map_err(|_| "缩略图缺失，请重新定位照片后重试")?;
+            .map_err(|_| tr("照片不存在", "Photo not found"))?;
+        let bytes = fs::read(&path).map_err(|_| {
+            tr(
+                "缩略图缺失，请重新定位照片后重试",
+                "The thumbnail is missing. Relocate the photo and try again.",
+            )
+        })?;
         Ok::<_, String>((
             model,
             credentials::get(&service)?,
@@ -251,7 +293,11 @@ pub async fn ai_analyze_photo(
     };
     let conn = store.connection.lock().map_err(|e| e.to_string())?;
     if crate::db::library_root(&conn)? != root {
-        return Err("图库已切换，AI 结果未写入其他图库".into());
+        return Err(tr(
+            "图库已切换，AI 结果未写入其他图库",
+            "The library changed. The AI result was not saved.",
+        )
+        .into());
     }
     let current_path: String = conn
         .query_row(
@@ -259,9 +305,18 @@ pub async fn ai_analyze_photo(
             [&analysis.photo_id],
             |row| row.get(0),
         )
-        .map_err(|_| "照片已不可用，AI 结果未保存")?;
+        .map_err(|_| {
+            tr(
+                "照片已不可用，AI 结果未保存",
+                "The photo is no longer available. The AI result was not saved.",
+            )
+        })?;
     if current_path != revision {
-        return Err("照片已被替换，旧照片的 AI 结果未保存".into());
+        return Err(tr(
+            "照片已被替换，旧照片的 AI 结果未保存",
+            "The photo was replaced. The AI result for the old photo was not saved.",
+        )
+        .into());
     }
     conn.execute("INSERT INTO photo_analyses(photo_id,provider,model,text,analyzed_at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(photo_id) DO UPDATE SET provider=excluded.provider,model=excluded.model,text=excluded.text,analyzed_at=excluded.analyzed_at",params![analysis.photo_id,analysis.provider,analysis.model,analysis.text,analysis.analyzed_at]).map_err(|e|e.to_string())?;
     Ok(analysis)

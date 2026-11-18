@@ -1,3 +1,4 @@
+use crate::locale::tr;
 #[cfg(target_os = "macos")]
 mod jpeg_macos;
 mod queue;
@@ -87,7 +88,11 @@ pub(crate) fn prepare_restore(conn: &Connection) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
     if count != 0 && count != 4 {
-        return Err("备份的作品目录数据表不完整".into());
+        return Err(tr(
+            "备份的作品目录数据表不完整",
+            "The backup is missing work folder tables",
+        )
+        .into());
     }
     discard_sync_jobs(conn)?;
     init(conn)?;
@@ -108,7 +113,11 @@ pub(crate) fn prepare_restore(conn: &Connection) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
     if invalid {
-        return Err("备份的作品目录引用无效".into());
+        return Err(tr(
+            "备份的作品目录引用无效",
+            "The backup contains an invalid work folder reference",
+        )
+        .into());
     }
     let validate = |query: &str, check: fn(&[String]) -> bool| -> Result<(), String> {
         let mut statement = conn.prepare(query).map_err(|e| e.to_string())?;
@@ -122,7 +131,11 @@ pub(crate) fn prepare_restore(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         for row in rows {
             if !check(&row.map_err(|e| e.to_string())?) {
-                return Err("备份的作品目录路径或文件指纹无效".into());
+                return Err(tr(
+                    "备份的作品目录路径或文件指纹无效",
+                    "The backup contains an invalid work folder path or file fingerprint",
+                )
+                .into());
             }
         }
         Ok(())
@@ -255,7 +268,10 @@ fn folders(conn: &Connection, root: &Root) -> Result<BTreeMap<String, FolderEntr
         .map_err(|e| e.to_string())?;
     for row in rows {
         let (folder, file_name) = row.map_err(|e| e.to_string())?;
-        let entry = folders.get_mut(&folder).ok_or("作品目录记录不完整")?;
+        let entry = folders.get_mut(&folder).ok_or(tr(
+            "作品目录记录不完整",
+            "Work folder records are incomplete",
+        ))?;
         entry.1.insert(file_name);
     }
     Ok(folders)
@@ -263,12 +279,19 @@ fn folders(conn: &Connection, root: &Root) -> Result<BTreeMap<String, FolderEntr
 
 fn bind(conn: &Connection, path: &Path) -> Result<(), String> {
     if active(conn)?.is_some() {
-        return Err("当前图库已绑定作品目录，请重新定位或先解绑".into());
+        return Err(tr(
+            "当前图库已绑定作品目录，请重新定位或先解绑",
+            "This library already has a work folder. Relocate it or disconnect it first.",
+        )
+        .into());
     }
     let existing = conn
         .query_row(
             "SELECT id,path,authorized FROM work_directory_roots WHERE path=?1",
-            [path.to_str().ok_or("作品目录路径不是有效文本")?],
+            [path.to_str().ok_or(tr(
+                "作品目录路径不是有效文本",
+                "The work folder path is not valid text",
+            ))?],
             |row| {
                 Ok(Root {
                     id: row.get(0)?,
@@ -300,8 +323,14 @@ fn bind(conn: &Connection, path: &Path) -> Result<(), String> {
 }
 
 fn relink(conn: &Connection, path: &Path) -> Result<(), String> {
-    let root = active(conn)?.ok_or("当前图库未绑定作品目录")?;
-    let path_text = path.to_str().ok_or("作品目录路径不是有效文本")?;
+    let root = active(conn)?.ok_or(tr(
+        "当前图库未绑定作品目录",
+        "No work folder is connected to this library",
+    ))?;
+    let path_text = path.to_str().ok_or(tr(
+        "作品目录路径不是有效文本",
+        "The work folder path is not valid text",
+    ))?;
     let occupied: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM work_directory_roots WHERE path=?1 AND id<>?2)",
@@ -310,7 +339,7 @@ fn relink(conn: &Connection, path: &Path) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
     if occupied {
-        return Err("该目录已有保留的作品引用；请先解绑，再选择绑定该目录".into());
+        return Err(tr("该目录已有保留的作品引用；请先解绑，再选择绑定该目录", "This folder already has saved work references. Disconnect the current folder before connecting this folder.").into());
     }
     let signatures = sync::verify_relink(conn, &root, path)?;
     let stamp = source::RootDirectory::open(path)
@@ -347,16 +376,27 @@ fn unbind(conn: &Connection) -> Result<(), String> {
 fn choose_path(base: &Path, path: &str) -> Result<PathBuf, String> {
     let path = Path::new(path);
     if !path.is_absolute() {
-        return Err("请选择一个绝对目录路径".into());
+        return Err(tr("请选择一个绝对目录路径", "Choose an absolute folder path").into());
     }
-    let path = path
-        .canonicalize()
-        .map_err(|_| "所选作品目录不存在或无法访问")?;
+    let path = path.canonicalize().map_err(|_| {
+        tr(
+            "所选作品目录不存在或无法访问",
+            "The selected work folder is missing or inaccessible",
+        )
+    })?;
     if path.to_str().is_none() || !source::readable_root(&path) {
-        return Err("所选作品目录不可读取".into());
+        return Err(tr(
+            "所选作品目录不可读取",
+            "Could not read the selected work folder",
+        )
+        .into());
     }
     if path.starts_with(base) {
-        return Err("请选择应用数据目录之外的作品目录".into());
+        return Err(tr(
+            "请选择应用数据目录之外的作品目录",
+            "Choose a work folder outside the application data folder",
+        )
+        .into());
     }
     Ok(path)
 }

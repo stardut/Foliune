@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use crate::{
     db::{self, snapshot, Store},
     groups,
@@ -96,7 +97,7 @@ fn signature(conn: &Connection, group_id: &str) -> Result<String, String> {
         .groups
         .iter()
         .find(|group| group.id == group_id)
-        .ok_or("分组不存在")?;
+        .ok_or(tr("分组不存在", "Album not found"))?;
     let members: Vec<_> = state
         .memberships
         .iter()
@@ -112,27 +113,55 @@ fn group_draft(conn: &Connection, group_id: &str, patch: Value) -> Result<Draft,
         .iter()
         .find(|group| group.id == group_id)
         .cloned()
-        .ok_or("分组不存在")?;
-    let patch = patch.as_object().ok_or("无效取舍请求")?;
+        .ok_or(tr("分组不存在", "Album not found"))?;
+    let patch = patch
+        .as_object()
+        .ok_or(tr("无效取舍请求", "Invalid selection request"))?;
     let mut requested = Vec::new();
     for (key, value) in patch {
         match key.as_str() {
             "photoIds" => {
-                for id in value.as_array().ok_or("候选照片必须是 ID 数组")? {
-                    let id = id.as_str().ok_or("候选照片 ID 必须是文本")?.to_string();
+                for id in value.as_array().ok_or(tr(
+                    "候选照片必须是 ID 数组",
+                    "Candidate photos must be provided as a list of IDs",
+                ))? {
+                    let id = id
+                        .as_str()
+                        .ok_or(tr(
+                            "候选照片 ID 必须是文本",
+                            "A candidate photo ID must be text",
+                        ))?
+                        .to_string();
                     if !requested.contains(&id) {
                         requested.push(id);
                     }
                 }
             }
             "name" => {
-                group.name = models::name(value.as_str().ok_or("分组名称必须是文本")?)?.into()
+                group.name = models::name(
+                    value
+                        .as_str()
+                        .ok_or(tr("分组名称必须是文本", "The album name must be text"))?,
+                )?
+                .into()
             }
             "description" => {
-                group.description = value.as_str().ok_or("分组描述必须是文本")?.trim().into()
+                group.description = value
+                    .as_str()
+                    .ok_or(tr(
+                        "分组描述必须是文本",
+                        "The album description must be text",
+                    ))?
+                    .trim()
+                    .into()
             }
             "capacity" => group.capacity = groups::parse_capacity(value)?,
-            _ => return Err(format!("未知取舍字段：{key}")),
+            _ => {
+                return Err(display_format!(
+                    "未知取舍字段：{key}",
+                    "Unknown selection field: {key}"
+                ))
+            }
         }
     }
     let active_ids: Vec<_> = state
@@ -149,7 +178,7 @@ fn group_draft(conn: &Connection, group_id: &str, patch: Value) -> Result<Draft,
                 .iter()
                 .find(|photo| photo.id == *id)
                 .cloned()
-                .ok_or("分组照片缺失")?,
+                .ok_or(tr("分组照片缺失", "An album photo is missing"))?,
         );
     }
     let mut pending_ids = Vec::new();
@@ -162,7 +191,10 @@ fn group_draft(conn: &Connection, group_id: &str, patch: Value) -> Result<Draft,
             .iter()
             .find(|photo| photo.id == id && photo.library == group.library)
             .cloned()
-            .ok_or("候选照片不存在或属于其他图库")?;
+            .ok_or(tr(
+                "候选照片不存在或属于其他图库",
+                "A candidate photo is missing or belongs to another library section",
+            ))?;
         candidates.push(photo);
         pending_ids.push(id);
     }
@@ -207,7 +239,7 @@ pub(crate) fn save_group_info(
         NeedsCuration(Box<Draft>),
     }
     let pending = db::write(conn, |conn| {
-        let current = db::find_group(conn, group_id)?.ok_or("分组不存在")?;
+        let current = db::find_group(conn, group_id)?.ok_or(tr("分组不存在", "Album not found"))?;
         let mut patch = serde_json::Map::new();
         for (field, original, edited, saved) in [
             (
@@ -233,7 +265,7 @@ pub(crate) fn save_group_info(
                 continue;
             }
             if saved != original {
-                return Err(db::REVISION_CONFLICT.into());
+                return Err(db::revision_conflict().into());
             }
             patch.insert(field.to_string(), edited);
         }
@@ -262,10 +294,15 @@ fn cleanup(store: &Store, draft: &Draft) -> Result<(), String> {
         if !draft.library_root.starts_with(&store.root)
             || *path != draft.library_root.join("staging").join(&draft.view.id)
         {
-            return Err("候选目录校验失败".into());
+            return Err(tr("候选目录校验失败", "Could not verify the candidate folder").into());
         }
         if path.exists() {
-            fs::remove_dir_all(path).map_err(|e| format!("清理候选失败：{e}"))?;
+            fs::remove_dir_all(path).map_err(|e| {
+                display_format!(
+                    "清理候选失败：{e}",
+                    "Could not clean up candidate photos: {e}"
+                )
+            })?;
         }
     }
     Ok(())
@@ -292,7 +329,10 @@ pub fn commit(
         .lock()
         .map_err(|e| e.to_string())?
         .remove(id)
-        .ok_or("候选会话不存在或已结束")?;
+        .ok_or(tr(
+            "候选会话不存在或已结束",
+            "The selection session is missing or has ended",
+        ))?;
     let mut created = Vec::new();
     let result = commit_inner(store, &draft, keep_ids, &mut created);
     if let Err(message) = result {
@@ -300,7 +340,10 @@ pub fn commit(
         for path in created {
             if path.exists() {
                 if let Err(error) = fs::remove_file(path) {
-                    errors.push(format!("回滚候选文件失败：{error}"));
+                    errors.push(display_format!(
+                        "回滚候选文件失败：{error}",
+                        "Could not roll back candidate files: {error}"
+                    ));
                 }
             }
         }
@@ -321,20 +364,37 @@ fn save_staged_file(
 ) -> Result<PathBuf, String> {
     let source = Path::new(source);
     if source.parent() != Some(staging.join(folder).as_path()) {
-        return Err("候选文件目录不合法".into());
+        return Err(tr("候选文件目录不合法", "Invalid folder for candidate files").into());
     }
-    let target = library_root
-        .join(folder)
-        .join(source.file_name().ok_or("候选文件名无效")?);
-    let mut input = fs::File::open(source).map_err(|error| format!("读取候选文件失败：{error}"))?;
+    let target = library_root.join(folder).join(
+        source
+            .file_name()
+            .ok_or(tr("候选文件名无效", "Invalid candidate filename"))?,
+    );
+    let mut input = fs::File::open(source).map_err(|error| {
+        display_format!(
+            "读取候选文件失败：{error}",
+            "Could not read the candidate file: {error}"
+        )
+    })?;
     let mut output = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&target)
-        .map_err(|error| format!("创建图库文件失败：{error}"))?;
+        .map_err(|error| {
+            display_format!(
+                "创建图库文件失败：{error}",
+                "Could not create the library file: {error}"
+            )
+        })?;
     // 只记录本次创建的文件，复制失败时也清理部分写入。
     created.push(target.clone());
-    io::copy(&mut input, &mut output).map_err(|error| format!("保存图库文件失败：{error}"))?;
+    io::copy(&mut input, &mut output).map_err(|error| {
+        display_format!(
+            "保存图库文件失败：{error}",
+            "Could not save the library file: {error}"
+        )
+    })?;
     Ok(target)
 }
 
@@ -346,7 +406,11 @@ fn commit_inner(
 ) -> Result<Snapshot, String> {
     let keep: HashSet<_> = keep_ids.iter().cloned().collect();
     if keep.len() != keep_ids.len() {
-        return Err("保留集合包含重复照片".into());
+        return Err(tr(
+            "保留集合包含重复照片",
+            "The photos to keep contain duplicates",
+        )
+        .into());
     }
     let valid: HashSet<_> = draft
         .view
@@ -355,23 +419,39 @@ fn commit_inner(
         .map(|photo| photo.id.clone())
         .collect();
     if !keep.is_subset(&valid) {
-        return Err("保留集合含不属于此候选会话的照片".into());
+        return Err(tr(
+            "保留集合含不属于此候选会话的照片",
+            "Some photos to keep are outside this selection session",
+        )
+        .into());
     }
     if draft
         .view
         .capacity
         .is_some_and(|capacity| keep.len() > capacity as usize)
     {
-        return Err("保留照片超过分组容量".into());
+        return Err(tr(
+            "保留照片超过分组容量",
+            "The photos to keep exceed the album capacity",
+        )
+        .into());
     }
     let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
     if crate::db::library_root(&conn)? != draft.library_root {
-        return Err("图库已切换，请重新开始取舍。".into());
+        return Err(tr(
+            "图库已切换，请重新开始取舍。",
+            "The library changed. Start the selection again.",
+        )
+        .into());
     }
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     if let Some(group_id) = &draft.view.group_id {
         if Some(signature(&tx, group_id)?) != draft.signature {
-            return Err("分组已被其他操作修改，请重新开始取舍。".into());
+            return Err(tr(
+                "分组已被其他操作修改，请重新开始取舍。",
+                "This album changed. Start the selection again.",
+            )
+            .into());
         }
         let existing: Vec<_> = draft
             .view
@@ -389,7 +469,10 @@ fn commit_inner(
         let Some(original) = draft.staged_originals.get(&photo.id) else {
             continue;
         };
-        let staging = draft.staging.as_ref().ok_or("新照片缺少暂存目录")?;
+        let staging = draft.staging.as_ref().ok_or(tr(
+            "新照片缺少暂存目录",
+            "The temporary folder for new photos is missing",
+        ))?;
         let original = match original {
             StagedOriginal::Managed => save_staged_file(
                 staging,
@@ -403,14 +486,15 @@ fn commit_inner(
             StagedOriginal::Local { signature } => {
                 let current =
                     crate::local_photo::signature(&photo.original_path).map_err(|_| {
-                        format!(
-                            "无法读取「{}」的原件，请检查原件位置后重新导入。",
+                        display_format!(
+                            "无法读取「{}」的原件，请检查原件位置后重新导入。", "Could not read the original for “{}”. Check its location and import it again.",
                             photo.original_name
                         )
                     })?;
                 if current != *signature {
-                    return Err(format!(
+                    return Err(display_format!(
                         "「{}」的原件已变化，请重新导入。",
+                        "The original for “{}” changed. Import it again.",
                         photo.original_name
                     ));
                 }

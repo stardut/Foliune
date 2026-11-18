@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use crate::{content_refs, db::Store};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -72,12 +73,13 @@ pub fn init(conn: &Connection) -> Result<(), String> {
 
 fn validate(conn: &Connection, input: &SocialInput) -> Result<(), String> {
     content_refs::name(&input.name)?;
-    content_refs::text(&input.display_name, "展示名", 200)?;
-    content_refs::text(&input.title, "标题", 500)?;
-    content_refs::text(&input.body, "正文", 50000)?;
+    content_refs::text(&input.display_name, tr("展示名", "Display name"), 200)?;
+    content_refs::text(&input.title, tr("标题", "Title"), 500)?;
+    content_refs::text(&input.body, tr("正文", "Body"), 50000)?;
     if input.photo_ids.len() > input.platform.photo_limit() {
-        return Err(format!(
+        return Err(display_format!(
             "此排版模拟最多支持 {} 张照片",
+            "This layout preview supports up to {} photos",
             input.platform.photo_limit()
         ));
     }
@@ -105,7 +107,7 @@ pub fn list(conn: &Connection) -> Result<Vec<SocialDraft>, String> {
         let (id, name, platform, display_name, title, body, created_at, updated_at) =
             row.map_err(|e| e.to_string())?;
         let platform = serde_json::from_value(serde_json::Value::String(platform))
-            .map_err(|_| "排版草稿平台无效")?;
+            .map_err(|_| tr("排版草稿平台无效", "Invalid platform for the layout draft"))?;
         let photo_ids = content_refs::read_photos(
             conn,
             "SELECT photo_id,position FROM social_photos WHERE draft_id=?1 ORDER BY position",
@@ -156,7 +158,7 @@ pub fn save(
                 )
                 .optional()
                 .map_err(|e| e.to_string())?
-                .ok_or("排版草稿不存在")?;
+                .ok_or(tr("排版草稿不存在", "Layout draft not found"))?;
             (id.to_string(), created)
         }
         None => (uuid::Uuid::new_v4().to_string(), now.clone()),
@@ -188,7 +190,7 @@ pub fn delete(conn: &Connection, id: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         == 0
     {
-        return Err("排版草稿不存在".into());
+        return Err(tr("排版草稿不存在", "Layout draft not found").into());
     }
     Ok(())
 }

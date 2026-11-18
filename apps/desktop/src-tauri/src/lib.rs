@@ -19,6 +19,7 @@ mod groups;
 mod link_import;
 mod local_photo;
 mod local_photo_picker;
+mod locale;
 mod model_profiles;
 mod models;
 mod music;
@@ -34,6 +35,7 @@ mod social;
 mod work_directory;
 
 use db::Store;
+use locale::tr;
 use models::{GroupInput, Snapshot};
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
@@ -97,7 +99,7 @@ async fn update_group(
             .as_object()
             .filter(|fields| fields.len() == 1)
             .and_then(|fields| fields.get("cover"))
-            .ok_or("无效相簿封面修改")?;
+            .ok_or(tr("无效相簿封面修改", "Invalid album cover change"))?;
         groups::save_cover(conn, &id, cover, expected_cover.as_ref())
     })
     .await?;
@@ -119,6 +121,19 @@ async fn update_photo(
 ) -> Result<Snapshot, String> {
     db::with_connection(app, move |conn| {
         photos::update_from_baseline(conn, &id, patch, expected)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn set_photo_regions(
+    app: AppHandle,
+    photos: Vec<photos::PhotoRegionBaseline>,
+    region_id: String,
+    group_id: Option<String>,
+) -> Result<Snapshot, String> {
+    db::with_connection(app, move |conn| {
+        photos::set_location_regions(conn, &photos, &region_id, group_id.as_deref())
     })
     .await
 }
@@ -186,6 +201,7 @@ pub fn run() {
             context_menu::popup_context_menu,
             cli_install::cli_install_status,
             cli_install::install_cli,
+            locale::set_interface_locale,
             load_snapshot,
             snapshot_after_external_edit,
             import_photos,
@@ -194,6 +210,7 @@ pub fn run() {
             album_cover::read_album_cover,
             delete_group,
             update_photo,
+            set_photo_regions,
             photo_metadata::read_photo_metadata,
             add_photos_to_group,
             set_membership_statuses,

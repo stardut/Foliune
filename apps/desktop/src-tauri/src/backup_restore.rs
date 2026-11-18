@@ -1,5 +1,6 @@
 use super::RestoreResult;
 use crate::db::{self, Store};
+use crate::locale::{display_format, tr};
 use rusqlite::{params, Connection, OpenFlags, TransactionBehavior};
 use std::{
     fs,
@@ -13,7 +14,11 @@ pub(super) fn validate_data(conn: &Connection) -> Result<(), String> {
             .map_err(|error| error.to_string())
     };
     if has_rows("PRAGMA foreign_key_check")? {
-        return Err("图库数据库引用不完整".into());
+        return Err(tr(
+            "图库数据库引用不完整",
+            "The library database has missing references",
+        )
+        .into());
     }
     if has_rows(
         "SELECT 1 FROM memberships m
@@ -23,7 +28,7 @@ pub(super) fn validate_data(conn: &Connection) -> Result<(), String> {
          UNION ALL SELECT 1 FROM groups g JOIN memberships m ON m.group_id=g.id AND m.status='active'
          WHERE g.capacity IS NOT NULL GROUP BY g.id HAVING count(*)>g.capacity",
     )? {
-        return Err("相簿的照片关系或容量无效".into());
+        return Err(tr("相簿的照片关系或容量无效", "Album photo references or capacity are invalid").into());
     }
     if has_rows(
         "SELECT 1 FROM album_covers c
@@ -32,7 +37,7 @@ pub(super) fn validate_data(conn: &Connection) -> Result<(), String> {
            OR typeof(c.offset_y) NOT IN ('real','integer') OR typeof(c.zoom) NOT IN ('real','integer')
            OR c.offset_x NOT BETWEEN 0 AND 1 OR c.offset_y NOT BETWEEN 0 AND 1 OR c.zoom NOT BETWEEN 1 AND 3",
     )? {
-        return Err("相簿封面的照片关系或取景范围无效".into());
+        return Err(tr("相簿封面的照片关系或取景范围无效", "The album cover photo reference or crop is invalid").into());
     }
     crate::books::validate_archive(conn)?;
     crate::model_profiles::validate_all(conn)?;
@@ -63,7 +68,12 @@ pub(super) fn merge(store: &Store, root: &Path, archive: &Path) -> Result<Restor
         let skipped_membership_count = merge_albums(&tx)?;
         let skipped_document_count = merge_documents(&tx)?;
         let unresolved_work_photo_count = merge_work_directory(&tx)?;
-        validate_data(&tx).map_err(|error| format!("合并后的图库未通过校验：{error}"))?;
+        validate_data(&tx).map_err(|error| {
+            display_format!(
+                "合并后的图库未通过校验：{error}",
+                "The merged library failed validation: {error}"
+            )
+        })?;
         crate::work_directory::copy_availability(&live, &tx)?;
         let snapshot = db::snapshot(&tx)?;
         tx.commit().map_err(|error| error.to_string())?;
@@ -80,7 +90,10 @@ pub(super) fn merge(store: &Store, root: &Path, archive: &Path) -> Result<Restor
         let mut errors = vec![error];
         for path in created {
             if let Err(cleanup) = fs::remove_file(path) {
-                errors.push(format!("回滚恢复文件失败：{cleanup}"));
+                errors.push(display_format!(
+                    "回滚恢复文件失败：{cleanup}",
+                    "Could not roll back restored files: {cleanup}"
+                ));
             }
         }
         return Err(errors.join("；"));
@@ -138,10 +151,11 @@ fn copy_photos(
     conn.execute_batch(
         "INSERT INTO main.photos (
            id,library,title,original_name,original_path,thumbnail_path,width,height,tags,annotation,source,
-           captured_at,location,project,imported_at,regions,hidden_after_album_delete
+           captured_at,location,project,imported_at,regions,hidden_after_album_delete,location_region_id
          )
          SELECT a.id,a.library,a.title,a.original_name,p.original_path,p.thumbnail_path,a.width,a.height,
-           a.tags,a.annotation,a.source,a.captured_at,a.location,a.project,a.imported_at,a.regions,a.hidden_after_album_delete
+           a.tags,a.annotation,a.source,a.captured_at,a.location,a.project,a.imported_at,a.regions,a.hidden_after_album_delete,
+           a.location_region_id
          FROM restore_archive.photos a JOIN restore_photos p ON p.id=a.id;
 
          INSERT INTO main.photo_analyses(photo_id,provider,model,text,analyzed_at)
@@ -166,7 +180,7 @@ fn copy_file(source: &str, directory: &Path, created: &mut Vec<PathBuf>) -> Resu
             .map_err(|error| error.to_string())?
             != directory
     {
-        return Err("图库文件目录无效".into());
+        return Err(tr("图库文件目录无效", "Invalid library folder").into());
     }
     let mut destination = directory.join(uuid::Uuid::new_v4().to_string());
     if let Some(extension) = Path::new(source).extension() {
@@ -177,9 +191,19 @@ fn copy_file(source: &str, directory: &Path, created: &mut Vec<PathBuf>) -> Resu
         .create_new(true)
         .write(true)
         .open(&destination)
-        .map_err(|error| format!("创建恢复文件失败：{error}"))?;
+        .map_err(|error| {
+            display_format!(
+                "创建恢复文件失败：{error}",
+                "Could not create the restored file: {error}"
+            )
+        })?;
     created.push(destination.clone());
-    std::io::copy(&mut input, &mut output).map_err(|error| format!("写入恢复文件失败：{error}"))?;
+    std::io::copy(&mut input, &mut output).map_err(|error| {
+        display_format!(
+            "写入恢复文件失败：{error}",
+            "Could not write the restored file: {error}"
+        )
+    })?;
     output.sync_all().map_err(|error| error.to_string())?;
     Ok(destination.to_string_lossy().into_owned())
 }
@@ -231,7 +255,12 @@ fn merge_albums(conn: &Connection) -> Result<usize, String> {
          FROM restore_archive.album_covers c JOIN restore_albums n ON n.id=c.group_id
          JOIN main.memberships m ON m.group_id=c.group_id AND m.photo_id=c.photo_id;",
     )
-    .map_err(|error| format!("恢复相簿关系失败：{error}"))?;
+    .map_err(|error| {
+        display_format!(
+            "恢复相簿关系失败：{error}",
+            "Could not restore album references: {error}"
+        )
+    })?;
     conn.query_row(
         "SELECT count(*) FROM restore_archive.memberships a WHERE NOT EXISTS (
            SELECT 1 FROM main.memberships m WHERE m.group_id=a.group_id AND m.photo_id=a.photo_id
@@ -323,7 +352,7 @@ fn merge_documents(conn: &Connection) -> Result<usize, String> {
          FROM restore_archive.shoot_plans a WHERE NOT EXISTS (SELECT 1 FROM main.shoot_plans s WHERE s.id=a.id)
            AND NOT EXISTS (SELECT 1 FROM restore_skipped_documents WHERE kind='plan' AND id=a.id);",
     )
-    .map_err(|error| format!("恢复画册、模特、排版或策划失败：{error}"))?;
+    .map_err(|error| display_format!("恢复画册、模特、排版或策划失败：{error}", "Could not restore photo books, model profiles, layouts, or shoot plans: {error}"))?;
     conn.query_row(
         "SELECT count(*) FROM restore_skipped_documents",
         [],
@@ -362,7 +391,7 @@ fn merge_work_directory(conn: &Connection) -> Result<usize, String> {
          ) AND NOT EXISTS (
            SELECT 1 FROM main.work_directory_jobs j WHERE j.root_id=r.current_id AND j.folder=a.folder
          );",
-    ).map_err(|error| format!("恢复作品目录关系失败：{error}"))?;
+    ).map_err(|error| display_format!("恢复作品目录关系失败：{error}", "Could not restore work folder references: {error}"))?;
 
     // A changed root path cannot inherit access through its stable ID.
     // Keep current file indexes and ignores for roots with matching paths.
@@ -384,7 +413,7 @@ fn merge_work_directory(conn: &Connection) -> Result<usize, String> {
          )",
             [crate::local_photo::PREFIX],
         )
-        .map_err(|error| format!("保留冲突的作品照片索引失败：{error}"))?;
+        .map_err(|error| display_format!("保留冲突的作品照片索引失败：{error}", "Could not preserve the index for conflicting work photos: {error}"))?;
     conn.execute_batch(
         "INSERT INTO main.work_directory_photos(photo_id,root_id,folder,file_name,sha256,stat_signature)
          SELECT a.photo_id,r.current_id,a.folder,a.file_name,a.sha256,NULL
@@ -401,6 +430,6 @@ fn merge_work_directory(conn: &Connection) -> Result<usize, String> {
            WHERE p.root_id=r.current_id AND p.folder=a.folder AND p.file_name=a.file_name
          );",
     )
-    .map_err(|error| format!("恢复作品目录关系失败：{error}"))?;
+    .map_err(|error| display_format!("恢复作品目录关系失败：{error}", "Could not restore work folder references: {error}"))?;
     Ok(unresolved_count)
 }

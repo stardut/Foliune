@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use crate::{book_layout, content_refs, db, models::Snapshot};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -120,9 +121,9 @@ pub(crate) fn exclude_currently_referenced_photos(
         let data = row
             .get::<_, Option<String>>(0)
             .map_err(|e| e.to_string())?
-            .ok_or("画册当前内容不存在，无法确认照片是否仍被引用")?;
+            .ok_or(tr("画册当前内容不存在，无法确认照片是否仍被引用", "The current photo book content is missing. Could not check whether it still uses these photos."))?;
         let version: VersionInput = serde_json::from_str(&data)
-            .map_err(|e| format!("画册内容损坏，无法确认照片是否仍被引用：{e}"))?;
+            .map_err(|e| display_format!("画册内容损坏，无法确认照片是否仍被引用：{e}", "The photo book content is damaged. Could not check whether it still uses these photos: {e}"))?;
         for id in version_photo_ids(&version) {
             candidates.remove(id);
         }
@@ -166,16 +167,30 @@ pub fn get(conn: &Connection, id: &str) -> Result<BookDetail, String> {
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or("画册不存在")?;
-    let input: VersionInput = serde_json::from_str(&data.ok_or("画册当前内容不存在")?)
-        .map_err(|e| format!("画册内容损坏：{e}"))?;
+        .ok_or(tr("画册不存在", "Photo book not found"))?;
+    let input: VersionInput = serde_json::from_str(&data.ok_or(tr(
+        "画册当前内容不存在",
+        "The current photo book content is missing",
+    ))?)
+    .map_err(|e| {
+        display_format!(
+            "画册内容损坏：{e}",
+            "The photo book content is damaged: {e}"
+        )
+    })?;
     book.photo_count = input.chapters.iter().map(|c| c.photo_ids.len()).sum();
     book.cover_photo_id = cover_photo_id(conn, &input)?;
     let version = BookVersion {
         id: book.current_version_id.clone(),
         book_id: id.into(),
-        created_at: version_created_at.ok_or("画册当前内容不存在")?,
-        kind: kind.ok_or("画册当前内容不存在")?,
+        created_at: version_created_at.ok_or(tr(
+            "画册当前内容不存在",
+            "The current photo book content is missing",
+        ))?,
+        kind: kind.ok_or(tr(
+            "画册当前内容不存在",
+            "The current photo book content is missing",
+        ))?,
         input,
     };
     Ok(BookDetail {
@@ -212,8 +227,16 @@ pub fn list(conn: &Connection) -> Result<Vec<BookSummary>, String> {
     let mut books = Vec::new();
     for row in rows {
         let (mut book, data) = row.map_err(|e| e.to_string())?;
-        let current: VersionInput = serde_json::from_str(&data.ok_or("画册当前内容不存在")?)
-            .map_err(|e| format!("画册内容损坏：{e}"))?;
+        let current: VersionInput = serde_json::from_str(&data.ok_or(tr(
+            "画册当前内容不存在",
+            "The current photo book content is missing",
+        ))?)
+        .map_err(|e| {
+            display_format!(
+                "画册内容损坏：{e}",
+                "The photo book content is damaged: {e}"
+            )
+        })?;
         book.photo_count = current
             .chapters
             .iter()
@@ -243,12 +266,20 @@ pub(crate) fn validate_archive(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?
             .is_none()
         {
-            return Err("画册当前内容不存在".into());
+            return Err(tr(
+                "画册当前内容不存在",
+                "The current photo book content is missing",
+            )
+            .into());
         }
         let data = row.get::<_, String>(0).map_err(|e| e.to_string())?;
         let current = row.get::<_, bool>(1).map_err(|e| e.to_string())?;
-        let input: VersionInput =
-            serde_json::from_str(&data).map_err(|e| format!("画册内容损坏：{e}"))?;
+        let input: VersionInput = serde_json::from_str(&data).map_err(|e| {
+            display_format!(
+                "画册内容损坏：{e}",
+                "The photo book content is damaged: {e}"
+            )
+        })?;
         book_layout::validate_snapshot(conn, &input, current)?;
     }
     Ok(())
@@ -328,9 +359,13 @@ pub fn save_version(
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or("画册不存在")?;
+        .ok_or(tr("画册不存在", "Photo book not found"))?;
     if current != version_id {
-        return Err("画册内容已在其他操作中更改，请重新打开后再试；当前修改仍保留。".into());
+        return Err(tr(
+            "画册内容已在其他操作中更改，请重新打开后再试；当前修改仍保留。",
+            "This photo book changed. Reopen it and try again. Your edits are still available.",
+        )
+        .into());
     }
     let id = write_manual_version(&tx, book_id, &input)?;
     tx.execute(
@@ -372,11 +407,15 @@ pub fn append_photos(
         .filter(|id| !used.contains(id) && unique.insert(id.clone()))
         .collect();
     if added.is_empty() {
-        return Err("所选照片已在当前画册中".into());
+        return Err(tr(
+            "所选照片已在当前画册中",
+            "The selected photos are already in this photo book",
+        )
+        .into());
     }
     let chapter = BookChapter {
         id: uuid::Uuid::new_v4().to_string(),
-        title: "新增选片".into(),
+        title: tr("新增选片", "Added Photos").into(),
         photo_ids: added,
     };
     let layout = book_layout::generate(
@@ -387,7 +426,7 @@ pub fn append_photos(
     )?;
     input.chapters.push(chapter);
     input.pages.extend(layout.pages);
-    input.label = "追加选片".into();
+    input.label = tr("追加选片", "Added Photos").into();
     save_version(conn, book_id, &detail.book.current_version_id, input)
 }
 pub fn update(
@@ -400,7 +439,7 @@ pub fn update(
     let tx = conn.savepoint().map_err(|e| e.to_string())?;
     let detail = get(&tx, id)?;
     if detail.book.updated_at != expected_revision {
-        return Err(db::REVISION_CONFLICT.into());
+        return Err(db::revision_conflict().into());
     }
     let name = name.map(title).transpose()?.unwrap_or(&detail.book.title);
     let current = match version {
@@ -439,9 +478,17 @@ pub(crate) fn delete_record(conn: &Connection, id: &str) -> Result<(), String> {
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or("画册不存在")?;
-    let version: VersionInput = serde_json::from_str(&data.ok_or("画册当前内容不存在")?)
-        .map_err(|e| format!("画册内容损坏：{e}"))?;
+        .ok_or(tr("画册不存在", "Photo book not found"))?;
+    let version: VersionInput = serde_json::from_str(&data.ok_or(tr(
+        "画册当前内容不存在",
+        "The current photo book content is missing",
+    ))?)
+    .map_err(|e| {
+        display_format!(
+            "画册内容损坏：{e}",
+            "The photo book content is damaged: {e}"
+        )
+    })?;
     let candidates = version_photo_ids(&version).cloned().collect();
     conn.execute("DELETE FROM books WHERE id=?1", [id])
         .map_err(|e| e.to_string())?;

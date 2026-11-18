@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n.ts';
 // Adapted from beUI animated-toast-stack (MIT), https://beui.dev/components/motion/animated-toast-stack.
 // See ./LICENSE. Foliune uses its toast state/timer and stack composition with
 // direct unmount, visible CSS entrance, and the app's shared desktop materials.
@@ -82,7 +83,7 @@ function ToastItem({ toast, onDismiss }: { toast: AnimatedToast; onDismiss: (id:
     </div>
     {toast.action && <button type="button" className="button button-primary toast-action" aria-haspopup="dialog" onClick={toast.action.onClick}>{toast.action.label}</button>}
     {toast.dismissible && <button type="button" className={toast.dismissLabel ? 'button button-quiet toast-dismiss' : 'toast-close'}
-      aria-label={toast.dismissLabel ?? '关闭提示'} onPointerDown={(event) => event.preventDefault()} onClick={() => onDismiss(toast.id)}>
+      aria-label={toast.dismissLabel ?? t('关闭提示', 'Dismiss notification')} onPointerDown={(event) => event.preventDefault()} onClick={() => onDismiss(toast.id)}>
       {toast.dismissLabel ?? <X size={14} aria-hidden="true" />}
     </button>}
   </li>;

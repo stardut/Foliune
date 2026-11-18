@@ -2,6 +2,7 @@ use super::{
     input::{media_allowed, page_allowed, Platform, Target},
     Session,
 };
+use crate::locale::{display_format, tr};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::Deserialize;
 use std::{
@@ -28,22 +29,53 @@ fn report(url: &Url, nonce: &str, target: &Target) -> Result<Vec<String>, String
         || !url.path().starts_with("/result/")
         || url.path().len() > 500_000
     {
-        return Err("链接解析返回地址校验失败。".into());
+        return Err(tr(
+            "链接解析返回地址校验失败。",
+            "Could not verify the link resolver callback URL.",
+        )
+        .into());
     }
-    let bytes = URL_SAFE_NO_PAD
-        .decode(&url.path()[8..])
-        .map_err(|_| "链接解析返回编码无效")?;
-    let report: Report = serde_json::from_slice(&bytes).map_err(|_| "链接解析返回内容无效")?;
+    let bytes = URL_SAFE_NO_PAD.decode(&url.path()[8..]).map_err(|_| {
+        tr(
+            "链接解析返回编码无效",
+            "Invalid encoding in the link resolver response",
+        )
+    })?;
+    let report: Report = serde_json::from_slice(&bytes).map_err(|_| {
+        tr(
+            "链接解析返回内容无效",
+            "Invalid content in the link resolver response",
+        )
+    })?;
     if report.id != target.id {
-        return Err("链接解析返回的帖子不匹配。".into());
+        return Err(tr(
+            "链接解析返回的帖子不匹配。",
+            "The resolved post did not match the requested post.",
+        )
+        .into());
     }
     if report.status != "complete" {
         return Err(match report.status.as_str() {
-            "video" => "这篇帖子没有可导入的照片。",
-            "login_required" => "该帖子需要网页登录后查看；当前无痕导入不使用账号 Cookie。",
-            "blocked" => "平台要求安全验证或限制访问，无法导入该帖子。",
-            "unavailable" => "帖子不存在、不可见或平台暂时无法展示。",
-            _ => "未能验证帖子的完整图片列表，请稍后重试或改用本地照片。",
+            "video" => tr(
+                "这篇帖子没有可导入的照片。",
+                "This post has no photos to import.",
+            ),
+            "login_required" => tr(
+                "该帖子需要网页登录后查看；当前无痕导入不使用账号 Cookie。",
+                "This post requires signing in. Private import does not use account cookies.",
+            ),
+            "blocked" => tr(
+                "平台要求安全验证或限制访问，无法导入该帖子。",
+                "The platform requires verification or restricts access to this post.",
+            ),
+            "unavailable" => tr(
+                "帖子不存在、不可见或平台暂时无法展示。",
+                "This post is missing, private, or temporarily unavailable.",
+            ),
+            _ => tr(
+                "未能验证帖子的完整图片列表，请稍后重试或改用本地照片。",
+                "Could not verify the complete photo list. Try again later or import local photos.",
+            ),
         }
         .into());
     }
@@ -51,13 +83,22 @@ fn report(url: &Url, nonce: &str, target: &Target) -> Result<Vec<String>, String
         || report.images.len() > 100
         || report.expected != report.images.len()
     {
-        return Err("帖子图片列表不完整或数量超过限制。".into());
+        return Err(tr(
+            "帖子图片列表不完整或数量超过限制。",
+            "The photo list is incomplete or exceeds the import limit.",
+        )
+        .into());
     }
     let mut seen = HashSet::new();
     for image in &report.images {
-        let url = Url::parse(image).map_err(|_| "帖子图片地址无效")?;
+        let url = Url::parse(image)
+            .map_err(|_| tr("帖子图片地址无效", "Invalid photo URL in the post"))?;
         if !media_allowed(&url, target.platform) || !seen.insert(image) {
-            return Err("帖子图片地址无效、重复或超出平台 CDN 范围。".into());
+            return Err(tr(
+                "帖子图片地址无效、重复或超出平台 CDN 范围。",
+                "A photo URL is invalid, duplicated, or outside the platform's CDN.",
+            )
+            .into());
         }
     }
     Ok(report.images)
@@ -76,7 +117,7 @@ pub(super) async fn extract(
     let session_create = session.clone();
     app.run_on_main_thread(move || {
         if session_create.check().is_err() {
-            let _ = sender.try_send(Err("链接导入已取消。".into()));
+            let _ = sender.try_send(Err(tr("链接导入已取消。", "Link import canceled.").into()));
             return;
         }
         let nav_sender = sender.clone();
@@ -84,7 +125,7 @@ pub(super) async fn extract(
         let nav_target = target.clone();
         let result =
             WebviewWindowBuilder::new(&handle, &label, WebviewUrl::External(target.url.clone()))
-                .title("Foliune 照片来源")
+                .title(tr("Foliune 照片来源", "Foliune Photo Source"))
                 .inner_size(1260.0, 900.0)
                 .visible(false)
                 .incognito(true)
@@ -108,14 +149,22 @@ pub(super) async fn extract(
                 })
                 .build();
         if let Err(error) = result {
-            let _ = sender.try_send(Err(format!("无法创建无痕解析窗口：{error}")));
+            let _ = sender.try_send(Err(display_format!(
+                "无法创建无痕解析窗口：{error}",
+                "Could not open the private link resolver window: {error}"
+            )));
         } else if session_create.check().is_err() {
             if let Some(window) = handle.get_webview_window(&label) {
                 let _ = window.destroy();
             }
         }
     })
-    .map_err(|e| format!("无法启动链接解析：{e}"))?;
+    .map_err(|e| {
+        display_format!(
+            "无法启动链接解析：{e}",
+            "Could not start the link resolver: {e}"
+        )
+    })?;
     let check_session = session.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let started = Instant::now();
@@ -124,19 +173,25 @@ pub(super) async fn extract(
             match receiver.recv_timeout(Duration::from_millis(150)) {
                 Ok(result) => return result,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("链接解析窗口已关闭。".into())
+                    return Err(
+                        tr("链接解析窗口已关闭。", "The link resolver window closed.").into(),
+                    )
                 }
                 Err(mpsc::RecvTimeoutError::Timeout)
                     if started.elapsed() > Duration::from_secs(75) =>
                 {
-                    return Err("链接解析超时，未导入任何照片。".into())
+                    return Err(tr(
+                        "链接解析超时，未导入任何照片。",
+                        "The link resolver timed out. No photos were imported.",
+                    )
+                    .into())
                 }
                 Err(_) => {}
             }
         }
     })
     .await
-    .map_err(|_| "链接解析任务失败".to_string())?;
+    .map_err(|_| tr("链接解析任务失败", "Could not resolve the link").to_string())?;
     if let Some(window) = app.get_webview_window(&session.label) {
         let _ = window.destroy();
     }

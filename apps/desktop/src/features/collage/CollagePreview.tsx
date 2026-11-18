@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n';
 import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 import { ImageOff } from 'lucide-react';
 import type { Photo } from '../../lib/types';
@@ -21,7 +22,7 @@ export function CollagePreview({ state, layout, photos, activeId, editing, disab
   }, []);
   const scale = Math.min(Math.max(1, size.width) / layout.width, Math.max(1, size.height) / layout.height);
   return <div className="collage-preview-stage" ref={stage}>
-    <div className="collage-paper" aria-label="拼图预览" style={{ width: layout.width * scale, height: layout.height * scale, background: state.background }}>
+    <div className="collage-paper" aria-label={t('拼图预览', 'Collage Preview')} style={{ width: layout.width * scale, height: layout.height * scale, background: state.background }}>
       {layout.items.map((item) => {
         const photo = photos.find((candidate) => candidate.id === item.photoId)!;
         return <PreviewPhoto key={`${photo.id}:${photo.originalUrl}:${photo.originalAvailable}`} photo={photo} rect={{ x: item.x * scale, y: item.y * scale, width: item.width * scale, height: item.height * scale }} crop={cropFor(state, photo.id)}
@@ -57,7 +58,7 @@ function PreviewPhoto({ photo, rect, crop, active, editing, disabled, targeted, 
     else if (start.moved && !cancelled) { suppressClick.current = true; window.setTimeout(() => { suppressClick.current = false; }, 0); if (start.target) onSwap(start.target); }
   }
   return <button type="button" disabled={disabled} className={`collage-photo ${active ? 'is-active' : ''} ${editing ? 'is-editing' : ''} ${targeted ? 'is-swap-target' : ''}`} data-collage-photo={photo.id}
-    style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }} aria-label={`${photo.title || photo.originalName}${editing ? '，拖动调整裁切' : ''}`} aria-pressed={active}
+    style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }} aria-label={`${photo.title || photo.originalName}${editing ? t('，拖动调整裁切', ', drag to adjust the crop') : ''}`} aria-pressed={active}
     onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } onSelect(); }} onDoubleClick={onEdit}
     onKeyDown={(event) => { if (editing && crop.fit === 'cover' && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) { event.preventDefault(); const step = event.shiftKey ? .1 : .02; const clamp = (value: number) => Math.max(0, Math.min(1, value)); onCrop({ ...crop, offsetX: clamp(crop.offsetX + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0)), offsetY: clamp(crop.offsetY + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0)) }, true); } else if (event.key === 'Enter' && active) { event.preventDefault(); onEdit(); } }}
     onPointerDown={(event) => {
@@ -79,6 +80,6 @@ function PreviewPhoto({ photo, rect, crop, active, editing, disabled, targeted, 
       start.latest = next; onCrop(next, false);
     }} onPointerUp={(event) => endDrag(event)} onPointerCancel={(event) => endDrag(event, true)}>
     {photo.originalAvailable && !failed ? <img src={originalReadUrl(photo, readSession)} alt="" draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} style={{ width: imageWidth, height: imageHeight, left, top }} /> : <span className="collage-preview-missing"><ImageOff size={20} /><span>{photoUnavailableLabel(photo)}</span></span>}
-    {!failed && photo.originalAvailable && !loaded && <span className="collage-preview-loading">读取原图…</span>}
+    {!failed && photo.originalAvailable && !loaded && <span className="collage-preview-loading">{t('读取原图…', 'Loading original…')}</span>}
   </button>;
 }

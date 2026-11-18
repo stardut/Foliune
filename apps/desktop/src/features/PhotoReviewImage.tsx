@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n';
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useReducedMotion } from 'motion/react';
 import { ImageOff, LoaderCircle, LocateFixed } from 'lucide-react';
@@ -25,7 +26,7 @@ export function useReviewPresentation(photos: Photo[], requestedId: string, dire
 }
 
 export function PhotoReviewImage({ state, controller, busy, onRelink, allowZoom = true, onEntryZoom, fullscreen }: {
-  state: ReviewPresentationState; controller: ReviewPresentation; busy: boolean; onRelink: (photo: Photo) => Promise<void>; allowZoom?: boolean; onEntryZoom?: () => void; fullscreen?: boolean;
+  state: ReviewPresentationState; controller: ReviewPresentation; busy: boolean; onRelink?: (photo: Photo) => Promise<void>; allowZoom?: boolean; onEntryZoom?: () => void; fullscreen?: boolean;
 }) {
   const layers: [ReviewFrame | null, string][] = [[state.current, state.incoming ? 'cover' : state.entering ? 'enter' : 'current'], [state.incoming, 'incoming'], [state.outgoing, 'outgoing']];
   const reduced = !!useReducedMotion();
@@ -39,32 +40,33 @@ export function PhotoReviewImage({ state, controller, busy, onRelink, allowZoom 
   }, [owner, onEntryZoom]);
   useLayoutEffect(() => owner?.update(layers.map(([frame]) => frame).filter((frame): frame is ReviewFrame => !!frame), state.current, reduced), [owner, state, reduced]);
   useLayoutEffect(() => { if (fullscreen) owner?.reset(); }, [owner, fullscreen]);
+  const relink = onRelink && (async (photo: Photo) => { await onRelink(photo); controller.retry(photo); });
   return <div className="photo-review-images" ref={viewport}>
     {layers.map(([frame, role]) => frame && <div key={frame.key} className={`photo-review-frame photo-review-frame-${role}`} style={{ '--review-offset': `${state.direction * 12}px` } as CSSProperties} aria-hidden={role === 'incoming' || role === 'outgoing' ? true : undefined} inert={role === 'incoming' || role === 'outgoing'}>
-      {frame.kind === 'error' ? !fullscreen && <ReviewMissing photo={frame.photo} busy={busy} onRelink={async (photo) => { await onRelink(photo); controller.retry(photo); }} />
+      {frame.kind === 'error' ? !fullscreen && <ReviewMissing photo={frame.photo} busy={busy} onRelink={relink} />
         : <div className="photo-review-zoom" ref={owner ? (element) => owner.register(frame, element) : undefined}><img src={frame.src} width={frame.photo.width} height={frame.photo.height} alt={frame.photo.title || frame.photo.originalName} draggable={false}
           onLoad={(event) => { owner?.imageLoaded(frame.key); void controller.domReady(frame.key, event.currentTarget); }} onError={() => controller.domFailed(frame.key)} /></div>}
     </div>)}
-    {!fullscreen && state.waiting && <div className="photo-review-loading" role="status"><LoaderCircle size={16} aria-hidden="true" /><span>正在读取照片</span></div>}
+    {!fullscreen && state.waiting && <div className="photo-review-loading" role="status"><LoaderCircle size={16} aria-hidden="true" /><span>{t('正在读取照片', 'Loading photo')}</span></div>}
   </div>;
 }
 
-function ReviewMissing({ photo, busy, onRelink }: { photo: Photo; busy: boolean; onRelink: (photo: Photo) => Promise<void> }) {
+function ReviewMissing({ photo, busy, onRelink }: { photo: Photo; busy: boolean; onRelink?: (photo: Photo) => Promise<void> }) {
   const [error, setError] = useState('');
   const alive = useRef(true);
   useLayoutEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   async function repair() {
     setError('');
-    try { await onRelink(photo); }
+    try { await onRelink?.(photo); }
     catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : String(cause)); }
   }
   if (photo.availability) return <div className="missing-photo work-photo-review-placeholder" role="status" style={{ '--source-ratio': photo.width / photo.height } as CSSProperties}>
     <ImageOff size={25} strokeWidth={1} aria-hidden="true" /><span>{photoUnavailableLabel(photo)}</span>
   </div>;
   return <div className="missing-photo" role="status"><ImageOff size={25} strokeWidth={1} /><span>{photoUnavailableLabel(photo)}</span>
-    {!isLocalPhoto(photo) && <>
-      <p>{photo.originalAvailable ? '请重新定位可读取的原始照片' : '文件已移动或不在原位置'}</p>
-      <button type="button" className="button" onClick={() => void repair()} disabled={busy}><LocateFixed size={13} />{busy ? '处理中…' : '重新定位'}</button>
+    {onRelink && !isLocalPhoto(photo) && <>
+      <p>{photo.originalAvailable ? t('请重新定位可读取的原始照片', 'Relink to a readable original photo') : t('文件已移动或不在原位置', 'File moved or no longer at its original location')}</p>
+      <button type="button" className="button" onClick={() => void repair()} disabled={busy}><LocateFixed size={13} />{busy ? t('处理中…', 'Working…') : t('重新定位', 'Relink')}</button>
       {error && <p className="form-error" role="alert">{error}</p>}
     </>}
   </div>;

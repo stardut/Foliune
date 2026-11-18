@@ -1,10 +1,16 @@
+use crate::locale::tr;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Webview};
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod macos;
 
-const DISABLED: &str = "当前构建未启用应用更新。";
+fn disabled() -> &'static str {
+    tr(
+        "当前构建未启用应用更新。",
+        "App updates are disabled in this build.",
+    )
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,7 +45,11 @@ impl UpdateError {
 
 fn require_main(webview: &Webview) -> Result<(), String> {
     if webview.label() != "main" {
-        return Err("请在主窗口操作应用更新。".into());
+        return Err(tr(
+            "请在主窗口操作应用更新。",
+            "Manage updates from the main window.",
+        )
+        .into());
     }
     Ok(())
 }
@@ -73,7 +83,7 @@ pub(crate) async fn check_app_update(
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     {
         let _ = app;
-        Err(DISABLED.into())
+        Err(disabled().into())
     }
 }
 
@@ -90,6 +100,6 @@ pub(crate) async fn install_app_update(
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     {
         let _ = (app, version, progress);
-        Err(UpdateError::new("install", DISABLED))
+        Err(UpdateError::new("install", disabled()))
     }
 }

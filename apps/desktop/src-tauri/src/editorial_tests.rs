@@ -573,10 +573,20 @@ fn editorial_old_backup_initializes_empty_tables_before_restore_validation() {
     let (dir, store, _ids) = setup(1);
     let path = dir.path().join("backup.zip");
     backup::create(&store, &path).unwrap();
-    let legacy = mutate_backup(dir.path(), &path, "legacy", "DROP TABLE model_photos; DROP TABLE model_profiles; DROP TABLE social_photos; DROP TABLE social_drafts; ALTER TABLE photos DROP COLUMN hidden_after_album_delete; PRAGMA user_version=2;");
+    let legacy = mutate_backup(
+        dir.path(),
+        &path,
+        "legacy",
+        "DROP TABLE model_photos; DROP TABLE model_profiles;
+         DROP TABLE social_photos; DROP TABLE social_drafts;
+         ALTER TABLE photos DROP COLUMN hidden_after_album_delete;
+         ALTER TABLE photos DROP COLUMN location_region_id;
+         PRAGMA user_version=2;",
+    );
     let target = Store::open(dir.path().join("target")).unwrap();
     let state = backup::restore(&target, &legacy).unwrap().snapshot;
     assert_eq!(state.photos.len(), 1);
+    assert!(state.photos[0].location_region_id.is_empty());
     assert!(state.hidden_photo_ids.is_empty());
     let mut conn = target.connection.lock().unwrap();
     assert!(model_profiles::list(&conn).unwrap().is_empty());

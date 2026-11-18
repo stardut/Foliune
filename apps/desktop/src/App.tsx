@@ -1,3 +1,4 @@
+import { t } from './lib/i18n.ts';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Search, Settings2 } from 'lucide-react';
 import { TauriEvent } from '@tauri-apps/api/event';
@@ -20,7 +21,7 @@ import { BookWorkspace } from './features/books/BookWorkspace';
 import { ModelWorkspace } from './features/models/ModelWorkspace';
 import { PlanningWorkspace } from './features/planning/PlanningWorkspace';
 import { SearchWorkspace, type SearchSession } from './features/search/SearchWorkspace';
-import { SettingsWorkspace } from './features/SettingsWorkspace';
+import { LanguageSettings, SettingsWorkspace } from './features/SettingsWorkspace';
 import { AppUpdateDialog } from './features/AppUpdateDialog';
 import { rememberUpdateNotice, useAppUpdate } from './features/use-app-update';
 import { useCliInstall, useCliInstallNotice } from './features/use-cli-install';
@@ -34,14 +35,14 @@ import type { WorkDirectoryCommit } from './lib/work-directory-api';
 type Space = LibraryKind | 'books' | 'models' | 'planning' | 'search' | 'settings';
 type SearchDetail = { space: 'books'; book: BookDetail } | { space: 'models'; model: ModelProfile } | { space: 'planning'; plan: ShootPlan };
 type SearchTarget = { space: SearchDetail['space']; id: string };
-const spaces: { id: Space; label: string }[] = [{ id: 'work', label: '作品' }, { id: 'collection', label: '收藏' }, { id: 'books', label: '画册' }, { id: 'models', label: '模特' }, { id: 'planning', label: '策划' }, { id: 'search', label: '搜索' }, { id: 'settings', label: '设置' }];
+const spaces: { id: Space; label: string }[] = [{ id: 'work', label: t('作品', 'Work') }, { id: 'collection', label: t('收藏', 'Collection') }, { id: 'books', label: t('画册', 'Books') }, { id: 'models', label: t('模特', 'Models') }, { id: 'planning', label: t('策划', 'Shoot Plans') }, { id: 'search', label: t('搜索', 'Search') }, { id: 'settings', label: t('设置', 'Settings') }];
 const primarySpaces = spaces.filter((item) => item.id !== 'search' && item.id !== 'settings');
 const primaryNavigationDurationMs = 360;
 const reducedMotionQuery = '(prefers-reduced-motion: reduce)';
 const empty: LibrarySnapshot = { photos: [], groups: [], memberships: [] };
 const initialSearchSession: SearchSession = { query: '', category: 'all', scrollTop: 0 };
 
-export default function App() {
+export default function App({ resumeSettings = false }: { resumeSettings?: boolean }) {
   const mainRef = useRef<HTMLElement>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
   const [{ snapshot }, setLibraryView] = useState<LibraryView>({ snapshot: empty, pendingCommits: [], observedPhotos: [] });
@@ -52,7 +53,7 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const toast = useToast();
-  const [space, setSpace] = useState<Space>('work');
+  const [space, setSpace] = useState<Space>(resumeSettings ? 'settings' : 'work');
   const [workspaceVisibility, setWorkspaceVisibility] = useState(readWorkspaceVisibility);
   const navigationSpaces = useMemo(() => primarySpaces.filter(({ id }) => isWorkspaceVisible(id, workspaceVisibility)), [workspaceVisibility]);
   const previousSpace = useRef(space);
@@ -122,20 +123,20 @@ export default function App() {
     if (!updateVersion || noticedVersions.current.has(updateVersion) || updateBlocked || !noticeSafe || modalHost !== document.body) return;
     noticedVersions.current.add(updateVersion);
     if (rememberUpdateNotice(updateVersion) && space !== 'settings') {
-      const dismiss = toast({ title: `Foliune ${updateVersion} 可更新`, status: 'info', duration: null,
-        action: { label: '立即更新', onClick: () => startFromNotice.current() } });
+      const dismiss = toast({ title: t(`Foliune ${updateVersion} 可更新`, `Foliune ${updateVersion} is available`), status: 'info', duration: null,
+        action: { label: t('立即更新', 'Update Now'), onClick: () => startFromNotice.current() } });
       updateNotice.current = { version: updateVersion, dismiss };
     }
   }, [appUpdate.status.type, updateVersion, updateBlocked, noticeSafe, modalHost, space, toast]);
 
   function startUpdate(source: 'notice' | 'settings' | 'retry') {
     if (appUpdate.status.type === 'checking') {
-      toast({ title: '正在检查更新，请稍候。', status: 'info' });
+      toast({ title: t('正在检查更新，请稍候。', 'Checking for updates…'), status: 'info' });
       return;
     }
     if (updateBlocked || (source === 'notice' && !noticeSafe) || isContextMenuTracking()
       || (source !== 'retry' && (appUpdate.dialogOpen || document.querySelector('dialog[open]')))) {
-      toast({ title: '请先完成当前编辑或图库操作。', status: 'info' });
+      toast({ title: t('请先完成当前编辑或图库操作。', 'Finish the current edit or library operation first.'), status: 'info' });
       return;
     }
     if (source === 'notice') settingsButton.current?.focus({ preventScroll: true });
@@ -146,7 +147,7 @@ export default function App() {
 
   function startCliInstall(fromNotice: boolean) {
     if (cliBlocked || (fromNotice && !noticeSafe) || isContextMenuTracking() || document.querySelector('dialog[open]')) {
-      toast({ title: '请先完成当前编辑或图库操作。', status: 'info' });
+      toast({ title: t('请先完成当前编辑或图库操作。', 'Finish the current edit or library operation first.'), status: 'info' });
       return;
     }
     if (fromNotice) settingsButton.current?.focus({ preventScroll: true });
@@ -234,16 +235,16 @@ export default function App() {
     void getCurrentWindow().onCloseRequested((event) => {
       if (!closeState.current.dirty && !closeState.current.busy) return;
       event.preventDefault();
-      if (closeState.current.busy) { toast({ title: '正在处理，请完成后再关闭窗口', status: 'info' }); return; }
+      if (closeState.current.busy) { toast({ title: t('正在处理，请完成后再关闭窗口', 'Wait for the current operation to finish before closing the window.'), status: 'info' }); return; }
       setPendingClose(true);
-    }).then((stop) => { if (disposed) stop(); else unlisten = stop; }).catch((cause) => { if (!disposed) setError(`关闭保护无法启用：${message(cause)}`); });
+    }).then((stop) => { if (disposed) stop(); else unlisten = stop; }).catch((cause) => { if (!disposed) setError(t(`关闭保护无法启用：${message(cause)}`, `Could not protect unsaved changes on close: ${message(cause)}`)); });
     return () => { disposed = true; unlisten?.(); };
   }, []);
   async function discardAndClose() {
     if (closeState.current.busy || closing) return;
     setClosing(true);
     try { await getCurrentWindow().destroy(); }
-    catch (cause) { setError(`关闭窗口失败：${message(cause)}`); setPendingClose(false); setClosing(false); }
+    catch (cause) { setError(t(`关闭窗口失败：${message(cause)}`, `Could not close the window: ${message(cause)}`)); setPendingClose(false); setClosing(false); }
   }
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
@@ -263,7 +264,7 @@ export default function App() {
     navigate('search');
   }
   function navigate(next: Space, target?: SearchTarget) {
-    if (workspaceBusy) { feedback('正在处理，请完成后再切换工作区'); return; }
+    if (workspaceBusy) { feedback(t('正在处理，请完成后再切换工作区', 'Wait for the current operation to finish before switching workspaces.')); return; }
     if (workspaceDirty && (next !== space || searchTarget || next === 'collection' || next === 'work')) { setPendingSpace({ space: next, target }); return; }
     changeSpace(next, target);
   }
@@ -287,21 +288,21 @@ export default function App() {
       }
     }
     try { saveWorkspaceVisibility(workspace, visible); }
-    catch { feedback('无法记住工作区显示设置', true); }
+    catch { feedback(t('无法记住工作区显示设置', 'Could not save workspace visibility.'), true); }
   }
   async function relinkPhoto(photo: Photo) {
     setRelinkBusy(true); setError('');
     try {
       const next = await api.relinkPhoto(photo.id, (path) => new Promise<boolean>((resolve) => setRelinkConfirmation({ path, resolve })));
       if (!next) return;
-      setSnapshot(next); toast({ title: '已重新定位照片，相簿与标注已保留' });
+      setSnapshot(next); toast({ title: t('已重新定位照片，相簿与标注已保留', 'Photo relinked. Albums and annotations were preserved.') });
     } catch (cause) { throw cause; }
     finally { setRelinkBusy(false); }
   }
   function confirmRelink(confirmed: boolean) { relinkConfirmation?.resolve(confirmed); setRelinkConfirmation(null); }
-  function openPlayer(ids: string[]) { const actual = ids.filter((id) => snapshot.photos.some((photo) => photo.id === id)); if (actual.length) setPlayingIds(actual); else feedback('没有可欣赏的照片', true); }
+  function openPlayer(ids: string[]) { const actual = ids.filter((id) => snapshot.photos.some((photo) => photo.id === id)); if (actual.length) setPlayingIds(actual); else feedback(t('没有可欣赏的照片', 'No photos to play.'), true); }
   function returnToSearch() {
-    if (relinkBusy) { feedback('正在处理，请完成后再切换工作区'); return; }
+    if (relinkBusy) { feedback(t('正在处理，请完成后再切换工作区', 'Wait for the current operation to finish before switching workspaces.')); return; }
     changeSpace('search');
   }
   function renderWorkspace(result?: SearchDetail) {
@@ -331,19 +332,19 @@ export default function App() {
         <span className="wordmark">Foliune<span>.</span></span>
       </div>
       <PrimaryNavigation items={navigationSpaces} value={space} durationMs={primaryNavigationDurationMs} onChange={navigate} />
-      <nav className="header-actions" aria-label="工具">
-        <button type="button" className={`icon-button ${space === 'search' ? 'is-active' : ''}`} aria-label="全局搜索 · ⌘K / Ctrl K" title="全局搜索 · ⌘K / Ctrl K" aria-current={space === 'search' ? 'page' : undefined} onClick={openSearch}><Search size={19} /></button>
+      <nav className="header-actions" aria-label={t('工具', 'Tools')}>
+        <button type="button" className={`icon-button ${space === 'search' ? 'is-active' : ''}`} aria-label={t('全局搜索 · ⌘K / Ctrl K', 'Search All · ⌘K / Ctrl K')} title={t('全局搜索 · ⌘K / Ctrl K', 'Search All · ⌘K / Ctrl K')} aria-current={space === 'search' ? 'page' : undefined} onClick={openSearch}><Search size={19} /></button>
         <button ref={settingsButton} type="button" className={`icon-button ${space === 'settings' ? 'is-active' : ''} ${updateVersion && space !== 'settings' ? 'settings-update-notice' : ''}`}
-          aria-label={updateVersion ? '设置，有可用更新' : '设置'} title={updateVersion ? '设置 · 有可用更新' : '设置'}
+          aria-label={updateVersion ? t('设置，有可用更新', 'Settings, update available') : t('设置', 'Settings')} title={updateVersion ? t('设置 · 有可用更新', 'Settings · Update available') : t('设置', 'Settings')}
           aria-current={space === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} /></button>
       </nav>
     </header>
-    {!api.isDesktop() && <div className="desktop-hint">当前为浏览器预览 · 请在 Foliune 桌面应用中导入和管理本地照片</div>}
-    {error && <div className="recovery-banner" role="alert"><span>{error}</span>{!ready && api.isDesktop() && <button type="button" onClick={() => void reload()}>重新读取</button>}</div>}
-    <main ref={mainRef} aria-busy={loading || workspaceBusy}>{loading ? <Busy /> : !ready ? <><WorkspaceHeader title={spaces.find((item) => item.id === space)?.label} /><EmptyState title={api.isDesktop() ? '暂时无法读取图库' : '请在桌面应用中使用'} description={api.isDesktop() ? '读取失败，请检查提示后重试。现有照片未作更改。' : '浏览器仅预览界面。本地照片、存储与编辑需在 Foliune 桌面应用中使用。'} action={api.isDesktop() ? <button type="button" className="button" onClick={() => void reload()}>重新读取</button> : undefined} /></> : searchTarget ? <SearchResultLoader key={`${searchTarget.space}:${searchTarget.id}`} target={searchTarget} onBack={returnToSearch}>{renderWorkspace}</SearchResultLoader> : renderWorkspace()}</main>
-    {relinkConfirmation && <Modal title="确认替换照片" onClose={() => confirmRelink(false)}><p className="replacement-copy">将用所选文件替换此照片；所有相簿和画册中的引用都会使用该文件</p><p className="replacement-path">{relinkConfirmation.path}</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => confirmRelink(false)}>取消</button><button type="button" className="button button-primary" onClick={() => confirmRelink(true)}>确认替换</button></div></Modal>}
-    {pendingClose && <Modal title="放弃修改并关闭窗口？" onClose={() => { if (!closing) setPendingClose(false); }}><p className="replacement-copy">当前修改尚未保存，关闭窗口将放弃这些修改。</p><div className="form-actions"><button type="button" className="button" autoFocus disabled={closing} onClick={() => setPendingClose(false)}>继续编辑</button><button type="button" className="button" disabled={closing || workspaceBusy} onClick={() => void discardAndClose()}>{closing ? '正在关闭…' : '放弃并关闭'}</button></div></Modal>}
-    {pendingSpace && <Modal title="离开未保存的修改？" onClose={() => setPendingSpace(null)}><p className="replacement-copy">当前修改尚未保存。离开将放弃这些修改。</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setPendingSpace(null)}>继续编辑</button><button type="button" className="button" disabled={workspaceBusy} onClick={() => { if (workspaceBusy) return; setBookDirty(false); setPhotoDirty(false); setModelDirty(false); setPlanningDirty(false); changeSpace(pendingSpace.space, pendingSpace.target); }}>放弃并离开</button></div></Modal>}
+    {!api.isDesktop() && <div className="desktop-hint">{t('当前为浏览器预览 · 请在 Foliune 桌面应用中导入和管理本地照片', 'Browser preview · Use the Foliune desktop app to import and manage local photos.')}</div>}
+    {error && <div className="recovery-banner" role="alert"><span>{error}</span>{!ready && api.isDesktop() && <button type="button" onClick={() => void reload()}>{t('重新读取', 'Reload')}</button>}</div>}
+    <main ref={mainRef} aria-busy={loading || workspaceBusy}>{loading ? <Busy /> : !ready ? <><WorkspaceHeader title={spaces.find((item) => item.id === space)?.label} />{space === 'settings' && api.isDesktop() && <LanguageSettings disabled={workspaceBusy} />}<EmptyState title={api.isDesktop() ? t('暂时无法读取图库', 'Could not load the library') : t('请在桌面应用中使用', 'Open Foliune on your desktop')} description={api.isDesktop() ? t('读取失败，请检查提示后重试。现有照片未作更改。', 'Check the error above and try again. Your photos are unchanged.') : t('浏览器仅预览界面。本地照片、存储与编辑需在 Foliune 桌面应用中使用。', 'Use the Foliune desktop app to access your local library and edit photos.')} action={api.isDesktop() ? <button type="button" className="button" onClick={() => void reload()}>{t('重新读取', 'Reload')}</button> : undefined} /></> : searchTarget ? <SearchResultLoader key={`${searchTarget.space}:${searchTarget.id}`} target={searchTarget} onBack={returnToSearch}>{renderWorkspace}</SearchResultLoader> : renderWorkspace()}</main>
+    {relinkConfirmation && <Modal title={t('确认替换照片', 'Replace this photo?')} onClose={() => confirmRelink(false)}><p className="replacement-copy">{t('将用所选文件替换此照片；所有相簿和画册中的引用都会使用该文件', 'This photo will use the selected file in every album and photo book that references it.')}</p><p className="replacement-path">{relinkConfirmation.path}</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => confirmRelink(false)}>{t('取消', 'Cancel')}</button><button type="button" className="button button-primary" onClick={() => confirmRelink(true)}>{t('确认替换', 'Replace Photo')}</button></div></Modal>}
+    {pendingClose && <Modal title={t('放弃修改并关闭窗口？', 'Discard changes and close the window?')} onClose={() => { if (!closing) setPendingClose(false); }}><p className="replacement-copy">{t('当前修改尚未保存，关闭窗口将放弃这些修改。', 'Closing the window will discard your unsaved changes.')}</p><div className="form-actions"><button type="button" className="button" autoFocus disabled={closing} onClick={() => setPendingClose(false)}>{t('继续编辑', 'Keep Editing')}</button><button type="button" className="button" disabled={closing || workspaceBusy} onClick={() => void discardAndClose()}>{closing ? t('正在关闭…', 'Closing…') : t('放弃并关闭', 'Discard and Close')}</button></div></Modal>}
+    {pendingSpace && <Modal title={t('离开未保存的修改？', 'Discard unsaved changes?')} onClose={() => setPendingSpace(null)}><p className="replacement-copy">{t('当前修改尚未保存。离开将放弃这些修改。', 'Leaving this workspace will discard your unsaved changes.')}</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setPendingSpace(null)}>{t('继续编辑', 'Keep Editing')}</button><button type="button" className="button" disabled={workspaceBusy} onClick={() => { if (workspaceBusy) return; setBookDirty(false); setPhotoDirty(false); setModelDirty(false); setPlanningDirty(false); changeSpace(pendingSpace.space, pendingSpace.target); }}>{t('放弃并离开', 'Discard and Leave')}</button></div></Modal>}
     {playingIds && <PhotoPlayer photos={snapshot.photos} photoIds={playingIds} onClose={() => setPlayingIds(null)} onRelink={relinkPhoto} onFeedback={feedback} />}
     {appUpdate.dialogOpen && (appUpdate.status.type === 'updating' || appUpdate.status.type === 'updateError') &&
       <AppUpdateDialog status={appUpdate.status} retryBlocked={updateBlocked} onRetry={() => startUpdate('retry')} onClose={appUpdate.closeDialog} />}
@@ -355,11 +356,11 @@ async function loadSearchDetail({ space, id }: SearchTarget): Promise<SearchDeta
   if (space === 'books') return { space, book: await getBook(id) };
   if (space === 'models') {
     const model = (await listModels()).find((item) => item.id === id);
-    if (!model) throw new Error('模特档案不存在');
+    if (!model) throw new Error(t('模特档案不存在', 'This model profile no longer exists.'));
     return { space, model };
   }
   const plan = (await listPlans()).find((item) => item.id === id);
-  if (!plan) throw new Error('拍摄策划不存在');
+  if (!plan) throw new Error(t('拍摄策划不存在', 'This shoot plan no longer exists.'));
   return { space, plan };
 }
 
@@ -381,8 +382,8 @@ function SearchResultLoader({ target, onBack, children }: { target: SearchTarget
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
   }, [detail, attempt]);
   return <div ref={root} className="search-result-detail">{detail ? children(detail) : <>
-    <WorkspaceHeader title={title}><button type="button" className="button" onClick={onBack}>返回搜索</button></WorkspaceHeader>
-    {error ? <div role="alert"><EmptyState title="暂时无法打开结果" description={error} action={<button type="button" className="button" onClick={() => { setError(''); setAttempt((value) => value + 1); }}>重新读取</button>} /></div> : <Busy label={`正在读取${title}`} />}
+    <WorkspaceHeader title={title}><button type="button" className="button" onClick={onBack}>{t('返回搜索', 'Back to Search')}</button></WorkspaceHeader>
+    {error ? <div role="alert"><EmptyState title={t('暂时无法打开结果', 'Could not open this result')} description={error} action={<button type="button" className="button" onClick={() => { setError(''); setAttempt((value) => value + 1); }}>{t('重新读取', 'Reload')}</button>} /></div> : <Busy label={t(`正在读取${title}`, `Loading ${title}…`)} />}
   </>}</div>;
 }
 

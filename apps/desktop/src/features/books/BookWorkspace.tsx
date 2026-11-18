@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Busy, EmptyState, Modal, WorkspaceHeader } from '../../components/ui';
 import * as api from '../../lib/book-api';
@@ -53,7 +54,7 @@ export function BookWorkspace({ snapshot, photos, onSnapshot, onPlay, onDirtyCha
         const fresh = current ? await api.getBook(current.id) : null;
         if (!active || editorDirty.current) return;
         setDetail((previous) => previous === detail ? fresh : previous);
-        if (!fresh) setError('画册已删除');
+        if (!fresh) setError(t('画册已删除', 'This photo book has been deleted'));
       }
       loadedExternalRevision.current = externalRevision;
     }).catch((cause: unknown) => { if (active) setError(message(cause)); });
@@ -105,8 +106,8 @@ export function BookWorkspace({ snapshot, photos, onSnapshot, onPlay, onDirtyCha
     const target = () => menuState.current.books.find((item) => item.id === book.id);
     const allowed = () => menuState.current.context === context && !menuState.current.blocked && !!target();
     void openMenu([
-      { id: 'rename', text: '重命名…', disabled: blocked, allowed, run: () => { const current = target(); if (current) { setRenaming(current); setName(current.title); } } },
-      { id: 'delete', text: '删除画册…', disabled: blocked, allowed, run: () => { const current = target(); if (current) setDeleting(current); } },
+      { id: 'rename', text: t('重命名…', 'Rename…'), disabled: blocked, allowed, run: () => { const current = target(); if (current) { setRenaming(current); setName(current.title); } } },
+      { id: 'delete', text: t('删除画册…', 'Delete Photo Book…'), disabled: blocked, allowed, run: () => { const current = target(); if (current) setDeleting(current); } },
     ], at, trigger);
   }
   function openBook(book: BookSummary) {
@@ -119,12 +120,12 @@ export function BookWorkspace({ snapshot, photos, onSnapshot, onPlay, onDirtyCha
   }
   if (detail) return <BookEditor snapshot={snapshot} onSnapshot={onSnapshot} detail={detail} photos={photos} onChange={changed} onPlay={onPlay} onDirtyChange={reportEditorDirty} onBusyChange={onBusyChange} onRelink={onRelink}
     fromSearch={!!onBackToSearch} onBack={onBackToSearch ?? (() => { setDetail(null); void reload(); })} />;
-  return <section className="book-workspace" aria-label="画册">
-    <WorkspaceHeader title="画册" count={`${books.length} 本画册`}>
-      <button type="button" className="button" disabled={busy} onClick={() => setCreating(true)}>创建画册</button>
+  return <section className="book-workspace" aria-label={t('画册', 'Photo Book')}>
+    <WorkspaceHeader title={t('画册', 'Books')} count={t(`${books.length} 本画册`, `${books.length} ${books.length === 1 ? 'book' : 'books'}`)}>
+      <button type="button" className="button" disabled={busy} onClick={() => setCreating(true)}>{t('创建画册', 'Create Photo Book')}</button>
     </WorkspaceHeader>
-    {error && <div className="book-error" role="alert"><span>{error}</span><button type="button" className="button" onClick={() => void reload()}>重新读取</button></div>}
-    {loading ? <Busy label="正在读取书架" /> : !books.length ? <EmptyState title="还没有画册" action={<button type="button" className="button" onClick={() => setCreating(true)}>创建第一本画册</button>} /> : <div className="book-shelf">{books.map((book) => {
+    {error && <div className="book-error" role="alert"><span>{error}</span><button type="button" className="button" onClick={() => void reload()}>{t('重新读取', 'Reload')}</button></div>}
+    {loading ? <Busy label={t('正在读取书架', 'Loading bookshelf')} /> : !books.length ? <EmptyState title={t('还没有画册', 'No Photo Books Yet')} action={<button type="button" className="button" onClick={() => setCreating(true)}>{t('创建第一本画册', 'Create Your First Photo Book')}</button>} /> : <div className="book-shelf">{books.map((book) => {
       const cover = book.coverPhotoId ? photoMap.get(book.coverPhotoId) : undefined;
       return <article className="book-card" key={book.id}
       onClick={() => openBook(book)}
@@ -143,8 +144,8 @@ export function BookWorkspace({ snapshot, photos, onSnapshot, onPlay, onDirtyCha
     </article>;
     })}</div>}
     {creating && <BookCreator snapshot={snapshot} onSnapshot={onSnapshot} onBusyChange={setSourceBusy} photos={photos} busy={busy} onClose={() => setCreating(false)} onCreate={create} />}
-    {renaming && <Modal title="重命名画册" onClose={() => setRenaming(null)}><form onSubmit={(event) => void rename(event)}><label>画册名称<input autoFocus value={name} maxLength={200} required onChange={(e) => setName(e.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions"><button className="button" type="button" onClick={() => setRenaming(null)}>取消</button><button className="button button-primary" type="submit" disabled={busy}>保存</button></div></form></Modal>}
-    {deleting && <Modal title="删除画册？" onClose={() => { if (!busy) setDeleting(null); }}><p>将删除《{deleting.title}》。仅在此画册使用的照片将从全局搜索和图库选片中移除，照片文件会保留。</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions"><button type="button" className="button" autoFocus disabled={busy} onClick={() => setDeleting(null)}>取消</button><button type="button" className="button button-primary" disabled={busy} onClick={() => void remove()}>确认删除</button></div></Modal>}
+    {renaming && <Modal title={t('重命名画册', 'Rename Photo Book')} onClose={() => setRenaming(null)}><form onSubmit={(event) => void rename(event)}><label>{t('画册名称', 'Book Title')}<input autoFocus value={name} maxLength={200} required onChange={(e) => setName(e.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions"><button className="button" type="button" onClick={() => setRenaming(null)}>{t('取消', 'Cancel')}</button><button className="button button-primary" type="submit" disabled={busy}>{t('保存', 'Save')}</button></div></form></Modal>}
+    {deleting && <Modal title={t('删除画册？', 'Delete Photo Book?')} onClose={() => { if (!busy) setDeleting(null); }}><p>{t(`将删除《${deleting.title}》。仅在此画册使用的照片将从全局搜索和图库选片中移除，照片文件会保留。`, `Delete “${deleting.title}”? Photos used only in this book will be removed from global search and the photo picker. The photo files will be kept.`)}</p>{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions"><button type="button" className="button" autoFocus disabled={busy} onClick={() => setDeleting(null)}>{t('取消', 'Cancel')}</button><button type="button" className="button button-primary" disabled={busy} onClick={() => void remove()}>{t('确认删除', 'Confirm Delete')}</button></div></Modal>}
   </section>;
 }
 function message(cause: unknown) { return cause instanceof Error ? cause.message : String(cause); }

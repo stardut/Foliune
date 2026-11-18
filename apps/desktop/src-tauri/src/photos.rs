@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use crate::{
     db::{snapshot, Store},
     groups, local_photo,
@@ -7,10 +8,10 @@ use crate::{
 use exif::{In, Tag};
 use image::{imageops::FilterType, GenericImageView, ImageFormat};
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     io::{BufReader, Seek},
     path::{Path, PathBuf},
@@ -28,6 +29,14 @@ pub struct ImportResult {
 pub struct ImportFailure {
     pub path: String,
     pub message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PhotoRegionBaseline {
+    pub id: String,
+    pub location: String,
+    pub location_region_id: String,
 }
 
 #[cfg(test)]
@@ -60,7 +69,11 @@ fn import_files(
     let mut conn = store.connection.lock().map_err(|e| e.to_string())?;
     if let Some(id) = group_id {
         if groups::group_library(&conn, id)? != library {
-            return Err("目标分组不属于该图库".into());
+            return Err(tr(
+                "目标分组不属于该图库",
+                "The selected album belongs to a different library section",
+            )
+            .into());
         }
         // 满额操作必须在任何文件与数据库变化发生之前拒绝。
         groups::ensure_capacity(&conn, id, paths.len())?;
@@ -103,7 +116,7 @@ pub(crate) const THUMBNAIL_MAX_EDGE: u32 = 960;
 pub(crate) fn save_thumbnail(image: &image::DynamicImage, path: &Path) -> Result<(), String> {
     thumbnail_image(image)
         .save_with_format(path, ImageFormat::Jpeg)
-        .map_err(|e| format!("生成缩略图失败：{e}"))
+        .map_err(|e| display_format!("生成缩略图失败：{e}", "Could not create the thumbnail: {e}"))
 }
 
 pub(crate) fn thumbnail_image(image: &image::DynamicImage) -> image::RgbImage {
@@ -143,7 +156,11 @@ pub(crate) fn supported_extension(path: &Path) -> bool {
 
 fn prepare_image(source: &Path) -> Result<PreparedImage, String> {
     if !source.is_file() {
-        return Err("照片文件不存在或不是普通文件".into());
+        return Err(tr(
+            "照片文件不存在或不是普通文件",
+            "The photo is missing or is not a regular file",
+        )
+        .into());
     }
     let file = fs::File::open(source).map_err(|e| e.to_string())?;
     prepare_open_image(source, file)
@@ -153,7 +170,7 @@ pub(crate) fn prepare_open_image(source: &Path, file: fs::File) -> Result<Prepar
     let original_name = source
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or("文件名称无效")?
+        .ok_or(tr("文件名称无效", "Invalid filename"))?
         .to_string();
     let input = inspect_open_image(source, file)?;
     let extension = source
@@ -179,7 +196,11 @@ pub(crate) struct OpenImage {
 
 pub(crate) fn inspect_open_image(source: &Path, file: fs::File) -> Result<OpenImage, String> {
     if !supported_extension(source) {
-        return Err("目前仅支持 JPEG、PNG、WebP，不支持 RAW 或 HEIC".into());
+        return Err(tr(
+            "目前仅支持 JPEG、PNG、WebP，不支持 RAW 或 HEIC",
+            "Supported formats are JPEG, PNG, and WebP. RAW and HEIC are unavailable.",
+        )
+        .into());
     }
     let mut buffer = BufReader::new(file);
     let exif = read_exif(&mut buffer).ok();
@@ -191,7 +212,11 @@ pub(crate) fn inspect_open_image(source: &Path, file: fs::File) -> Result<OpenIm
         reader.format(),
         Some(ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::WebP)
     ) {
-        return Err("文件内容不是受支持的照片格式".into());
+        return Err(tr(
+            "文件内容不是受支持的照片格式",
+            "The file does not contain a supported photo format",
+        )
+        .into());
     }
     Ok(OpenImage { reader, exif })
 }
@@ -210,7 +235,7 @@ impl OpenImage {
         let image = self
             .reader
             .decode()
-            .map_err(|e| format!("照片解码失败：{e}"))?;
+            .map_err(|e| display_format!("照片解码失败：{e}", "Could not decode the photo: {e}"))?;
         Ok(apply_orientation(image, orientation))
     }
 
@@ -236,7 +261,11 @@ impl OpenImage {
                     None
                 }
             });
-        let location = self.exif.as_ref().and_then(gps_location).unwrap_or_default();
+        let location = self
+            .exif
+            .as_ref()
+            .and_then(gps_location)
+            .unwrap_or_default();
         (captured_at, location)
     }
 }
@@ -280,7 +309,11 @@ impl PreparedImport {
             let signature = local_photo::file_signature(&file)?;
             let decoded = prepare_open_image(source, file)?;
             if local_photo::signature(&locator)? != signature {
-                return Err("本地照片在读取期间发生变化，请重新选择".into());
+                return Err(tr(
+                    "本地照片在读取期间发生变化，请重新选择",
+                    "The local photo changed while it was being read. Select it again.",
+                )
+                .into());
             }
             return Ok(Self {
                 decoded,
@@ -309,7 +342,9 @@ impl PreparedImport {
     ) -> Result<(), String> {
         let result = (|| {
             if let Some(path) = &self.managed_path {
-                fs::copy(source, path).map_err(|e| format!("复制原件失败：{e}"))?;
+                fs::copy(source, path).map_err(|e| {
+                    display_format!("复制原件失败：{e}", "Could not copy the original: {e}")
+                })?;
             }
             save_thumbnail(&self.decoded.image, thumbnail)?;
             save_record()
@@ -317,7 +352,12 @@ impl PreparedImport {
         if let Err(message) = &result {
             for path in self.managed_path.as_deref().into_iter().chain([thumbnail]) {
                 if path.exists() {
-                    fs::remove_file(path).map_err(|e| format!("{message}；清理失败：{e}"))?;
+                    fs::remove_file(path).map_err(|e| {
+                        display_format!(
+                            "{message}；清理失败：{e}",
+                            "{message}. Could not clean up: {e}"
+                        )
+                    })?;
                 }
             }
         }
@@ -380,12 +420,20 @@ pub fn relink(store: &Store, photo_id: &str, source: &Path) -> Result<Snapshot, 
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or("照片不存在")?;
+        .ok_or(tr("照片不存在", "Photo not found"))?;
     if crate::work_directory::is_locator(&locator) {
-        return Err("此照片引用作品目录，请在图库设置中重新定位作品目录".into());
+        return Err(tr(
+            "此照片引用作品目录，请在图库设置中重新定位作品目录",
+            "This photo uses the work folder. Relocate the work folder in Settings.",
+        )
+        .into());
     }
     if local_photo::is_locator(&locator) {
-        return Err("本地照片使用导入时的文件路径，请将原件放回原处".into());
+        return Err(tr(
+            "本地照片使用导入时的文件路径，请将原件放回原处",
+            "This photo uses its original path. Return the source file to that location.",
+        )
+        .into());
     }
     let root = crate::db::library_root(&conn)?;
     let revision = uuid::Uuid::new_v4().to_string();
@@ -445,29 +493,108 @@ pub(crate) fn update_from_baseline(
     expected: Value,
 ) -> Result<Snapshot, String> {
     crate::db::write(conn, |conn| {
-        let fields = patch.as_object().ok_or("无效照片修改")?;
-        let expected = expected.as_object().ok_or("无效照片修改基准")?;
+        let fields = patch
+            .as_object()
+            .ok_or(tr("无效照片修改", "Invalid photo change"))?;
+        let expected = expected.as_object().ok_or(tr(
+            "无效照片修改基准",
+            "Invalid original value for the photo change",
+        ))?;
         let photo = conn
             .query_row(
                 &format!(
-                    "{} WHERE p.id=?1 AND p.hidden_after_album_delete=0",
-                    crate::db::PHOTO_SELECT
+                    "SELECT {},p.location_region_id FROM photos p
+                     WHERE p.id=?1 AND p.hidden_after_album_delete=0",
+                    crate::db::PHOTO_FIELDS
                 ),
                 [id],
                 crate::db::photo_from_row,
             )
             .optional()
             .map_err(|error| error.to_string())?
-            .ok_or("照片不存在")?;
+            .ok_or(tr("照片不存在", "Photo not found"))?;
         let current = serde_json::to_value(photo).map_err(|error| error.to_string())?;
         for key in fields.keys() {
-            let baseline = expected.get(key).ok_or("无效照片修改基准")?;
+            let baseline = expected.get(key).ok_or(tr(
+                "无效照片修改基准",
+                "Invalid original value for the photo change",
+            ))?;
             if current.get(key) != Some(baseline) {
-                return Err(crate::db::REVISION_CONFLICT.into());
+                return Err(crate::db::revision_conflict().into());
             }
         }
         apply_patch(conn, id, patch)?;
         snapshot(conn)
+    })
+}
+
+pub(crate) fn set_location_regions(
+    conn: &mut Connection,
+    photos: &[PhotoRegionBaseline],
+    region_id: &str,
+    group_id: Option<&str>,
+) -> Result<Snapshot, String> {
+    if !valid_location_region_id(region_id) {
+        return Err(tr("请选择有效的拍摄地区", "Choose a valid shooting region").into());
+    }
+    let mut ids = HashSet::new();
+    if photos.is_empty()
+        || photos
+            .iter()
+            .any(|photo| photo.id.trim().is_empty() || !ids.insert(photo.id.as_str()))
+    {
+        return Err(tr("请选择有效的作品照片", "Select valid work photos").into());
+    }
+    crate::db::write(conn, |conn| {
+        let mut update = conn
+            .prepare(
+                "UPDATE photos AS p SET location_region_id=?1
+                 WHERE p.id=?2 AND p.library='work' AND p.hidden_after_album_delete=0
+                   AND p.location=?3 AND p.location_region_id=?4
+                   AND (?5 IS NULL OR EXISTS (
+                     SELECT 1 FROM memberships m JOIN groups g ON g.id=m.group_id
+                     WHERE m.group_id=?5 AND m.photo_id=p.id AND m.status='active' AND g.library='work'
+                   ))",
+            )
+            .map_err(|error| error.to_string())?;
+        for photo in photos {
+            if has_gps_location(&photo.location) {
+                return Err(tr(
+                    "带拍摄坐标的照片不能批量设置拍摄地区",
+                    "Photos with GPS coordinates cannot be assigned a shooting region in bulk",
+                )
+                .into());
+            }
+            let changed = update
+                .execute(params![
+                    region_id,
+                    photo.id,
+                    photo.location,
+                    photo.location_region_id,
+                    group_id,
+                ])
+                .map_err(|error| error.to_string())?;
+            if changed != 1 {
+                return Err(crate::db::revision_conflict().into());
+            }
+        }
+        snapshot(conn)
+    })
+}
+
+// Match the desktop map's signed decimal latitude and longitude format.
+fn has_gps_location(location: &str) -> bool {
+    fn in_range(value: &str, limit: f64) -> bool {
+        let value = value.trim_matches(|character: char| {
+            character == '\u{feff}' || (character != '\u{85}' && character.is_whitespace())
+        });
+        let unsigned = value.strip_prefix(['+', '-']).unwrap_or(value);
+        !unsigned.ends_with('.')
+            && unsigned.bytes().all(|byte| byte.is_ascii_digit() || byte == b'.')
+            && value.parse::<f64>().is_ok_and(|number| number.abs() <= limit)
+    }
+    location.split_once(',').is_some_and(|(lat, lon)| {
+        in_range(lat, 90.0) && in_range(lon, 180.0)
     })
 }
 
@@ -480,9 +607,11 @@ pub(crate) fn apply_patch(conn: &Connection, id: &str, patch: Value) -> Result<(
         )
         .map_err(|e| e.to_string())?;
     if !exists {
-        return Err("照片不存在".into());
+        return Err(tr("照片不存在", "Photo not found").into());
     }
-    let object = patch.as_object().ok_or("无效照片修改")?;
+    let object = patch
+        .as_object()
+        .ok_or(tr("无效照片修改", "Invalid photo change"))?;
     for (key, value) in object {
         let column = match key.as_str() {
             "title" => "title",
@@ -490,14 +619,22 @@ pub(crate) fn apply_patch(conn: &Connection, id: &str, patch: Value) -> Result<(
             "source" => "source",
             "capturedAt" => "captured_at",
             "location" => "location",
+            "locationRegionId" => "location_region_id",
             "project" => "project",
             "tags" => "tags",
             "regions" => "regions",
-            _ => return Err(format!("不支持修改照片字段：{key}")),
+            _ => {
+                return Err(display_format!(
+                    "不支持修改照片字段：{key}",
+                    "This photo field cannot be changed: {key}"
+                ))
+            }
         };
         let stored: Option<String> = if key == "regions" {
             let regions: Vec<crate::models::PhotoRegion> = serde_json::from_value(value.clone())
-                .map_err(|e| format!("区域标注格式无效：{e}"))?;
+                .map_err(|e| {
+                    display_format!("区域标注格式无效：{e}", "Invalid photo region format: {e}")
+                })?;
             let mut ids = std::collections::HashSet::new();
             for region in &regions {
                 if region.id.trim().is_empty()
@@ -513,24 +650,42 @@ pub(crate) fn apply_patch(conn: &Connection, id: &str, patch: Value) -> Result<(
                     || region.x + region.width > 1.0
                     || region.y + region.height > 1.0
                 {
-                    return Err("区域标注应包含唯一 ID、说明和照片范围内的相对坐标".into());
+                    return Err(tr("区域标注应包含唯一 ID、说明和照片范围内的相对坐标", "Photo regions need a unique ID, description, and coordinates within the photo").into());
                 }
             }
             Some(serde_json::to_string(&regions).map_err(|e| e.to_string())?)
         } else if key == "tags" {
-            let tags = value.as_array().ok_or("标签必须是文本数组")?;
+            let tags = value.as_array().ok_or(tr(
+                "标签必须是文本数组",
+                "Tags must be a list of text values",
+            ))?;
             let mut normalized = Vec::new();
             for tag in tags {
-                let tag = tag.as_str().ok_or("标签必须是文本")?.trim();
+                let tag = tag
+                    .as_str()
+                    .ok_or(tr("标签必须是文本", "Tags must be text"))?
+                    .trim();
                 if !tag.is_empty() && !normalized.contains(&tag) {
                     normalized.push(tag);
                 }
             }
             Some(serde_json::to_string(&normalized).map_err(|e| e.to_string())?)
+        } else if key == "locationRegionId" {
+            let region = value
+                .as_str()
+                .filter(|region| region.is_empty() || valid_location_region_id(region))
+                .ok_or(tr(
+                    "照片的拍摄地区标识无效",
+                    "The photo’s shooting region ID is invalid",
+                ))?;
+            Some(region.to_owned())
         } else if key == "capturedAt" && value.is_null() {
             None
         } else {
-            let text = value.as_str().ok_or("照片字段必须是文本")?.trim();
+            let text = value
+                .as_str()
+                .ok_or(tr("照片字段必须是文本", "Photo fields must be text"))?
+                .trim();
             if key == "title" {
                 models::name(text)?;
             }
@@ -540,7 +695,11 @@ pub(crate) fn apply_patch(conn: &Connection, id: &str, patch: Value) -> Result<(
                 && chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S").is_err()
                 && chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d").is_err()
             {
-                return Err("拍摄时间请使用有效的日期或 ISO 时间".into());
+                return Err(tr(
+                    "拍摄时间请使用有效的日期或 ISO 时间",
+                    "Enter a valid date or ISO timestamp for the capture time",
+                )
+                .into());
             }
             if key == "capturedAt" && text.is_empty() {
                 None
@@ -555,4 +714,19 @@ pub(crate) fn apply_patch(conn: &Connection, id: &str, patch: Value) -> Result<(
         .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+fn valid_location_region_id(id: &str) -> bool {
+    // The atlas uses a three-letter country code and a subdivision code or name.
+    // The picker checks membership in the bundled atlas, which is kept in the frontend.
+    id.len() <= 128
+        && id.split_once(':').is_some_and(|(country, region)| {
+            country.len() == 3
+                && country.bytes().all(|byte| byte.is_ascii_uppercase())
+                && region.chars().next().is_some_and(char::is_alphanumeric)
+                && region == region.trim()
+                && region.chars().all(|character| {
+                    character.is_alphanumeric() || " -.+?'".contains(character)
+                })
+        })
 }

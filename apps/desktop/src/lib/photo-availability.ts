@@ -1,3 +1,4 @@
+import { t } from './i18n.ts';
 import type { Photo } from './types';
 
 const LOCAL_PHOTO_PREFIX = 'local-photo:';
@@ -23,7 +24,7 @@ export function originalReadUrl(photo: Photo, session: string) {
 }
 
 export function photoUnavailableLabel(photo?: Photo) {
-  if (photo?.availability === 'offline') return '作品目录离线';
-  if (isLocalPhoto(photo)) return '找不到源文件';
-  return photo?.originalAvailable ? '图片无法读取' : '原图文件缺失';
+  if (photo?.availability === 'offline') return t('作品目录离线', 'Work folder is offline');
+  if (isLocalPhoto(photo)) return t('找不到源文件', 'Source file not found');
+  return photo?.originalAvailable ? t('图片无法读取', 'Could not read the image') : t('原图文件缺失', 'Original file is missing');
 }

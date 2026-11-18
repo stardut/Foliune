@@ -1,3 +1,4 @@
+use crate::locale::tr;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +22,8 @@ pub struct Photo {
     pub source: String,
     pub captured_at: Option<String>,
     pub location: String,
+    #[serde(default)]
+    pub location_region_id: String,
     pub project: String,
     pub imported_at: String,
 }
@@ -91,14 +94,14 @@ pub struct GroupInput {
 pub fn library(value: &str) -> Result<(), String> {
     match value {
         "collection" | "work" => Ok(()),
-        _ => Err("未知图库类型".into()),
+        _ => Err(tr("未知图库类型", "Unknown library section").into()),
     }
 }
 
 pub fn name(value: &str) -> Result<&str, String> {
     let value = value.trim();
     if value.is_empty() || value.chars().count() > 200 {
-        Err("名称应为 1–200 个字符".into())
+        Err(tr("名称应为 1–200 个字符", "The name must be 1–200 characters").into())
     } else {
         Ok(value)
     }

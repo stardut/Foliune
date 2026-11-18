@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n.ts';
 import { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { animate, useMotionValue } from 'motion/react';
 
@@ -156,7 +157,7 @@ export function PrimaryNavigation<Value extends string>({ items, value, duration
     };
   }, [items, value, selectedIndex, durationMs, reducedMotion, leftEdge, rightEdge]);
 
-  return <nav ref={navRef} className="primary-navigation" aria-label="工作区">
+  return <nav ref={navRef} className="primary-navigation" aria-label={t('工作区', 'Workspaces')}>
     {selectedIndex >= 0 && !reducedMotion && <span ref={pillRef} className="navigation-liquid-pill" aria-hidden="true" />}
     {items.map((item) => <button type="button" key={item.id} className={value === item.id ? 'current' : ''} aria-current={value === item.id ? 'page' : undefined} onClick={() => onChange(item.id)}>
       <span>{item.label}</span>

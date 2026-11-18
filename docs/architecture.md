@@ -42,6 +42,7 @@ macOS 的 `context_menu.rs` / `context_menu_macos.m` 只在主窗口保存原始
 - `src/lib/api.ts`：Tauri IPC、系统文件选择、受限 asset URL 转换。非桌面环境明确报错。
 - `src/features`、`src/components`：界面及交互，不直接读写数据库或文件系统。
 - `src-tauri/src/db.rs`：SQLite 建表、快照读取和持久连接。
+- 照片的手选拍摄地区通过既有照片更新与基准校验写入 `photos.location_region_id`。照片原始 `location` 保留经纬度或文字说明。SQLite 新旧库及备份恢复共用照片迁移，地图读取地区 ID 与本机行政区目录匹配。
 - `src-tauri/src/photos.rs`：格式验证、解码、EXIF、管理副本、缩略图和照片信息。
 - `src-tauri/src/photo_metadata.rs`：大图信息浮层按照片 ID 从当前图库查询管理副本，锁外只读 EXIF 和文件信息；与导入共用 EXIF 解析入口。拍摄时间与地点继续由图库快照提供。
 - `src-tauri/src/groups.rs`：分组 CRUD、容量检查及成员关系。

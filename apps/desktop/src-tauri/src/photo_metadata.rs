@@ -1,4 +1,5 @@
 use crate::db::{library_root, Store};
+use crate::locale::{display_format, tr};
 use exif::{In, Tag, Value};
 use image::ImageFormat;
 use rusqlite::OptionalExtension;
@@ -66,16 +67,23 @@ fn source(
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or("照片不存在")?;
+        .ok_or(tr("照片不存在", "Photo not found"))?;
     let original = crate::work_directory::original(&conn, photo_id, &path)?;
     Ok((library_root(&conn)?, path, original))
 }
 
 fn original_error(error: io::Error) -> String {
     if error.kind() == io::ErrorKind::NotFound {
-        "照片原件缺失，请重新定位照片".into()
+        tr(
+            "照片原件缺失，请重新定位照片",
+            "The original photo is missing. Relocate it and try again.",
+        )
+        .into()
     } else {
-        format!("读取照片原件失败：{error}")
+        display_format!(
+            "读取照片原件失败：{error}",
+            "Could not read the original photo: {error}"
+        )
     }
 }
 
@@ -86,7 +94,13 @@ fn read_original(file: File) -> Result<PhotoMetadata, String> {
         Ok(ImageFormat::Jpeg) => "JPEG",
         Ok(ImageFormat::Png) => "PNG",
         Ok(ImageFormat::WebP) => "WebP",
-        _ => return Err("照片原件格式无法识别".into()),
+        _ => {
+            return Err(tr(
+                "照片原件格式无法识别",
+                "Could not identify the original photo format",
+            )
+            .into())
+        }
     };
     let (exif, exif_read_failed) = match read_exif(&mut reader) {
         Ok(data) => (Some(data), false),
@@ -168,14 +182,17 @@ fn read(
     photo_id: &str,
     expected_original_path: &str,
 ) -> Result<PhotoMetadata, String> {
-    const STALE_SOURCE: &str = "图库或照片原件已更新，请重新打开照片信息";
+    let stale_source = tr(
+        "图库或照片原件已更新，请重新打开照片信息",
+        "The library or original photo changed. Reopen the photo information.",
+    );
     let (root, path, original) = source(store, photo_id)?;
     if path != expected_original_path {
-        return Err(STALE_SOURCE.into());
+        return Err(stale_source.into());
     }
     let details = read_original(original.open()?)?;
     if source(store, photo_id)? != (root, path, original) {
-        return Err(STALE_SOURCE.into());
+        return Err(stale_source.into());
     }
     Ok(details)
 }

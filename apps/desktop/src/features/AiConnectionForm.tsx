@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n';
 import { useState, type FormEvent } from 'react';
 import { KeyRound } from 'lucide-react';
 import { DropdownSelect } from '../components/DropdownSelect';
@@ -43,15 +44,15 @@ export function AiConnectionForm({ settings, disabled, onSave, onRemove }: {
   }
   return <form className="provider-form" onSubmit={(event) => void save(event)} aria-busy={operation !== null}>
     <div className="provider-fields">
-      <DropdownSelect label="提供方" field value={provider} options={providerOptions} disabled={locked} onChange={selectProvider} />
-      <label>模型<input required maxLength={200} value={model} disabled={locked} onChange={(event) => setModel(event.target.value)} /></label>
-      <label className="provider-key">API Key<input type="password" autoComplete="off" spellCheck={false} required={!hasSavedKey} value={key} disabled={locked} onChange={(event) => setKey(event.target.value)} placeholder={hasSavedKey ? '留空保留已保存的 Key' : '输入此提供方的 API Key'} /></label>
+      <DropdownSelect label={t('提供方', 'Provider')} field value={provider} options={providerOptions} disabled={locked} onChange={selectProvider} />
+      <label>{t('模型', 'Model')}<input required maxLength={200} value={model} disabled={locked} onChange={(event) => setModel(event.target.value)} /></label>
+      <label className="provider-key">API Key<input type="password" autoComplete="off" spellCheck={false} required={!hasSavedKey} value={key} disabled={locked} onChange={(event) => setKey(event.target.value)} placeholder={hasSavedKey ? t('留空保留已保存的 Key', 'Leave blank to keep the saved key') : t('输入此提供方的 API Key', 'Enter this provider’s API key')} /></label>
     </div>
     <div className="provider-actions">
-      <label><input type="checkbox" checked={!textOnly && vision} disabled={locked || textOnly} onChange={(event) => setVision(event.target.checked)} />图像输入</label>
-      {hasSavedKey && <span className="provider-key-state"><KeyRound size={11} />Key 已保存</span>}
-      {saved?.provider === provider && <button type="button" className="text-button" disabled={locked} onClick={() => void remove()} title="移除当前接入及其系统 API Key">{operation === 'remove' ? '移除中…' : '移除接入与 Key'}</button>}
-      <button className="button button-primary" type="submit" disabled={locked}>{operation === 'save' ? '保存中…' : '保存'}</button>
+      <label><input type="checkbox" checked={!textOnly && vision} disabled={locked || textOnly} onChange={(event) => setVision(event.target.checked)} />{t('图像输入', 'Image input')}</label>
+      {hasSavedKey && <span className="provider-key-state"><KeyRound size={11} />{t('Key 已保存', 'Key saved')}</span>}
+      {saved?.provider === provider && <button type="button" className="text-button" disabled={locked} onClick={() => void remove()} title={t('移除当前接入及其系统 API Key', 'Remove this connection and its stored API key')}>{operation === 'remove' ? t('移除中…', 'Removing…') : t('移除接入与 Key', 'Remove Connection and Key')}</button>}
+      <button className="button button-primary" type="submit" disabled={locked}>{operation === 'save' ? t('保存中…', 'Saving…') : t('保存', 'Save')}</button>
     </div>
     {error && <p className="form-error" role="alert">{error}</p>}
   </form>;

@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use rusqlite::{Connection, OpenFlags};
 use std::{
     collections::HashSet,
@@ -17,7 +18,12 @@ pub(super) fn record_publication(staging: &Path, names: &[String]) -> Result<(),
     let manifest = serde_json::to_vec(names).map_err(|e| e.to_string())?;
     fs::write(&temporary, manifest)
         .and_then(|()| fs::rename(temporary, staging.join(PUBLICATION)))
-        .map_err(|e| format!("无法记录作品缩略图发布清单：{e}"))
+        .map_err(|e| {
+            display_format!(
+                "无法记录作品缩略图发布清单：{e}",
+                "Could not record the work thumbnail manifest: {e}"
+            )
+        })
 }
 
 pub(super) fn clean_abandoned_staging(library: &Path) -> Result<(), String> {
@@ -52,7 +58,11 @@ pub(super) fn clean_abandoned_staging(library: &Path) -> Result<(), String> {
                 .strip_suffix(".jpg")
                 .is_some_and(|id| Uuid::parse_str(id).is_ok())
         }) {
-            return Err("作品缩略图发布清单包含无效文件名".into());
+            return Err(tr(
+                "作品缩略图发布清单包含无效文件名",
+                "The work thumbnail manifest contains an invalid filename",
+            )
+            .into());
         }
         let conn = Connection::open_with_flags(
             library.join("library.sqlite"),
@@ -73,10 +83,20 @@ pub(super) fn clean_abandoned_staging(library: &Path) -> Result<(), String> {
                 match fs::remove_file(thumbnail) {
                     Ok(()) => {}
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(format!("无法清理未提交的作品缩略图：{error}")),
+                    Err(error) => {
+                        return Err(display_format!(
+                            "无法清理未提交的作品缩略图：{error}",
+                            "Could not clean up uncommitted work thumbnails: {error}"
+                        ))
+                    }
                 }
             }
         }
     }
-    fs::remove_dir_all(directory).map_err(|e| format!("无法清理作品目录同步暂存：{e}"))
+    fs::remove_dir_all(directory).map_err(|e| {
+        display_format!(
+            "无法清理作品目录同步暂存：{e}",
+            "Could not clean up temporary work folder sync files: {e}"
+        )
+    })
 }

@@ -1,3 +1,4 @@
+use crate::locale::{display_format, tr};
 use crate::{
     content_refs,
     db::snapshot,
@@ -31,7 +32,11 @@ pub(crate) fn insert(conn: &Connection, input: GroupInput) -> Result<String, Str
     models::library(&input.library)?;
     let name = models::name(&input.name)?;
     if input.capacity == Some(0) {
-        return Err("分组容量必须大于 0".into());
+        return Err(tr(
+            "分组容量必须大于 0",
+            "Album capacity must be greater than zero",
+        )
+        .into());
     }
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute("INSERT INTO groups(id,library,name,description,capacity,created_at) VALUES(?1,?2,?3,?4,?5,?6)",
@@ -43,7 +48,7 @@ pub fn group_library(conn: &Connection, id: &str) -> Result<String, String> {
     conn.query_row("SELECT library FROM groups WHERE id=?1", [id], |r| r.get(0))
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "分组不存在".into())
+        .ok_or_else(|| tr("分组不存在", "Album not found").into())
 }
 
 pub(crate) fn active_count(conn: &Connection, id: &str) -> Result<u32, String> {
@@ -63,7 +68,7 @@ pub fn ensure_capacity(conn: &Connection, id: &str, additional: usize) -> Result
         .map_err(|e| e.to_string())?;
     let active = active_count(conn, id)?;
     if capacity.is_some_and(|cap| active as usize + additional > cap as usize) {
-        return Err("分组容量不足，请先调整容量或废弃组内照片；此次操作尚未保存。".into());
+        return Err(tr("分组容量不足，请先调整容量或废弃组内照片；此次操作尚未保存。", "The album is full. Increase its capacity or move album photos to Rejects. Your changes were not saved.").into());
     }
     Ok(())
 }
@@ -84,9 +89,9 @@ pub(crate) fn save_cover(
     expected: Option<&AlbumCover>,
 ) -> Result<Snapshot, String> {
     crate::db::write(conn, |conn| {
-        let group = crate::db::find_group(conn, id)?.ok_or("分组不存在")?;
+        let group = crate::db::find_group(conn, id)?.ok_or(tr("分组不存在", "Album not found"))?;
         if !crate::album_cover::matches_cover(group.cover.as_ref(), expected) {
-            return Err(crate::db::REVISION_CONFLICT.into());
+            return Err(crate::db::revision_conflict().into());
         }
         update_cover(conn, id, cover)?;
         snapshot(conn)
@@ -95,16 +100,25 @@ pub(crate) fn save_cover(
 
 pub(crate) fn apply_patch(conn: &Connection, id: &str, patch: Value) -> Result<(), String> {
     group_library(conn, id)?;
-    let object = patch.as_object().ok_or("无效分组修改")?;
+    let object = patch
+        .as_object()
+        .ok_or(tr("无效分组修改", "Invalid album change"))?;
     for (key, value) in object {
         match key.as_str() {
             "name" => {
-                let name = models::name(value.as_str().ok_or("分组名称必须是文本")?)?;
+                let name = models::name(
+                    value
+                        .as_str()
+                        .ok_or(tr("分组名称必须是文本", "The album name must be text"))?,
+                )?;
                 conn.execute("UPDATE groups SET name=?1 WHERE id=?2", params![name, id])
                     .map_err(|e| e.to_string())?;
             }
             "description" => {
-                let description = value.as_str().ok_or("分组描述必须是文本")?;
+                let description = value.as_str().ok_or(tr(
+                    "分组描述必须是文本",
+                    "The album description must be text",
+                ))?;
                 conn.execute(
                     "UPDATE groups SET description=?1 WHERE id=?2",
                     params![description.trim(), id],
@@ -115,7 +129,11 @@ pub(crate) fn apply_patch(conn: &Connection, id: &str, patch: Value) -> Result<(
                 let capacity = parse_capacity(value)?;
                 if let Some(cap) = capacity {
                     if cap < active_count(conn, id)? {
-                        return Err("新容量不能小于当前有效照片数".into());
+                        return Err(tr(
+                            "新容量不能小于当前有效照片数",
+                            "The new capacity cannot be lower than the number of active photos",
+                        )
+                        .into());
                     }
                 }
                 conn.execute(
@@ -125,7 +143,12 @@ pub(crate) fn apply_patch(conn: &Connection, id: &str, patch: Value) -> Result<(
                 .map_err(|e| e.to_string())?;
             }
             "cover" => update_cover(conn, id, value)?,
-            _ => return Err(format!("不支持修改分组字段：{key}")),
+            _ => {
+                return Err(display_format!(
+                    "不支持修改分组字段：{key}",
+                    "This album field cannot be changed: {key}"
+                ))
+            }
         }
     }
     Ok(())
@@ -139,17 +162,21 @@ pub(crate) fn parse_capacity(value: &Value) -> Result<Option<u32>, String> {
         .as_u64()
         .and_then(|count| u32::try_from(count).ok())
         .filter(|count| *count > 0)
-        .ok_or("分组容量必须为正整数或无限制")?;
+        .ok_or(tr(
+            "分组容量必须为正整数或无限制",
+            "Album capacity must be a positive whole number or unlimited",
+        ))?;
     Ok(Some(count))
 }
 
 fn update_cover(conn: &Connection, group_id: &str, value: &Value) -> Result<(), String> {
-    let cover = AlbumCover::deserialize(value).map_err(|_| "相簿封面参数无效")?;
+    let cover = AlbumCover::deserialize(value)
+        .map_err(|_| tr("相簿封面参数无效", "Invalid album cover settings"))?;
     if !(0.0..=1.0).contains(&cover.offset_x)
         || !(0.0..=1.0).contains(&cover.offset_y)
         || !(1.0..=3.0).contains(&cover.zoom)
     {
-        return Err("相簿封面的取景范围无效".into());
+        return Err(tr("相簿封面的取景范围无效", "Invalid album cover crop").into());
     }
     let active = conn
         .query_row(
@@ -163,7 +190,11 @@ fn update_cover(conn: &Connection, group_id: &str, value: &Value) -> Result<(), 
         )
         .map_err(|error| error.to_string())?;
     if !active {
-        return Err("请选择当前相簿中未废弃的照片作为封面".into());
+        return Err(tr(
+            "请选择当前相簿中未废弃的照片作为封面",
+            "Choose an active photo from this album for the cover",
+        )
+        .into());
     }
     conn.execute(
         "INSERT INTO album_covers(group_id,photo_id,offset_x,offset_y,zoom) VALUES(?1,?2,?3,?4,?5)
@@ -186,7 +217,7 @@ pub(crate) fn delete(conn: &Connection, id: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         == 0
     {
-        return Err("分组不存在".into());
+        return Err(tr("分组不存在", "Album not found").into());
     }
     content_refs::hide_unreferenced_photos(conn, candidates)
 }
@@ -223,7 +254,11 @@ pub(crate) fn add_members(
             .optional()
             .map_err(|e| e.to_string())?;
         if photo_library.as_deref() != Some(&library) {
-            return Err("只能加入同一图库中存在的照片".into());
+            return Err(tr(
+                "只能加入同一图库中存在的照片",
+                "Add photos from the same library section",
+            )
+            .into());
         }
         let active: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM memberships WHERE group_id=?1 AND photo_id=?2 AND status='active')", params![group_id,id], |r| r.get(0)).map_err(|e| e.to_string())?;
         if !active {
@@ -273,7 +308,7 @@ pub(crate) fn set_member_statuses(
     status: &str,
 ) -> Result<(), String> {
     if status != "active" && status != "discarded" {
-        return Err("未知分组成员状态".into());
+        return Err(tr("未知分组成员状态", "Unknown album membership status").into());
     }
     group_library(conn, group_id)?;
     let ids: HashSet<&String> = photo_ids.iter().collect();
@@ -287,7 +322,10 @@ pub(crate) fn set_member_statuses(
             )
             .optional()
             .map_err(|e| e.to_string())?;
-        let current = current.ok_or("照片不属于该分组")?;
+        let current = current.ok_or(tr(
+            "照片不属于该分组",
+            "The photo does not belong to this album",
+        ))?;
         if status == "active" && current != "active" {
             restoring += 1;
         }

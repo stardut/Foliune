@@ -1,4 +1,6 @@
+import { t } from '../lib/i18n';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { EXHIBITION_LAYOUT_ERROR } from './exhibition-layout';
 import { photoWallLayout, visibleWallRange, type PhotoWallLayout, type PhotoWallResponse, type WallLayoutInput, type WallUnit } from './photo-wall-layout';
 
 interface PublishedWall { key: string; contentKey: string; layout: PhotoWallLayout; complete: boolean }
@@ -62,7 +64,12 @@ export function usePhotoWall(canvasRef: RefObject<HTMLDivElement | null>, conten
         worker = new Worker(new URL('./photo-wall.worker.ts', import.meta.url), { type: 'module' });
         worker.onmessage = ({ data }: MessageEvent<PhotoWallResponse>) => {
           if (!active) return;
-          if ('error' in data) { fail(data.error || '无法准备照片布局'); return; }
+          if ('error' in data) {
+            fail(data.error === EXHIBITION_LAYOUT_ERROR
+              ? t(EXHIBITION_LAYOUT_ERROR, 'Could not arrange the exhibition using these photo proportions')
+              : data.error || t('无法准备照片布局', 'Could not prepare the photo layout'));
+            return;
+          }
           units = units.concat(data.units);
           const layout = { units, height: data.height };
           if (data.complete) {
@@ -76,9 +83,9 @@ export function usePhotoWall(canvasRef: RefObject<HTMLDivElement | null>, conten
             return { key, contentKey, layout, complete: data.complete };
           });
         };
-        worker.onerror = () => fail('无法准备照片布局');
+        worker.onerror = () => fail(t('无法准备照片布局', 'Could not prepare the photo layout'));
         worker.postMessage(input);
-      } catch (cause) { fail(cause instanceof Error ? cause.message : '无法准备照片布局'); }
+      } catch (cause) { fail(cause instanceof Error ? cause.message : t('无法准备照片布局', 'Could not prepare the photo layout')); }
     }, previous ? 80 : 0);
     return () => { clearTimeout(timer); stop(); };
   }, [key, input, mode, contentKey, populated]);

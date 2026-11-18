@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n.ts';
 import { useId, useMemo, useState } from 'react';
 import { Files, Link2 } from 'lucide-react';
 import type { LibraryKind, LibrarySnapshot, Photo } from '../lib/types';
@@ -28,20 +29,20 @@ export interface PhotoSourceDialogProps {
 type Source = 'library' | 'local' | 'link';
 
 function LinkImportProgress({ total, ready, onStop }: { total: number | null; ready: number; onStop?: () => void }) {
-  const text = total === null ? '正在读取帖子…' : `已获取 ${ready} / ${total} 张`;
+  const text = total === null ? t('正在读取帖子…', 'Loading post…') : t(`已获取 ${ready} / ${total} 张`, `Loaded ${ready} of ${total}`);
   return <>
-    <div className="photo-source-progress" role="progressbar" aria-label={total === null ? text : '链接图片获取进度'}
+    <div className="photo-source-progress" role="progressbar" aria-label={total === null ? text : t('链接图片获取进度', 'Photo download progress')}
       aria-valuemin={total === null ? undefined : 0} aria-valuemax={total ?? undefined}
       aria-valuenow={total === null ? undefined : ready} aria-valuetext={total === null ? undefined : text}>
       <span className="photo-source-progress-track" aria-hidden="true"><span style={total === null ? undefined : { width: `${ready / total * 100}%` }} /></span>
       <span>{text}</span>
     </div>
-    {onStop && <button type="button" className="text-button" onClick={onStop}>停止获取</button>}
+    {onStop && <button type="button" className="text-button" onClick={onStop}>{t('停止获取', 'Stop Download')}</button>}
   </>;
 }
 
 export function PhotoSourceDialog({ snapshot, selectedIds = [], library, groupId, allowLibrary = true,
-  maxSelection, title = '选择照片', onConfirm, onClose, onBusyChange }: PhotoSourceDialogProps) {
+  maxSelection, title = t('选择照片', 'Select Photos'), onConfirm, onClose, onBusyChange }: PhotoSourceDialogProps) {
   const [source, setSource] = useState<Source>(allowLibrary ? 'library' : 'local');
   const [selected, setSelected] = useState(() => allowLibrary ? [...new Set(selectedIds)] : []);
   const [pendingSelected, setPendingSelected] = useState<string[]>([]);
@@ -93,9 +94,9 @@ export function PhotoSourceDialog({ snapshot, selectedIds = [], library, groupId
     if (!snapshot) { setReview(null); setPendingSelected([]); return; }
     if (source === 'local' && (draft.failures.length || skippedForLimit)) {
       const description = draft.failures.map(({ path, message }) => `${path} · ${message}`);
-      if (skippedForLimit) description.unshift(`另有 ${skippedForLimit} 张超出当前选片上限。`);
+      if (skippedForLimit) description.unshift(t(`另有 ${skippedForLimit} 张超出当前选片上限。`, `Photos skipped because of the selection limit: ${skippedForLimit}.`));
       toast({
-        title: `已导入 ${added.length} 张照片${draft.failures.length ? ` · ${draft.failures.length} 个项目未能导入` : ''}`,
+        title: t(`已导入 ${added.length} 张照片${draft.failures.length ? ` · ${draft.failures.length} 个项目未能导入` : ''}`, `Imported ${added.length} ${added.length === 1 ? 'photo' : 'photos'}${draft.failures.length ? ` · Failed: ${draft.failures.length}` : ''}`),
         description: description.join('\n'),
         status: draft.failures.length ? 'error' : 'info',
         ...(draft.failures.length ? { duration: null } : {}),
@@ -132,41 +133,43 @@ export function PhotoSourceDialog({ snapshot, selectedIds = [], library, groupId
     onCommit={(keepIds) => finish(review.draft, keepIds, review.chosenIds, review.skippedForLimit)} onCancel={cancelReview} />;
   return <Modal title={title} onClose={() => void close()} closeDisabled={session.committing || session.cleaning} wide glass>
     <div className="photo-picker photo-source">
-      <div className="photo-source-tabs segmented" role="group" aria-label="照片来源">
-        {([...(allowLibrary ? [['library', '图库']] as const : []), ['local', '本地'], ['link', '链接']] as const).map(([value, label]) =>
+      <div className="photo-source-tabs segmented" role="group" aria-label={t('照片来源', 'Photo source')}>
+        {([...(allowLibrary ? [['library', t('图库', 'Library')]] as const : []), ['local', t('本地', 'Local')], ['link', t('链接', 'Link')]] as const).map(([value, label]) =>
           <button key={value} type="button" className={source === value ? 'active' : ''} aria-pressed={source === value}
             disabled={session.committing || session.cleaning} onClick={() => void changeSource(value)}>{label}</button>)}
       </div>
       {source === 'library' ? <PhotoLibraryPicker snapshot={snapshot} selectedIds={selected} onChange={setSelected} maxSelection={maxSelection} disabled={session.busy} actions={<>
-        <button type="button" className="button" disabled={session.committing || session.cleaning} onClick={() => void close()}>取消</button>
-        <button type="button" className="button button-primary" disabled={session.busy || overLimit} onClick={confirm}>确认选择</button>
+        <button type="button" className="button" disabled={session.committing || session.cleaning} onClick={() => void close()}>{t('取消', 'Cancel')}</button>
+        <button type="button" className="button button-primary" disabled={session.busy || overLimit} onClick={confirm}>{t('确认选择', 'Confirm Selection')}</button>
       </>} /> : <>
         {source === 'link' && <div className="photo-source-input">
-          <div className="search-field"><Link2 size={16} /><input autoFocus aria-label="小红书或 Instagram 链接"
-            aria-describedby={showLinkProgress ? undefined : linkHintId} placeholder="粘贴链接"
+          <div className="search-field"><Link2 size={16} /><input autoFocus aria-label={t('小红书或 Instagram 链接', 'Xiaohongshu or Instagram link')}
+            aria-describedby={showLinkProgress ? undefined : linkHintId} placeholder={t('粘贴链接', 'Paste a link')}
             value={input} disabled={session.busy} onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); if (!session.busy && input.trim()) void prepare(); } }} /></div>
-          <button type="button" className="button" disabled={session.busy || !input.trim()} onClick={() => void prepare()}>获取图片</button>
+          <button type="button" className="button" disabled={session.busy || !input.trim()} onClick={() => void prepare()}>{t('获取图片', 'Get Photos')}</button>
         </div>}
         {source === 'link' && <div className="photo-source-link-meta">{showLinkProgress
           ? <LinkImportProgress total={session.linkProgress ? session.linkProgress.total : pendingPhotos.length}
             ready={session.linkProgress?.photos.length ?? pendingPhotos.length} onStop={session.linkProgress ? () => void session.clear() : undefined} />
-          : <p id={linkHintId} className="muted photo-source-link-hint">仅支持单篇小红书笔记或 Instagram 帖子的链接。</p>}</div>}
+          : <p id={linkHintId} className="muted photo-source-link-hint">{t('仅支持单篇小红书笔记或 Instagram 帖子的链接。', 'Use a link to a single Xiaohongshu or Instagram post.')}</p>}</div>}
         {session.cleaning || (source === 'local' && (session.preparing || session.committing)) ? <div className="photo-source-wait">
-          <Busy label={session.cleaning ? '正在取消…' : session.committing ? '正在导入照片…' : '正在准备照片…'} />
-          {session.preparing && <button type="button" className="button" onClick={() => void session.clear()}>取消</button>}</div>
+          <Busy label={session.cleaning ? t('正在取消…', 'Canceling…') : session.committing ? t('正在导入照片…', 'Importing photos…') : t('正在准备照片…', 'Preparing photos…')} />
+          {session.preparing && <button type="button" className="button" onClick={() => void session.clear()}>{t('取消', 'Cancel')}</button>}</div>
           : source === 'local' ? <div className="photo-source-empty">
             <button type="button" className="button" disabled={session.busy || remaining === 0} onClick={() => void prepare()}>
-              <Files size={15} aria-hidden="true" />选择照片或文件夹</button>
-            {remaining === 0 && <p className="muted photo-source-limit" role="status">已达 {maxSelection} 张上限</p>}
+              <Files size={15} aria-hidden="true" />{t('选择照片或文件夹', 'Choose Photos or a Folder')}</button>
+            {remaining === 0 && <p className="muted photo-source-limit" role="status">{t(`已达 ${maxSelection} 张上限`, `Selection limit reached (${maxSelection})`)}</p>}
           </div>
           : session.draft || session.linkProgress ? <PhotoSourceGrid
             photos={session.linkProgress?.photos ?? pendingPhotos} selectedIds={[...selected, ...pendingSelected]} totalSelected={totalSelected}
             maxSelection={maxSelection} disabled={session.committing} previewOnly={session.linkProgress !== null}
-            loadingNext={loadingNextPhoto} onToggle={togglePending} emptyTitle="没有可选择的照片" />
-            : <div className="photo-source-empty"><EmptyState title="从链接获取照片" /></div>}
+            loadingNext={loadingNextPhoto} onToggle={togglePending} emptyTitle={t('没有可选择的照片', 'No photos to select')} />
+            : <div className="photo-source-empty"><EmptyState title={t('从链接获取照片', 'Get Photos from a Link')} /></div>}
         {!!session.draft?.failures.length && <div className="photo-source-failures" role="alert">
-          <strong>{session.draft.failures.length} {source === 'local' ? '个项目未能导入' : '张照片未能读取'}</strong>
+          <strong>{source === 'local'
+            ? t(`${session.draft.failures.length} 个项目未能导入`, `Items that could not be imported: ${session.draft.failures.length}`)
+            : t(`${session.draft.failures.length} 张照片未能读取`, `Photos that could not be read: ${session.draft.failures.length}`)}</strong>
           <ul>{session.draft.failures.map((failure, index) => <li key={`${index}-${failure.path}`}>{failure.path} · {failure.message}</li>)}</ul></div>}
       </>}
       {session.error && <p className="form-error photo-source-error" role="alert">{session.error}</p>}
@@ -174,9 +177,9 @@ export function PhotoSourceDialog({ snapshot, selectedIds = [], library, groupId
         <PhotoSelectionControls photos={pendingPhotos} selectedIds={[...selected, ...pendingSelected]}
           maxSelection={maxSelection} disabled={session.busy} onSelect={(ids) => setPendingSelected((current) => [...new Set([...current, ...ids])])}
           onClear={() => { setSelected([]); setPendingSelected([]); }} />
-        <div className="form-actions"><button type="button" className="button" disabled={session.committing || session.cleaning} onClick={() => void close()}>取消</button>
+        <div className="form-actions"><button type="button" className="button" disabled={session.committing || session.cleaning} onClick={() => void close()}>{t('取消', 'Cancel')}</button>
           <button type="button" className="button button-primary" disabled={session.busy || overLimit || !pendingSelected.length} onClick={confirm}>
-            {session.committing ? '正在导入…' : '确认导入'}</button></div>
+            {session.committing ? t('正在导入…', 'Importing…') : t('确认导入', 'Import')}</button></div>
       </div>}
     </div>
   </Modal>;

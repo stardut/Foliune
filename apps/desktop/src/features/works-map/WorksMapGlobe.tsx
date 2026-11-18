@@ -10,9 +10,6 @@ const colors = {
   landFill: '#d9d9dc30',
   coastStroke: '#e5e5e729',
   lakeStroke: '#d5d5d721',
-  boundaryStroke: '#dedee01c',
-  selectedFill: '#e6eaef1a',
-  selectedStroke: '#e5e9ee76',
   graticuleStroke: '#d8d8da0d',
 };
 
@@ -93,9 +90,8 @@ function LoadingGraticule({ loading }: { loading: boolean }) {
   </svg>;
 }
 
-export const WorksMapGlobe = memo(function WorksMapGlobe({ atlas, selectedRegionId, view, map, globe, visibleRadius }: {
+export const WorksMapGlobe = memo(function WorksMapGlobe({ atlas, view, map, globe, visibleRadius }: {
   atlas: WorksMapAtlas | null;
-  selectedRegionId?: string;
   view: WorksMapView;
   map: MapRect;
   globe: MapRect;
@@ -104,9 +100,7 @@ export const WorksMapGlobe = memo(function WorksMapGlobe({ atlas, selectedRegion
   const detail = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const blurredCanvas = useRef<HTMLCanvasElement>(null);
-  const geometry = useMemo(() => atlas && prepareWorksMapGlobe(atlas.basemap, atlas.regionData.boundaries), [atlas]);
-  const selectedOutline = useMemo(() => selectedRegionId ? atlas?.regionData.outline(selectedRegionId) : undefined,
-    [atlas, selectedRegionId]);
+  const geometry = useMemo(() => atlas && prepareWorksMapGlobe(atlas.basemap), [atlas]);
   const pixelRatio = window.devicePixelRatio || 1;
   const drawing = useMemo(() => worksMapDrawingBounds(view, map), [view, map]);
   const feather = Math.min(view.scale - visibleRadius, 20, Math.max(12, visibleRadius * .072));
@@ -148,13 +142,13 @@ export const WorksMapGlobe = memo(function WorksMapGlobe({ atlas, selectedRegion
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, element.width, element.height);
     context.setTransform(pixelRatio, 0, 0, pixelRatio, -drawing.x * pixelRatio, -drawing.y * pixelRatio);
-    drawWorksMapGlobe(context, geometry, view, map, colors, selectedOutline);
+    drawWorksMapGlobe(context, geometry, view, map, colors);
     const blur = blurredCanvas.current?.getContext('2d');
     if (blur) {
       blur.clearRect(0, 0, element.width, element.height);
       blur.drawImage(element, 0, 0);
     }
-  }, [drawing, geometry, map, pixelRatio, selectedOutline, view]);
+  }, [drawing, geometry, map, pixelRatio, view]);
 
   return <div className="works-map-globe" aria-hidden="true" data-loading={!atlas || undefined} style={{
     left: drawing.x, top: drawing.y, width: drawing.width, height: drawing.height,

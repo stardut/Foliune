@@ -25,12 +25,10 @@ const globeUrl = sourceUrl('works-map-globe.ts', {
 });
 const { drawWorksMapGlobe, prepareWorksMapGlobe, worksMapGlobeProjection } = await import(globeUrl);
 const { projectWorksMapCoordinate, worksMapGlobeBounds } = await import(layoutUrl);
-const { createWorksMapRegionData } = await import(sourceUrl('works-map-regions.ts'));
 const map = { x: 24, y: 10, width: 512, height: 400 };
 
 const colors = {
-  landFill: '#404447', coastStroke: '#596165', lakeStroke: '#464e52', boundaryStroke: '#5a6165',
-  selectedFill: '#667278', selectedStroke: '#bcc4c8', graticuleStroke: '#353b3e',
+  landFill: '#404447', coastStroke: '#596165', lakeStroke: '#464e52', graticuleStroke: '#353b3e',
 };
 
 function recordingCanvas() {
@@ -64,16 +62,14 @@ function visibleFill(paths, { x, y }) {
 test('地球底图与作品位置使用同一正射投影，球面背后没有标记或画线', () => {
   const front = 'M-15,10 -15,-10 15,-10 15,10Z';
   const back = 'M145,10 145,-10 165,-10 165,10Z';
-  const geometry = prepareWorksMapGlobe({ land: front + back, lakes: '' }, 'M-30,0 30,0M140,0 170,0');
+  const geometry = prepareWorksMapGlobe({ land: front + back, lakes: '' });
   const view = { center: { lat: 0, lon: 0 }, scale: 179 };
   const context = recordingCanvas();
-  drawWorksMapGlobe(context, geometry, view, map, colors, { fill: back, stroke: back });
+  drawWorksMapGlobe(context, geometry, view, map, colors);
   const layer = color => context.painted.find(item => item.color === color);
   assert.equal(layer(colors.landFill).rule, 'evenodd');
   assert.equal(layer(colors.landFill).paths.length, 1);
-  assert.equal(layer(colors.boundaryStroke).paths.length, 1);
-  assert.equal(layer(colors.selectedFill).paths.length, 0);
-  assert.equal(layer(colors.selectedStroke).paths.length, 0);
+  assert.equal(layer(colors.coastStroke).paths.length, 1);
 
   const coordinate = { lat: 8, lon: -11 };
   const marker = projectWorksMapCoordinate(coordinate, view, map);
@@ -83,18 +79,15 @@ test('地球底图与作品位置使用同一正射投影，球面背后没有�
   assert.equal(projectWorksMapCoordinate({ lat: 3, lon: 150 }, view, map), undefined);
 });
 
-test('转到日期线时，两侧同一选区都可填充且仍在圆盘范围内', () => {
+test('转到日期线时，两侧陆地都可填充且仍在圆盘范围内', () => {
   const west = 'M170,-55 170,-70 180,-70 180,-55Z';
   const east = 'M-180,-55 -180,-70 -170,-70 -170,-55Z';
-  const geometry = prepareWorksMapGlobe({ land: west + east, lakes: '' }, '');
+  const geometry = prepareWorksMapGlobe({ land: west + east, lakes: '' });
   const view = { center: { lat: 63, lon: 180 }, scale: 188 };
   const context = recordingCanvas();
-  drawWorksMapGlobe(context, geometry, view, map, colors, {
-    fill: west + east,
-    stroke: 'M180,-55 170,-55 170,-70 180,-70M-180,-55 -170,-55 -170,-70 -180,-70',
-  });
-  const fill = context.painted.find(layer => layer.color === colors.selectedFill);
-  const stroke = context.painted.find(layer => layer.color === colors.selectedStroke);
+  drawWorksMapGlobe(context, geometry, view, map, colors);
+  const fill = context.painted.find(layer => layer.color === colors.landFill);
+  const stroke = context.painted.find(layer => layer.color === colors.coastStroke);
   for (const lon of [175, -175]) {
     const point = projectWorksMapCoordinate({ lat: 64, lon }, view, map);
     assert.ok(visibleFill(fill.paths, point));
@@ -108,26 +101,22 @@ test('转到日期线时，两侧同一选区都可填充且仍在圆盘范围�
   assert.ok(stroke.paths.every(path => path[0] !== path.at(-1)));
 });
 
-test('真实离线地形保留亚洲和海面，省级选中层与作品位置对应', () => {
+test('真实离线地形在总览和放大时只绘制陆地、海岸、湖泊和经纬网', () => {
   const basemap = JSON.parse(readFileSync(new URL('natural-earth.json', sourceDirectory), 'utf8'));
-  const regions = createWorksMapRegionData(JSON.parse(readFileSync(new URL('natural-earth-regions.json', sourceDirectory), 'utf8')));
-  const globe = prepareWorksMapGlobe(basemap, regions.boundaries);
-  for (const part of [globe.overview, globe.detailed]) {
-    assert.ok(part.boundaries.coordinates.reduce((count, path) => count + path.length, 0) < 50_000);
-  }
+  const globe = prepareWorksMapGlobe(basemap);
   const photo = { lat: 39.916345, lon: 116.397155 };
-  const tianjin = { lat: 39.084158, lon: 117.200983 };
   const sea = { lat: 31, lon: 147 };
-  const selected = regions.outline(regions.resolve(photo).id);
   for (const scale of [190, 600]) {
     const context = recordingCanvas();
     const view = { center: { lat: 41.75, lon: 107.6 }, scale };
-    drawWorksMapGlobe(context, globe, view, map, colors, selected);
+    drawWorksMapGlobe(context, globe, view, map, colors);
+    assert.deepEqual(context.painted.map(item => item.color), [
+      colors.landFill, colors.coastStroke, colors.lakeStroke, colors.graticuleStroke,
+    ]);
+    assert.ok(context.painted.every(item => item.paths.length > 0));
     const layer = color => context.painted.find(item => item.color === color).paths;
     const beijingPin = projectWorksMapCoordinate(photo, view, map);
     assert.ok(visibleFill(layer(colors.landFill), beijingPin));
-    assert.ok(visibleFill(layer(colors.selectedFill), beijingPin));
-    assert.equal(visibleFill(layer(colors.selectedFill), projectWorksMapCoordinate(tianjin, view, map)), false);
     if (scale < 200) {
       const seaPoint = projectWorksMapCoordinate(sea, view, map);
       assert.equal(visibleFill(layer(colors.landFill), seaPoint), false);

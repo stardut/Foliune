@@ -45,7 +45,7 @@ PY
 
 ## 作品地区归属与边界
 
-行政归属使用 Natural Earth 同一 `v5.1.2` 标签下的 1:10m Admin-1 与 Admin-0，两层图层版本均为 `5.1.1`，同样属 public domain。行政多边形同时用于本机点位反查、常态省州界和选中轮廓。以上地形底图提供陆地与湖泊。 [Admin-1 图层](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-1-states-provinces/) · [Admin-0 图层](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-0-countries/)
+行政归属使用 Natural Earth 同一 `v5.1.2` 标签下的 1:10m Admin-1 与 Admin-0，两层图层版本均为 `5.1.1`，同样属 public domain。作品地图使用行政多边形在本机反查点位所属地区，底图的陆地与湖泊来自前述 1:50m 数据。 [Admin-1 图层](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-1-states-provinces/) · [Admin-0 图层](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-0-countries/)
 
 | 图层 | 上游 GeoJSON | SHA-256 |
 | --- | --- | --- |
@@ -67,6 +67,6 @@ python3 build-natural-earth-regions.py ne_10m_admin_1_states_provinces.geojson n
 
 生成脚本保留多部件、内环和日期线两侧的多边形，将坐标量化到 0.0001°，约为赤道处的 11 米。脚本以增量整数编码几何，省去原始 GeoJSON 的无关字段。带常态共边的地区包约 7.3 MB，通过本地应用资源按需加载。应用以空间网格筛选多边形，再检查点位归属。未命中或命中多个不同地区的点位不分配地区。
 
-常态边界从同一套量化后的多边形提取。生成器收集同属一个国家、归属 ID 不同的相邻地区共边，并把连续边合成路径。路径保留共边顶点，使常态边界与选中轮廓深度放大时仍重合。海岸、国界和已经归并的次级行政线不进入这一层。
+地区包保留从同一套量化多边形提取的行政区共边，用于几何核对。生成器收集同属一个国家、归属 ID 不同的相邻地区共边，并把连续边合成路径。海岸、国界和已经归并的次级行政线不进入这一层。
 
-选中轮廓按地区 ID 生成。归并区抵消各下级面之间重合的边，填充保留多部件和行政飞地的内环；描边省略地理数据在 `±180°` 切分面时形成的人工闭合段。选中轮廓使用 1:10m 的行政区海岸，地形底图使用 1:50m 的海岸，近看两层海岸细节会有差异。
+几何测试按地区 ID 生成轮廓，核对归并区和共边。生成时抵消各下级面之间重合的边，保留多部件和行政飞地的内环，省略数据在 `±180°` 切分面时形成的人工描边闭合段。

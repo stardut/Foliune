@@ -29,8 +29,8 @@ foliune-cli --help
 | 对象 | 查询 | 编辑 |
 | --- | --- | --- |
 | `plan` | `search <关键词>`、`show <id>` | `create`、`update <id>`、`delete <id>` |
-| `photo` | `search <关键词>`、`show <id>`、`preview <id> --output <path>` | `update <id>` |
-| `album` | `list`、`show <id>` | `create`、`update <id>`、`delete <id>`、`add/discard/restore <id> <photo-id>…` |
+| `photo` | `search <关键词>`、`show <id>`、`preview <id> --output <path>` | `update <id>`、`set-region <id> <地区>`、`clear-region <id>` |
+| `album` | `list`、`show <id>` | `create`、`update <id>`、`delete <id>`、`add/discard/restore <id> <photo-id>…`、`set-region <id> <地区> [--skip-gps]` |
 | `book` | `search <关键词>`、`show <id>` | `create`、`update <id>`、`delete <id>` |
 | `model` | `search <关键词>`、`show <id>` | `create`、`update <id>`、`delete <id>` |
 
@@ -39,6 +39,20 @@ foliune-cli --help
 - `create` 和 `update` 通过 `--file <path>` 读取 JSON，`--file -` 从 stdin 读取。省略的字段保留当前值。可空字段用 `null` 清除。列表按提交顺序替换。策划的场景和镜头按稳定 ID 保留条目内未提交的字段。
 - 策划、画册和模特档案的 `update` 和 `delete` 须带上 `show` 返回的 `--revision <revision>`。收到 `REVISION_CONFLICT` 后，重新读取并核对需要修改的字段。
 - `photo preview` 将图库现有缩略图以 JPEG 格式写入新文件，即使原片暂时离线也可读取已有预览。目标文件已存在时会报错。作品目录原片需要重新核验时，`photo show` 的 `originalAvailable` 为 `null`。
+
+## 设置拍摄地区
+
+```sh
+foliune-cli photo set-region "$photo_id" '杭州市' --json
+foliune-cli photo clear-region "$photo_id" --json
+foliune-cli album set-region "$album_id" 'Île-de-France' --skip-gps --json
+```
+
+地区与桌面共用目录，支持中国的市级地区和全球的省、州等地区。可用完整中文名、英文名或地区 ID，例如杭州市的 `CHN:city-330100` 或北京市的 `CHN:CHN-1155`。英文名忽略大小写。重名时列出各候选的上级省或国家及地区 ID，可用 ID 重试。旧图库提示缺少拍摄地区时，先用新版桌面端打开一次。
+
+`photo set-region` 设置单张照片的手选地区。`album set-region` 默认处理作品相簿中当前有效且可见的所有成员。添加 `--skip-gps` 后，批量操作跳过带有效 GPS 坐标的照片。地图优先采用手选地区，原有 GPS、地点文字和原片保留。`photo clear-region` 清除手选地区，地图恢复使用照片已有的 GPS。
+
+结果包含所选地区的 `regionId`、实际更新的 `updatedCount`、跳过 GPS 的 `skippedGpsCount`，以及地区无需变更的 `unchangedCount`。清除时 `regionId` 为空字符串，未设置手选地区的照片计入 `unchangedCount`。批量更新在一次事务内提交。
 
 ## 策划参考图
 

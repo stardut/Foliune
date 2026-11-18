@@ -45,7 +45,7 @@ PY
 
 ## 作品地区归属与边界
 
-行政归属使用 Natural Earth 同一 `v5.1.2` 标签下的 1:10m Admin-1 与 Admin-0，两层图层版本均为 `5.1.1`，同样属 public domain。作品地图使用行政多边形在本机反查点位所属地区，底图的陆地与湖泊来自前述 1:50m 数据。 [Admin-1 图层](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-1-states-provinces/) · [Admin-0 图层](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-0-countries/)
+全球省级及同级行政归属使用 Natural Earth 同一 `v5.1.2` 标签下的 1:10m Admin-1 与 Admin-0，两层图层版本均为 `5.1.1`，同样属 public domain。作品地图使用行政多边形在本机反查点位所属地区，底图的陆地与湖泊来自前述 1:50m 数据。 [Admin-1 图层](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-1-states-provinces/) · [Admin-0 图层](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-0-countries/)
 
 | 图层 | 上游 GeoJSON | SHA-256 |
 | --- | --- | --- |
@@ -70,3 +70,25 @@ python3 build-natural-earth-regions.py ne_10m_admin_1_states_provinces.geojson n
 地区包保留从同一套量化多边形提取的行政区共边，用于几何核对。生成器收集同属一个国家、归属 ID 不同的相邻地区共边，并把连续边合成路径。海岸、国界和已经归并的次级行政线不进入这一层。
 
 几何测试按地区 ID 生成轮廓，核对归并区和共边。生成时抵消各下级面之间重合的边，保留多部件和行政飞地的内环，省略数据在 `±180°` 切分面时形成的人工描边闭合段。
+
+## 中国地级行政归属
+
+中国地级归属使用 Cheng, Rui、Hu, Yunfeng、Xiao, Chiwei 和 Wang, Yanjun 发布的 CTAmap v2.0《CTAmap: A continuous vector dataset of Chinese administrative divisions from 2000 to 2026》，采用 2026 年 1 月 1 日快照的 `T2026_prefecture.gpkg`。原件使用 WGS 84（EPSG:4326），以 CC BY 4.0 发布。Foliune 提取地级市、地区、自治州、盟，按行政区划代码关联既有省级 ID，将边界简化、量化并重新编码为 `china-city-regions.json`。直辖市、港澳台及省直辖县级行政区沿用已有地区粒度。 [Zenodo 数据档案](https://doi.org/10.5281/zenodo.22179207) · [发布说明](https://www.shengshixian.com/pages/9f2c41/) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+
+原件通过 Zenodo 所列的 MD5 `2c935849e66db951eeb7cc368cbb563c` 核对。下方命令使用同一原件的 SHA-256。在本目录执行。
+
+```sh
+curl -fsSLO 'https://zenodo.org/records/22179207/files/T2026_prefecture.gpkg'
+printf '%s\n' '6a35915313444d4e669fdc147eade4eb50d67489c38c00f340d871baa624ad85  T2026_prefecture.gpkg' | LC_ALL=C shasum -a 256 -c
+npx --yes mapshaper@0.8.5 T2026_prefecture.gpkg \
+  -filter '["地级市","地区","自治州","盟"].includes(地级类)' \
+  -filter-fields 区划码,地名,ENG_NAME \
+  -clean gap-width=0 snap-interval=0.0000001 \
+  -simplify dp interval=100m keep-shapes \
+  -o format=geojson china-prefectures.geojson
+python3 -B build-china-city-regions.py china-prefectures.geojson
+```
+
+Mapshaper 在约厘米级阈值下对齐原件的近重合共边，再按 100 米间隔做 Douglas–Peucker 简化。生成器保留多边形的独立部件和可量化内环，将经纬度量化到 0.0001°。行政边缘附近的归属受源精度、简化及 GPS 误差影响。三沙市按源数据的离散岛礁面匹配。
+
+生成包共 333 条地级归属，含 293 个地级市、7 个地区、30 个自治州、3 个盟，对应 27 个省级 ID。核对了所有量化面及其共边，333 个代表点均可反查回自身。经纬度样本覆盖杭州、宁波、成都、阿坝藏族羌族自治州、三沙市永兴岛，以及继续按省级匹配的北京和湖北仙桃。

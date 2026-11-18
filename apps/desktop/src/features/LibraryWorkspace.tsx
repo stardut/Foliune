@@ -32,7 +32,6 @@ import { COLLAGE_MAX_PHOTOS } from './collage/collage-layout';
 import type { useWorkDirectory } from './use-work-directory';
 import { WorksMap } from './works-map/WorksMap';
 import { PhotoRegionBatchDialog, type PhotoRegionBatch } from './works-map/PhotoRegionBatchDialog';
-import { parseWorksMapCoordinate } from './works-map/works-map-layout';
 
 let preferredPhotoLayout: Exclude<AlbumPhotoLayout, 'single'> = 'exhibition';
 let prefersSinglePhoto = false;
@@ -428,14 +427,12 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
   function openPhotoRegionBatch(album: LibraryAlbum, requestedIds?: ReadonlySet<string>) {
     const hidden = albumMenuState.current.hiddenPhotoIds;
     const photos: PhotoRegionBatch['photos'] = [];
-    let gpsCount = 0;
     for (const { id, location, locationRegionId } of album.photos) {
       if (hidden.has(id) || (requestedIds && !requestedIds.has(id))) continue;
-      if (parseWorksMapCoordinate(location)) gpsCount++;
-      else photos.push({ id, location, locationRegionId: locationRegionId ?? '' });
+      photos.push({ id, location, locationRegionId: locationRegionId ?? '' });
     }
-    if (photos.length || gpsCount) {
-      setPhotoRegionBatch({ groupId: album.group.id, albumName: requestedIds ? undefined : album.group.name, photos, gpsCount });
+    if (photos.length) {
+      setPhotoRegionBatch({ groupId: album.group.id, albumName: requestedIds ? undefined : album.group.name, photos });
     }
   }
   function showAlbumMenu(group: Group, at: ContextMenuPosition, trigger: HTMLElement) {
@@ -611,12 +608,12 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
       setDetailId(null);
     }} />}
     {photoRegionBatch && <PhotoRegionBatchDialog batch={photoRegionBatch} busy={busy || importDisabled} onDirtyChange={onDirtyChange}
-      onClose={() => setPhotoRegionBatch(null)} onSave={async (regionId, count) => {
+      onClose={() => setPhotoRegionBatch(null)} onSave={async (regionId, photos) => {
         setBusy(true);
         try {
-          onSnapshot(await api.setPhotoRegions(photoRegionBatch.photos, regionId, photoRegionBatch.groupId));
+          onSnapshot(await api.setPhotoRegions(photos, regionId, photoRegionBatch.groupId));
           setPhotoRegionBatch(null);
-          onFeedback(t(`已更新 ${count} 张照片的拍摄地区`, `Shooting region set for ${photoCount(count)}`));
+          onFeedback(t(`已更新 ${photos.length} 张照片的拍摄地区`, `Shooting region set for ${photoCount(photos.length)}`));
         } finally { setBusy(false); }
       }} />}
     {groupForm && <GroupForm group={groupForm === 'new' ? undefined : groupForm}

@@ -1,4 +1,5 @@
 fn main() {
+    write_shooting_region_labels();
     tauri_build::build();
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os == "macos" {
@@ -64,4 +65,54 @@ fn main() {
         println!("cargo:rustc-link-lib=ole32");
         println!("cargo:rustc-link-lib=uuid");
     }
+}
+
+fn write_shooting_region_labels() {
+    use std::{collections::HashMap, env, fs, path::PathBuf};
+
+    fn read_atlas(source: &str) -> serde_json::Value {
+        println!("cargo:rerun-if-changed={source}");
+        let input = fs::read(source).unwrap_or_else(|error| panic!("read {source}: {error}"));
+        serde_json::from_slice(&input).unwrap_or_else(|error| panic!("parse {source}: {error}"))
+    }
+
+    let mut global = read_atlas("../src/features/works-map/natural-earth-regions.json");
+    let mut cities = read_atlas("../src/features/works-map/china-city-regions.json");
+    let regions: Vec<[String; 5]> =
+        serde_json::from_value(global["labels"].take()).expect("parse global region labels");
+    let city_labels: Vec<[String; 5]> =
+        serde_json::from_value(cities["labels"].take()).expect("parse Chinese city labels");
+    let parents: Vec<String> =
+        serde_json::from_value(cities["parents"].take()).expect("parse Chinese city parent IDs");
+    assert_eq!(
+        city_labels.len(),
+        parents.len(),
+        "missing Chinese city parent IDs"
+    );
+
+    let names: HashMap<_, _> = regions
+        .iter()
+        .map(|[id, chinese, ..]| (id.as_str(), chinese))
+        .collect();
+    let mut labels: Vec<_> = regions
+        .iter()
+        .map(|[id, chinese, country, english, _]| [id, chinese, country, english])
+        .collect();
+    labels.extend(
+        city_labels
+            .iter()
+            .zip(parents)
+            .map(|([id, chinese, _, english, _], parent)| {
+                let province = names
+                    .get(parent.as_str())
+                    .unwrap_or_else(|| panic!("missing parent {parent} for {id}"));
+                [id, chinese, province, english]
+            }),
+    );
+    let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo output directory"));
+    fs::write(
+        output.join("shooting-region-labels.json"),
+        serde_json::to_vec(&labels).expect("encode the atlas region labels"),
+    )
+    .expect("write the atlas region labels");
 }

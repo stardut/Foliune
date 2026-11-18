@@ -1,6 +1,6 @@
 import { getLocale, photoCount, t } from '../../lib/i18n';
 import { LocateFixed, MapPin, Minus, Plus } from 'lucide-react';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from 'react';
 import { DropdownMenu } from '../../components/DropdownMenu';
 import { PhotoImage } from '../../components/PhotoImage';
 import { IconButton } from '../../components/ui';
@@ -10,7 +10,8 @@ import { useWorksMapPhotoDock } from './use-works-map-photo-dock';
 import { useWorksMapView } from './use-works-map-view';
 import { WorksMapGlobe, type WorksMapAtlas } from './WorksMapGlobe';
 import {
-  createWorksMapFrame, fitWorksMapView, interpolateWorksMapLayout, layoutWorksMap, projectWorksMapCoordinate, worksMapGlobeBounds, worksMapVisibleCircle,
+  createWorksMapFrame, fitWorksMapView, interpolateWorksMapLayout, layoutWorksMap, projectWorksMapCoordinate, selectWorksMapRegions,
+  worksMapGlobeBounds, worksMapVisibleCircle,
   type MapPoint, type MapRect, type WorksMapCard, type WorksMapRegionGroup,
 } from './works-map-layout';
 
@@ -20,12 +21,13 @@ const PIN_HIT_SIZE = 28;
 const PIN_RADIUS = 4;
 const PIN_HALO_RADIUS = 6;
 const PIN_VISUAL_GAP = 0.9;
+const REGION_BUTTONS = '.works-map-pin, .works-map-print';
 
 function rectStyle({ x, y, width, height }: MapRect) {
   return { left: x, top: y, width, height };
 }
 
-export function WorksMapExhibition({ regions, atlas, onReviewChange }: {
+export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }: {
   regions: WorksMapRegionGroup<Photo>[];
   atlas: WorksMapAtlas | null;
   onReviewChange: (open: boolean) => void;
@@ -39,7 +41,7 @@ export function WorksMapExhibition({ regions, atlas, onReviewChange }: {
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [selectedId, setSelectedId] = useState<string>();
   const [hovered, setHovered] = useState<string>();
-  const [focused, setFocused] = useState<string>();
+  const [focused, setFocused] = useState<{ id: string; trigger: HTMLButtonElement; keyboard: boolean }>();
   const [skipPrintArrival, setSkipPrintArrival] = useState(false);
   const [review, setReview] = useState<Review>();
   const selection = useRef<GroupSelection>(null);
@@ -63,19 +65,29 @@ export function WorksMapExhibition({ regions, atlas, onReviewChange }: {
   }, [review, onReviewChange]);
 
   const frame = useMemo(() => size.width && size.height ? createWorksMapFrame(size.width, size.height) : undefined, [size]);
-  const coordinates = useMemo(() => regions.map(({ representative }) => representative.coordinate), [regions]);
-  const regionsById = useMemo(() => new Map(regions.map((region) => [region.id, region])), [regions]);
-  const countriesByName = useMemo(() => {
-    const countries = new Map<string, Set<string>>();
-    for (const { name, country } of regions) {
-      const known = countries.get(name);
-      if (known) known.add(country);
-      else countries.set(name, new Set([country]));
-    }
-    return countries;
-  }, [regions]);
+  const coordinates = useMemo(() => overview.map(({ representative }) => representative.coordinate), [overview]);
   const camera = useWorksMapView(coordinates, atlas ? frame?.map : undefined, stage);
   const { view, dragOrigin, zoomTransition } = camera;
+  const lastRegions = useRef<{ overview: typeof overview; regions: readonly WorksMapRegionGroup<Photo>[] }>(null);
+  const groupingView = dragOrigin ?? zoomTransition?.start ?? view;
+  const keepGroups = !!(dragOrigin || zoomTransition || selectedId || focused || restoreFocus.current?.regionId);
+  const regions = useMemo(() => {
+    // Keep the same groups throughout a gesture and while their photos or keyboard focus are active.
+    if (keepGroups && lastRegions.current?.overview === overview) return lastRegions.current.regions;
+    return frame && groupingView ? selectWorksMapRegions(overview, frame, groupingView) : overview;
+  }, [frame, groupingView, keepGroups, overview]);
+  useLayoutEffect(() => { lastRegions.current = { overview, regions }; }, [overview, regions]);
+  const regionsById = useMemo(() => new Map(regions.map((region) => [region.id, region])), [regions]);
+  const qualifiersByName = useMemo(() => {
+    const qualifiers = new Map<string, Set<string>>();
+    for (const { name, country, parentName } of regions) {
+      const qualifier = parentName ?? country;
+      const known = qualifiers.get(name);
+      if (known) known.add(qualifier);
+      else qualifiers.set(name, new Set([qualifier]));
+    }
+    return qualifiers;
+  }, [regions]);
   const displayView = useMemo(() => view ?? (frame && fitWorksMapView([], frame.map)), [frame, view]);
   const globe = useMemo(() => frame && displayView && worksMapGlobeBounds(displayView, frame.map), [frame, displayView]);
   const visible = frame && view && worksMapVisibleCircle(view, frame.map);
@@ -89,20 +101,22 @@ export function WorksMapExhibition({ regions, atlas, onReviewChange }: {
     return layoutWorksMap(regions, frame, position, selectedId);
   }, [frame, regions, selectedId]);
   const currentLayout = useMemo(() => layoutAt(layoutView), [layoutAt, layoutView]);
-  const lastLayout = useRef({ frame, layout: currentLayout });
+  const lastLayout = useRef({ frame, regions, layout: currentLayout });
   const transitionLayouts = useMemo(() => {
     if (!zoomTransition) return undefined;
     return { start: lastLayout.current.layout, target: layoutAt(zoomTransition.target) };
   }, [layoutAt, zoomTransition]);
   const layout = useMemo(() => {
-    if (dragOrigin && lastLayout.current.frame === frame) return lastLayout.current.layout ?? currentLayout;
-    if (!currentLayout || !frame || !view || !visible || !zoomTransition || !transitionLayouts?.start
+    if (dragOrigin && lastLayout.current.frame === frame && lastLayout.current.regions === regions) {
+      return lastLayout.current.layout ?? currentLayout;
+    }
+    if (!currentLayout || !frame || !view || !zoomTransition || !transitionLayouts?.start
       || !transitionLayouts.target) return currentLayout;
     const { start, target } = zoomTransition;
     const progress = (view.scale - start.scale) / (target.scale - start.scale);
-    return interpolateWorksMapLayout(transitionLayouts.start, transitionLayouts.target, currentLayout, visible, progress);
-  }, [currentLayout, dragOrigin, frame, transitionLayouts, view, visible, zoomTransition]);
-  useLayoutEffect(() => { lastLayout.current = { frame, layout }; }, [frame, layout]);
+    return interpolateWorksMapLayout(transitionLayouts.start, transitionLayouts.target, currentLayout, progress);
+  }, [currentLayout, dragOrigin, frame, regions, transitionLayouts, view, zoomTransition]);
+  useLayoutEffect(() => { lastLayout.current = { frame, regions, layout }; }, [frame, layout, regions]);
   const pinAreas = useMemo(() => {
     const markers = layout?.markers ?? [];
     const points = markers.map(({ point }) => point);
@@ -144,9 +158,11 @@ export function WorksMapExhibition({ regions, atlas, onReviewChange }: {
   useLayoutEffect(exposeGroup, [selected]);
   useWorksMapPhotoDock(strip, selected?.id, !!review);
   useLayoutEffect(() => {
-    const target = restoreFocus.current;
+    const removedFocusId = focused && !focused.trigger.isConnected ? focused.id : undefined;
+    const target = restoreFocus.current ?? (removedFocusId ? { regionId: removedFocusId } : null);
     if (!target) return;
     restoreFocus.current = null;
+    if (removedFocusId) setFocused(undefined);
     // A selected region can have a temporary print that is removed on close.
     if (target.trigger?.isConnected) {
       target.trigger.focus({ preventScroll: true });
@@ -156,7 +172,7 @@ export function WorksMapExhibition({ regions, atlas, onReviewChange }: {
       ? stage.current?.querySelector<HTMLButtonElement>(`.works-map-pin[data-region-id="${CSS.escape(target.regionId)}"]`)
       : strip.current?.querySelector<HTMLButtonElement>('.works-map-thumbnail');
     (fallback ?? viewport.current)?.focus({ preventScroll: true });
-  }, [selectedId, review]);
+  }, [focused, layout, selectedId, review]);
 
   function pick(region: WorksMapRegionGroup<Photo>, origin: GroupSelection) {
     selection.current = origin;
@@ -211,8 +227,8 @@ export function WorksMapExhibition({ regions, atlas, onReviewChange }: {
     restoreFocus.current = { trigger: review?.trigger };
     setReview(undefined);
   }
-  function accessibleRegionName({ name, country }: WorksMapRegionGroup<Photo>) {
-    return (countriesByName.get(name)?.size ?? 0) > 1 ? `${name} · ${country}` : name;
+  function regionName({ name, country, parentName }: WorksMapRegionGroup<Photo>) {
+    return (qualifiersByName.get(name)?.size ?? 0) > 1 ? `${name} · ${parentName ?? country}` : name;
   }
   function regionButtonProps(region: WorksMapRegionGroup<Photo>, label: string) {
     const isSelected = selected?.id === region.id;
@@ -224,25 +240,31 @@ export function WorksMapExhibition({ regions, atlas, onReviewChange }: {
       'data-highlighted': highlighted === region.id || undefined,
       onPointerEnter: () => setHovered(region.id),
       onPointerLeave: () => setHovered((current) => current === region.id ? undefined : current),
-      onFocus: () => setFocused(document.documentElement.dataset.inputMode === 'keyboard' ? region.id : undefined),
-      onBlur: () => setFocused((current) => current === region.id ? undefined : current),
+      onFocus: ({ currentTarget }: FocusEvent<HTMLButtonElement>) =>
+        setFocused({ id: region.id, trigger: currentTarget, keyboard: document.documentElement.dataset.inputMode === 'keyboard' }),
+      onBlur: ({ relatedTarget }: FocusEvent<HTMLButtonElement>) => {
+        if (!(relatedTarget instanceof Element && relatedTarget.matches(REGION_BUTTONS))) setFocused(undefined);
+      },
       onClick: (event: MouseEvent<HTMLButtonElement>) => pick(region, { trigger: event.currentTarget, keyboard: event.detail === 0 }),
     };
   }
-  const highlighted = [selected?.id, focused, hovered].find((id) => layout?.markers.some(({ group }) => group.id === id));
+  const keyboardFocus = focused?.keyboard ? focused.id : undefined;
+  const highlighted = [selected?.id, keyboardFocus, hovered].find((id) => layout?.markers.some(({ group }) => group.id === id));
   const highlightedLine = highlighted !== undefined && cardsByRegion.has(highlighted);
   const markerPaintOrder = [...(layout?.markers ?? [])].sort((a, b) => Number(a.group.id === highlighted) - Number(b.group.id === highlighted));
   const ready = !!(frame && view && visible && layout);
 
-  return <div ref={exhibition} className="works-map-exhibition" onPointerDownCapture={() => setFocused(undefined)}>
+  return <div ref={exhibition} className="works-map-exhibition" onPointerDownCapture={() => {
+    if (focused?.keyboard) setFocused({ ...focused, keyboard: false });
+  }}>
     {atlas && <div className="works-map-top-tools">
-      <small>Natural Earth</small>
+      <small title="CTAmap, Rui Cheng, Yunfeng Hu, Chiwei Xiao, Yanjun Wang, CC BY 4.0. https://doi.org/10.5281/zenodo.22179207">Natural Earth · CTAmap</small>
       <div className="works-map-tools">
         {regionsToFind.length > 0 && <DropdownMenu label={t('查找拍摄地区', 'Find a Region')}
           triggerLabel={t('查找拍摄地区', 'Find a Region')} triggerText={t('地区', 'Regions')} icon={<MapPin size={15} aria-hidden="true" />}
           groups={[{ items: regionsToFind.map((region) => ({
             id: region.id,
-            label: accessibleRegionName(region),
+            label: regionName(region),
             run: () => revealRegion(region),
           })) }]} />}
         <div className="works-map-controls" role="group" aria-label={t('地图缩放', 'Map Zoom')}>
@@ -281,13 +303,12 @@ export function WorksMapExhibition({ regions, atlas, onReviewChange }: {
             </clipPath>)}
           </defs>
           <g className="works-map-leader-paths">
-            {markerPaintOrder.map(({ group, point, button }) => {
+            {markerPaintOrder.map(({ group }) => {
               const card = cardsByRegion.get(group.id);
               if (!card) return null;
-              const bend = point !== button ? `L${button.x} ${button.y}` : '';
-              const { to } = card.line;
+              const { from, to } = card.line;
               return <path key={group.id} pathLength={1} data-region-id={group.id} data-highlighted={highlighted === group.id || undefined}
-                d={`M${point.x} ${point.y}${bend}L${to.x} ${to.y}`} />;
+                d={`M${from.x} ${from.y}L${to.x} ${to.y}`} />;
             })}
           </g>
           <g clipPath={`url(#${globeClipId})`}>
@@ -298,14 +319,15 @@ export function WorksMapExhibition({ regions, atlas, onReviewChange }: {
                 clipPath={area?.visible ? `url(#${area.clipId})` : undefined}>
                 <circle className="works-map-anchor-halo" data-highlighted={active} cx={point.x} cy={point.y} r={PIN_HALO_RADIUS} />
                 <circle className="works-map-anchor" data-region-id={group.id} data-highlighted={active}
-                  data-focused={focused === group.id || undefined} cx={point.x} cy={point.y} r={PIN_RADIUS} />
+                  data-focused={keyboardFocus === group.id || undefined} cx={point.x} cy={point.y} r={PIN_RADIUS} />
               </g>;
             })}
           </g>
         </svg>
         <div className="works-map-pins" style={{ clipPath: `circle(${visible.radius}px at ${visible.center.x}px ${visible.center.y}px)` }}>
           {layout.markers.map(({ group: region, point }) => {
-            const label = t(`${accessibleRegionName(region)}，${region.photos.length} 张照片`, `${accessibleRegionName(region)}, ${photoCount(region.photos.length)}`);
+            const name = regionName(region);
+            const label = t(`${name}，${region.photos.length} 张照片`, `${name}, ${photoCount(region.photos.length)}`);
             return <button key={region.id} type="button" className="works-map-pin" title={label} data-region-id={region.id}
               style={{ left: point.x, top: point.y, width: PIN_HIT_SIZE, height: PIN_HIT_SIZE, clipPath: pinAreas.get(region.id)?.hit }}
               {...regionButtonProps(region, label)} />;
@@ -315,12 +337,12 @@ export function WorksMapExhibition({ regions, atlas, onReviewChange }: {
           {layout.cards.map((card) => {
             const region = regionsById.get(card.regionId)!;
             if (dragOrigin && !projectWorksMapCoordinate(region.representative.coordinate, view, frame.map)) return null;
-            const label = accessibleRegionName(region);
+            const label = regionName(region);
             return <button type="button" className="works-map-print" key={region.id} data-region-id={region.id} title={label} style={printBounds(card)}
               {...regionButtonProps(region, t(`${label}，${region.photos.length} 张照片，代表作 ${photoName(card.photo)}`, `${label}, ${photoCount(region.photos.length)}, cover photo ${photoName(card.photo)}`))}>
               <span className="works-map-print-image" style={printPart(card, card.rect)} aria-hidden="true"><PhotoImage photo={card.photo} thumbnailOnly /></span>
               <span className="works-map-print-caption" style={printPart(card, card.captionRect)} aria-hidden="true">
-                <span>{region.name}</span>{region.photos.length > 1 && <span>×{region.photos.length}</span>}
+                <span>{label}</span>{region.photos.length > 1 && <span>×{region.photos.length}</span>}
               </span>
             </button>;
           })}

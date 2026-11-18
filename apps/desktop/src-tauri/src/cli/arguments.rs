@@ -129,6 +129,10 @@ pub(super) enum PhotoAction {
         #[command(flatten)]
         input: Input,
     },
+    /// 设置手选拍摄地区，保留原有 GPS 和地点文字。
+    SetRegion { id: String, region: String },
+    /// 清除手选拍摄地区，恢复使用原有 GPS。
+    ClearRegion { id: String },
 }
 
 #[derive(Args)]
@@ -168,4 +172,12 @@ pub(super) enum AlbumAction {
     Discard(AlbumPhotos),
     /// 恢复指定照片在当前相簿的成员关系。
     Restore(AlbumPhotos),
+    /// 为作品相簿中的有效照片批量设置拍摄地区。
+    SetRegion {
+        id: String,
+        region: String,
+        /// 跳过带有效 GPS 坐标的照片。
+        #[arg(long)]
+        skip_gps: bool,
+    },
 }

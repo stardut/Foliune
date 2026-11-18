@@ -9,7 +9,6 @@ import { Modal } from '../components/ui';
 import { PhotoImage } from '../components/PhotoImage';
 import { PhotoReviewInfo } from './PhotoReviewInfo';
 import { PhotoRegionField } from './works-map/PhotoRegionField';
-import { parseWorksMapCoordinate } from './works-map/works-map-layout';
 
 export function PhotoDetail({ photo, onClose, onSave, busy, onRelink, extension, onDirtyChange }: {
   photo: Photo; onClose: () => void; busy: boolean;
@@ -31,7 +30,6 @@ export function PhotoDetail({ photo, onClose, onSave, busy, onRelink, extension,
   const [error, setError] = useState('');
   const infoTitleId = useId();
   const originalPath = displayOriginalPath(photo);
-  const hasCoordinates = !!parseWorksMapCoordinate(location);
   const initialRegionId = initial.locationRegionId ?? '';
   const dirty = title !== initial.title || tags !== initial.tags.join('，') || annotation !== initial.annotation || source !== initial.source || location !== initial.location
     || locationRegionId !== initialRegionId || project !== initial.project || capturedAtDirty;
@@ -85,7 +83,7 @@ export function PhotoDetail({ photo, onClose, onSave, busy, onRelink, extension,
         <label>{t('标题', 'Title')}<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
         <label>{t('标签', 'Tags')}<input value={tags} placeholder={t('用逗号分隔', 'Separate with commas')} onChange={(event) => setTags(event.target.value)} /></label>
         <div className="form-columns"><label>{t('地点', 'Location')}<input value={location} onChange={(event) => setLocation(event.target.value)} /></label><label>{t('项目', 'Project')}<input value={project} onChange={(event) => setProject(event.target.value)} /></label></div>
-        {(!hasCoordinates || locationRegionId) && <PhotoRegionField value={locationRegionId} readOnly={hasCoordinates} disabled={busy} onChange={setLocationRegionId} />}
+        <PhotoRegionField value={locationRegionId} disabled={busy} onChange={setLocationRegionId} />
         <DatePickerField label={t('拍摄时间', 'Date Taken')} withTime value={capturedAt} disabled={busy} onChange={setCapturedAt} />
         <label>{t('来源', 'Source')}<input value={source} placeholder={t('摄影师、网址或来源说明', 'Photographer, URL, or source notes')} onChange={(event) => setSource(event.target.value)} /></label>
         <label>{t('标注', 'Notes')}<textarea value={annotation} rows={4} placeholder={t('留下你的观察', 'Record your observations')} onChange={(event) => setAnnotation(event.target.value)} /></label>

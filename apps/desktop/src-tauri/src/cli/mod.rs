@@ -2,6 +2,7 @@
 mod arguments;
 mod catalog;
 mod documents;
+mod shooting_regions;
 
 use arguments::{AlbumAction, Arguments, Command, DocumentAction, Kind, PhotoAction};
 use clap::{error::ErrorKind, Parser};
@@ -245,6 +246,16 @@ fn photo(library: Library, action: PhotoAction) -> Result<Value, Failure> {
             let data = input(&file.file)?;
             library.write(|conn| value(catalog::update_photo(conn, &id, data)?))
         }
+        PhotoAction::SetRegion { id, region } => {
+            set_region(library, shooting_regions::Target::Photo(&id), &region)
+        }
+        PhotoAction::ClearRegion { id } => library.write(|conn| {
+            value(shooting_regions::assign(
+                conn,
+                shooting_regions::Target::Photo(&id),
+                "",
+            )?)
+        }),
     }
 }
 
@@ -292,7 +303,25 @@ fn album(library: Library, action: AlbumAction) -> Result<Value, Failure> {
                 &selection.photos,
             )?)
         }),
+        AlbumAction::SetRegion {
+            id,
+            region,
+            skip_gps,
+        } => set_region(
+            library,
+            shooting_regions::Target::Album { id: &id, skip_gps },
+            &region,
+        ),
     }
+}
+
+fn set_region(
+    library: Library,
+    target: shooting_regions::Target<'_>,
+    input: &str,
+) -> Result<Value, Failure> {
+    let region_id = shooting_regions::resolve(input)?;
+    library.write(|conn| value(shooting_regions::assign(conn, target, &region_id)?))
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@ async function moduleFromSource(filename) {
   }).outputText;
   return import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 }
-const { createWorksMapRegionData } = await moduleFromSource('works-map-regions.ts');
+const { createWorksMapAtlasData, createWorksMapRegionData } = await moduleFromSource('works-map-regions.ts');
 const { groupWorksMapPhotos, locateMapPhotos } = await moduleFromSource('works-map-layout.ts');
 const data = JSON.parse(readFileSync(new URL('natural-earth-regions.json', feature), 'utf8'));
 const regions = createWorksMapRegionData(data);
@@ -46,6 +46,31 @@ test('English region names preserve administrative IDs and outlines', () => {
   }
 });
 
+test('中国市级坐标优先命中市，省级手选地区仍保留独立锚点和轮廓', () => {
+  const cities = JSON.parse(readFileSync(new URL('china-city-regions.json', feature), 'utf8'));
+  const atlas = createWorksMapAtlasData(data, cities);
+  const hangzhou = { lat: 30.2741, lon: 120.1551 };
+  const region = atlas.resolve(hangzhou);
+  assert.deepEqual(region, {
+    id: 'CHN:city-330100', name: '杭州市', country: '中国', parentId: 'CHN:CHN-1820', parentName: '浙江省',
+  });
+  assert.deepEqual(atlas.regionById(region.id), region);
+  assert.ok(atlas.regions.includes(region));
+  assert.equal(atlas.resolve(atlas.regionAnchor(region.id))?.id, region.id);
+  assert.ok(atlas.outline(region.id)?.fill);
+  assert.deepEqual(atlas.regionAnchor(region.parentId), regions.regionAnchor(region.parentId));
+  assert.ok(atlas.regionAnchor(region.parentId));
+  assert.deepEqual(atlas.outline(region.parentId), regions.outline(region.parentId));
+  assert.equal(atlas.boundaries, regions.boundaries);
+
+  assert.equal(atlas.resolve({ lat: 32.0617, lon: 118.7778 })?.id, 'CHN:city-320100');
+  assert.equal(atlas.resolve({ lat: 39.916345, lon: 116.397155 })?.id, 'CHN:CHN-1155');
+  assert.deepEqual(atlas.resolve({ lat: 41.3874, lon: 2.1686 }), at(41.3874, 2.1686));
+  assert.deepEqual(createWorksMapAtlasData(data, cities, 'en').resolve(hangzhou), {
+    id: 'CHN:city-330100', name: 'Hangzhou', country: 'China', parentId: 'CHN:CHN-1820', parentName: 'Zhejiang',
+  });
+});
+
 test('手选目录的每个地区都有可反查到同一地区的内部地图锚点', () => {
   assert.ok(regions.regions.length > 4_000);
   for (const region of regions.regions) {
@@ -62,12 +87,12 @@ test('无 GPS 的手选照片与 GPS 照片同地区合组，保留成员顺序�
   const beijing = at(39.916345, 116.397155);
   const tianjin = at(39.084158, 117.200983);
   const manual = { id: 'manual-beijing', location: '雨天之后', locationRegionId: beijing.id };
-  const tagged = { id: 'gps-beijing', location: '39.916345, 116.397155', locationRegionId: tianjin.id };
+  const tagged = { id: 'gps-beijing', location: '39.916345, 116.397155', locationRegionId: beijing.id };
   const manualOnly = { id: 'manual-tianjin', location: '', locationRegionId: tianjin.id };
   const located = locateMapPhotos([
     manual, { id: 'legacy-text', location: '北京胡同' }, manualOnly, tagged, manual,
     { id: 'bad-id', location: '', locationRegionId: 'unknown' },
-    { id: 'sea', location: '0, -140', locationRegionId: tianjin.id },
+    { id: 'sea', location: '0, -140' },
   ]);
   assert.deepEqual(located.map(({ photo }) => photo.id), ['manual-beijing', 'manual-tianjin', 'gps-beijing', 'bad-id', 'sea']);
 
@@ -85,6 +110,31 @@ test('无 GPS 的手选照片与 GPS 照片同地区合组，保留成员顺序�
   assert.equal(manualGroup.representative.photo, manualOnly);
   assert.equal(resolve(manualGroup.representative.coordinate)?.id, tianjin.id);
   assert.equal(manualGroup.representative.photo.location, '');
+});
+
+test('手选和 GPS 不同的照片按手选归组，保留 GPS，并让全组显示地区代表点', () => {
+  const beijing = at(39.916345, 116.397155);
+  const tianjin = at(39.084158, 117.200983);
+  const tianjinPhoto = { id: 'gps-tianjin', location: '39.084158, 117.200983' };
+  const reassigned = { id: 'gps-beijing', location: '39.916345, 116.397155', locationRegionId: tianjin.id };
+  const legacy = { id: 'legacy-id', location: '39.882043, 116.406619', locationRegionId: 'unknown' };
+  const ocean = { id: 'ocean', location: '0, -140', locationRegionId: tianjin.id };
+  const group = (photos) => groupWorksMapPhotos(locateMapPhotos(photos), regions);
+
+  const find = (groups, id) => groups.find((region) => region.id === id);
+  const assigned = group([tianjinPhoto, reassigned, legacy, ocean]);
+  assert.equal(assigned.length, 2);
+  assert.deepEqual(find(assigned, beijing.id).photos.map(({ photo }) => photo), [legacy]);
+  const tianjinGroup = find(assigned, tianjin.id);
+  assert.deepEqual(tianjinGroup.photos.map(({ photo }) => photo), [tianjinPhoto, reassigned, ocean]);
+  assert.deepEqual(tianjinGroup.photos[1].coordinate, { lat: 39.916345, lon: 116.397155 });
+  assert.deepEqual(tianjinGroup.representative, { photo: tianjinPhoto, coordinate: regions.regionAnchor(tianjin.id) });
+  assert.deepEqual(group([ocean])[0].representative, { photo: ocean, coordinate: regions.regionAnchor(tianjin.id) });
+
+  const cleared = { ...reassigned, locationRegionId: '' };
+  const restored = group([tianjinPhoto, cleared, legacy]);
+  assert.deepEqual(find(restored, beijing.id).representative, { photo: cleared, coordinate: { lat: 39.916345, lon: 116.397155 } });
+  assert.deepEqual(find(restored, tianjin.id).representative, { photo: tianjinPhoto, coordinate: { lat: 39.084158, lon: 117.200983 } });
 });
 
 test('香港和澳门按特别行政区定位，台湾的台北和高雄归入同一区域', () => {

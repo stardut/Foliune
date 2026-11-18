@@ -558,13 +558,6 @@ pub(crate) fn set_location_regions(
             )
             .map_err(|error| error.to_string())?;
         for photo in photos {
-            if has_gps_location(&photo.location) {
-                return Err(tr(
-                    "带拍摄坐标的照片不能批量设置拍摄地区",
-                    "Photos with GPS coordinates cannot be assigned a shooting region in bulk",
-                )
-                .into());
-            }
             let changed = update
                 .execute(params![
                     region_id,
@@ -583,7 +576,7 @@ pub(crate) fn set_location_regions(
 }
 
 // Match the desktop map's signed decimal latitude and longitude format.
-fn has_gps_location(location: &str) -> bool {
+pub(crate) fn has_gps_location(location: &str) -> bool {
     fn in_range(value: &str, limit: f64) -> bool {
         let value = value.trim_matches(|character: char| {
             character == '\u{feff}' || (character != '\u{85}' && character.is_whitespace())

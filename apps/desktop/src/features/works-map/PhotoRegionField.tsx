@@ -11,13 +11,12 @@ function searchText(value: string) {
   return value.normalize('NFKD').replace(/\p{M}/gu, '').trim().toLocaleLowerCase(getLocale());
 }
 
-function regionLabel(region: WorksMapRegion) {
-  return region.country && region.country !== region.name ? `${region.name} · ${region.country}` : region.name;
+function regionContext(region: WorksMapRegion) {
+  return region.parentName ?? (region.country === region.name ? '' : region.country);
 }
 
-export function PhotoRegionField({ value, readOnly, disabled, onChange }: {
+export function PhotoRegionField({ value, disabled, onChange }: {
   value: string;
-  readOnly: boolean;
   disabled: boolean;
   onChange: (regionId: string) => void;
 }) {
@@ -29,11 +28,11 @@ export function PhotoRegionField({ value, readOnly, disabled, onChange }: {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const [data, setData] = useState<WorksMapRegionData | 'failed'>();
-  const editing = open && !readOnly && !disabled;
+  const editing = open && !disabled;
   const wantsData = editing || !!value;
   const close = useCallback(() => { setOpen(false); setQuery(''); setActive(0); }, []);
   useDismiss(editing, close, field, { escape: false });
-  useEffect(() => { if (readOnly || disabled) close(); }, [close, disabled, readOnly]);
+  useEffect(() => { if (disabled) close(); }, [close, disabled]);
   useEffect(() => {
     if (!wantsData || data) return;
     let mounted = true;
@@ -44,7 +43,10 @@ export function PhotoRegionField({ value, readOnly, disabled, onChange }: {
   }, [data, wantsData]);
 
   const index = useMemo(() => data && data !== 'failed' ? data.regions.map((region) => ({
-    region, name: searchText(region.name), text: searchText(`${region.name} ${region.country}`),
+    region,
+    context: regionContext(region),
+    name: searchText(region.name),
+    text: searchText(`${region.name} ${region.parentName ?? ''} ${region.country}`),
   })) : [], [data]);
   const normalized = searchText(query);
   const matches = useMemo(() => {
@@ -52,12 +54,12 @@ export function PhotoRegionField({ value, readOnly, disabled, onChange }: {
     const terms = normalized.split(/\s+/u);
     return index.filter(({ text }) => terms.every((term) => text.includes(term)))
       .sort((a, b) => matchRank(a.name, normalized) - matchRank(b.name, normalized)
-        || a.region.name.localeCompare(b.region.name, getLocale()) || a.region.country.localeCompare(b.region.country, getLocale()))
+        || a.region.name.localeCompare(b.region.name, getLocale()) || a.context.localeCompare(b.context, getLocale()))
       .slice(0, 12);
   }, [index, normalized]);
 
   const selected = value && data && data !== 'failed' ? data.regionById(value) : undefined;
-  const selectedLabel = selected ? regionLabel(selected) : '';
+  const selectedLabel = selected ? [selected.name, regionContext(selected)].filter(Boolean).join(' · ') : '';
   const activeOption = editing && matches[active];
   const optionId = `${id}-${active}`;
   const status = data === 'failed' ? t('无法读取离线地区', 'Could not load offline regions')
@@ -76,7 +78,7 @@ export function PhotoRegionField({ value, readOnly, disabled, onChange }: {
     close();
   }
   function keyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (readOnly || disabled || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+    if (disabled || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
       || event.altKey || event.ctrlKey || event.metaKey) return;
     if (event.key === 'Escape' && editing) {
       event.preventDefault();
@@ -94,32 +96,31 @@ export function PhotoRegionField({ value, readOnly, disabled, onChange }: {
   }
 
   const label = t('拍摄地区', 'Shooting Region');
-  const placeholder = t('搜索省、州或国家', 'Search by region or country');
+  const placeholder = t('搜索城市、省州或国家', 'Search by city, region, or country');
   return <div ref={field} className="photo-region-field" onBlur={(event) => {
     if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) close();
   }}>
     <label htmlFor={id}>{label}</label>
     <div className="photo-region-control">
-      <input id={id} ref={input} readOnly={readOnly} disabled={disabled} role={readOnly ? undefined : 'combobox'}
-        aria-autocomplete={readOnly ? undefined : 'list'} aria-expanded={readOnly ? undefined : editing && matches.length > 0}
+      <input id={id} ref={input} disabled={disabled} role="combobox"
+        aria-autocomplete="list" aria-expanded={editing && matches.length > 0}
         aria-controls={editing && matches.length ? `${id}-list` : undefined} aria-activedescendant={activeOption ? optionId : undefined}
-        aria-describedby={showStatus ? `${id}-status` : readOnly ? `${id}-gps` : undefined}
+        aria-describedby={showStatus ? `${id}-status` : undefined}
         autoComplete="off" spellCheck={false} title={selectedLabel || undefined}
-        placeholder={readOnly ? undefined : selectedLabel || placeholder} value={editing ? query : selectedLabel}
-        onFocus={() => { if (!readOnly && !disabled) setOpen(true); }} onClick={() => { if (!readOnly && !disabled) setOpen(true); }}
+        placeholder={selectedLabel || placeholder} value={editing ? query : selectedLabel}
+        onFocus={() => setOpen(true)} onClick={() => setOpen(true)}
         onChange={(event) => { setQuery(event.target.value); setActive(0); setOpen(true); }} onKeyDown={keyDown} />
-      {!readOnly && value && <IconButton label={t('清除拍摄地区', 'Clear Shooting Region')} disabled={disabled}
+      {value && <IconButton label={t('清除拍摄地区', 'Clear Shooting Region')} disabled={disabled}
         onClick={() => { input.current?.focus({ preventScroll: true }); choose(''); }}><X size={15} aria-hidden="true" /></IconButton>}
     </div>
     {editing && matches.length > 0 && <div id={`${id}-list`} role="listbox" aria-label={label} ref={panel} className="photo-region-options">
-      {matches.map(({ region }, option) => <div key={region.id} id={`${id}-${option}`} role="option"
+      {matches.map(({ region, context }, option) => <div key={region.id} id={`${id}-${option}`} role="option"
         className="dropdown-row" aria-selected={region.id === value} data-active={option === active || undefined}
         onMouseDown={(event) => event.preventDefault()} onClick={() => choose(region.id)}>
-        <span className="photo-region-option-name">{region.name}</span>{region.country !== region.name && <small>{region.country}</small>}
+        <span className="photo-region-option-name">{region.name}</span>{context && <small>{context}</small>}
       </div>)}
     </div>}
     {showStatus && <small id={`${id}-status`} className="muted" role="status">{status}</small>}
-    {readOnly && <small id={`${id}-gps`} className="muted">{t('地图优先使用精确坐标', 'The map uses the exact coordinates')}</small>}
   </div>;
 }
 

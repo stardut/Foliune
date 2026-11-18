@@ -11,7 +11,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{collections::HashSet, io::Read, path::Path};
 
-// The CLI does not expose the desktop's manual region assignment and can read older libraries.
+// Photo queries keep their output shape and support libraries predating shooting regions.
 const PHOTO_REGION_PLACEHOLDER: &str = "''";
 
 #[derive(Serialize)]
@@ -121,7 +121,7 @@ fn ensure_album(conn: &Connection, id: &str) -> Result<(), String> {
         .map_err(album_error)
 }
 
-fn album_error(error: String) -> String {
+pub(super) fn album_error(error: String) -> String {
     if error == "分组不存在" {
         NOT_FOUND.into()
     } else {

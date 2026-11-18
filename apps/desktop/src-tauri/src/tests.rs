@@ -484,6 +484,11 @@ fn bulk_photo_regions_atomically_save_active_work_album_members() {
             location: "拍摄地笔记".into(),
             location_region_id: "FRA:Île-de-France".into(),
         },
+        photos::PhotoRegionBaseline {
+            id: gps.clone(),
+            location: "39.900000, 116.400000".into(),
+            location_region_id: String::new(),
+        },
     ];
     let saved =
         photos::set_location_regions(&mut conn, &targets, "ESP:Castilla y León", Some(&album))
@@ -491,16 +496,13 @@ fn bulk_photo_regions_atomically_save_active_work_album_members() {
     for (id, location) in [(first, ""), (second, "拍摄地笔记"), (gps, "39.900000, 116.400000")] {
         let photo = saved.photos.iter().find(|photo| &photo.id == id).unwrap();
         assert_eq!(photo.location, location);
-        assert_eq!(
-            photo.location_region_id,
-            if id == gps { "" } else { "ESP:Castilla y León" }
-        );
+        assert_eq!(photo.location_region_id, "ESP:Castilla y León");
     }
     assert_eq!(saved.memberships.len(), 3);
 }
 
 #[test]
-fn bulk_photo_regions_reject_gps_stale_or_ineligible_targets_without_partial_writes() {
+fn bulk_photo_regions_reject_stale_or_ineligible_targets_without_partial_writes() {
     let (root, store) = store();
     let image = fixture(&root, "bulk-conflict.png");
     let album = groups::insert(
@@ -543,7 +545,6 @@ fn bulk_photo_regions_reject_gps_stale_or_ineligible_targets_without_partial_wri
         location_region_id: region_id.into(),
     };
     for (target, group_id) in [
-        (baseline(gps, gps_location, ""), Some(album.as_str())),
         (baseline(gps, "", ""), Some(album.as_str())),
         (baseline(moved, "", ""), Some(album.as_str())),
         (baseline(hidden, "", ""), None),

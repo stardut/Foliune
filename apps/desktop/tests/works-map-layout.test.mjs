@@ -11,7 +11,7 @@ const compiled = ts.transpileModule(source, {
 }).outputText;
 const {
   centerWorksMapView, createWorksMapFrame, fitWorksMapView, groupWorksMapPhotos, interpolateWorksMapLayout, layoutWorksMap, locateMapPhotos,
-  maxWorksMapScale, minWorksMapScale, panWorksMapView, parseWorksMapCoordinate, projectWorksMapCoordinate,
+  maxWorksMapScale, minWorksMapScale, panWorksMapView, parseWorksMapCoordinate, projectWorksMapCoordinate, selectWorksMapRegions,
   unprojectWorksMapPoint, worksMapDrawingBounds, worksMapGlobeBounds, worksMapVisibleCircle, zoomWorksMapView,
 } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 
@@ -22,6 +22,29 @@ const gpsRegions = resolve => ({ resolve, regionById: () => undefined, regionAnc
 const individualRegions = photos => locateMapPhotos(photos).map(item =>
   ({ ...region(item.photo.id), representative: item, photos: [item] }));
 const anchors = groups => groups.map(({ representative }) => representative.coordinate);
+const chinaSites = [
+  ['zhejiang', 29.8, 120.5],
+  ['sichuan', 30.5, 102.8],
+  ['hangzhou', 30.2741, 120.1551, 'zhejiang'],
+  ['ningbo', 29.8683, 121.544, 'zhejiang'],
+  ['chengdu', 30.5723, 104.0665, 'sichuan'],
+  ['aba', 31.8998, 102.2247, 'sichuan'],
+  ['fujian', 26.07, 119.3],
+  ['anhui', 31.82, 117.23],
+  ['yunnan', 25.04, 102.72],
+  ['hunan', 28.23, 112.94],
+];
+const chinaRegions = chinaSites.map(([id, lat, lon, parentId]) => ({ ...region(id), lat, lon, parentId }));
+const chinaCatalog = {
+  resolve: ({ lat, lon }) => chinaRegions.find(site => site.lat === lat && site.lon === lon),
+  regionById: id => chinaRegions.find(site => site.id === id),
+  regionAnchor: id => {
+    const { lat, lon } = chinaRegions.find(site => site.id === id);
+    return { lat: lat + .1, lon };
+  },
+};
+const cityPhotos = chinaSites.filter(([, , , parentId]) => parentId)
+  .map(([id, lat, lon], index) => photo(id, lat, lon, ...(index % 2 ? [4000, 6000] : [6000, 4000])));
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-7, `${actual} ≠ ${expected}`);
 const right = rect => rect.x + rect.width;
 const bottom = rect => rect.y + rect.height;
@@ -178,7 +201,7 @@ test('宽窄窗口首屏沿真实球缘，放大后外圈逐级扩张并裁切�
       const { markers, cards } = layoutWorksMap(regions, frame, view, 'hidden');
       assert.deepEqual(markers.map(({ group }) => group.id), ['edge', 'nearby']);
       assert.ok(cards.length > 0);
-      for (const point of [...markers.flatMap(({ point, button }) => [point, button]), ...cards.map(({ line }) => line.from)]) {
+      for (const point of [...markers.map(({ point }) => point), ...cards.map(({ line }) => line.from)]) {
         assert.ok(Math.hypot(point.x - center.x, point.y - center.y) <= radius);
       }
       assert.ok(cards.every(({ regionId }) => regionId !== 'hidden'));
@@ -212,7 +235,7 @@ test('京津与天山的展签在宽窄窗缩放期间连续移动，保持原�
       const view = zoomWorksMapView(from, frame.map, 1 + (to.scale / from.scale - 1) * progress);
       const circle = worksMapVisibleCircle(view, frame.map);
       const current = layoutWorksMap(regions, frame, view);
-      const result = interpolateWorksMapLayout(start, target, current, circle, progress);
+      const result = interpolateWorksMapLayout(start, target, current, progress);
       assert.equal(result.cards.length, 3);
       result.cards.forEach(({ rect, side, regionId, line, photo }, index) => {
         const previous = start.cards[index].rect;
@@ -220,7 +243,7 @@ test('京津与天山的展签在宽窄窗缩放期间连续移动，保持原�
         close(rect.x, previous.x + (next.x - previous.x) * progress);
         close(rect.y, previous.y + (next.y - previous.y) * progress);
         close(rect.width / rect.height, photo.width / photo.height);
-        assert.deepEqual(line.from, result.markers.find(({ group }) => group.id === regionId).button);
+        assert.deepEqual(line.from, result.markers.find(({ group }) => group.id === regionId).point);
         const gap = side === 'bottom' ? rect.y - (circle.center.y + circle.radius)
           : side === 'left' ? circle.center.x - circle.radius - right(rect) : rect.x - (circle.center.x + circle.radius);
         assert.ok(gap >= (frame.narrow ? 13 : 22) - 1e-7);
@@ -249,17 +272,107 @@ test('按行政区保留一组与固定代表照，缩放不会合并相邻省�
   assert.equal(wide.cards.length, 2);
   const [beijing, tianjin] = wide.markers;
   assert.ok(Math.hypot(beijing.point.x - tianjin.point.x, beijing.point.y - tianjin.point.y) < 11);
-  assert.ok(Math.hypot(beijing.button.x - tianjin.button.x, beijing.button.y - tianjin.button.y) >= 30 - 1e-7);
   const card = wide.cards.find(({ regionId }) => regionId === 'CN-BJ');
   assert.equal(card.photo.id, 'palace');
-  assert.deepEqual(card.line.from, beijing.button);
+  assert.deepEqual(card.line.from, beijing.point);
   assert.deepEqual(tianjin.point, projectWorksMapCoordinate(groups[1].representative.coordinate, overview, frame.map));
-  assert.deepEqual(wide.cards.find(({ regionId }) => regionId === 'CN-TJ').line.from, tianjin.button);
+  assert.deepEqual(wide.cards.find(({ regionId }) => regionId === 'CN-TJ').line.from, tianjin.point);
   const closer = zoomWorksMapView(overview, frame.map, 16);
   const zoomed = layoutWorksMap(groups, frame, closer);
   assert.deepEqual(zoomed.markers.map(({ group }) => group), groups);
-  assert.ok(Math.hypot(zoomed.markers[0].button.x - zoomed.markers[1].button.x,
-    zoomed.markers[0].button.y - zoomed.markers[1].button.y) >= 30 - 1e-7);
+  for (const { group, point } of zoomed.markers) {
+    assert.deepEqual(point, projectWorksMapCoordinate(group.representative.coordinate, closer, frame.map));
+  }
+});
+
+test('省份少时可同时展开两省，照片和展签各出现一次，点位用真实 GPS', () => {
+  const frame = createWorksMapFrame(1248, 582);
+  const overview = groupWorksMapPhotos(locateMapPhotos([...cityPhotos, cityPhotos[0]]), chinaCatalog);
+  assert.deepEqual(overview.map(({ id }) => id), ['sichuan', 'zhejiang']);
+  const view = fitWorksMapView(anchors(overview), frame.map);
+  const groups = selectWorksMapRegions(overview, frame, view);
+  const { markers, cards } = layoutWorksMap(groups, frame, view);
+  assert.deepEqual(groups.map(({ id }) => id), ['aba', 'chengdu', 'hangzhou', 'ningbo']);
+  assert.deepEqual(new Set(cards.map(({ regionId }) => regionId)), new Set(groups.map(({ id }) => id)));
+  assert.deepEqual(groups.flatMap(({ photos }) => photos.map(({ photo }) => photo.id)).sort(), groups.map(({ id }) => id));
+  for (const { group, point } of markers) {
+    assert.deepEqual(point, projectWorksMapCoordinate(parseWorksMapCoordinate(group.representative.photo.location), view, frame.map));
+  }
+});
+
+test('杭州、温州、成都和凉山的混合画幅在宽窗同时展开，四条引线各自直连', () => {
+  const samples = [
+    ['hangzhou', 'zhejiang', 30.2741, 120.1551, 720, 5],
+    ['wenzhou', 'zhejiang', 27.9943, 120.6994, 1280, 4],
+    ['chengdu', 'sichuan', 30.5728, 104.0668, 720, 4],
+    ['liangshan', 'sichuan', 27.8945, 102.2630, 720, 4],
+  ];
+  const cities = individualRegions(samples.map(([id, , lat, lon, height]) => photo(id, lat, lon, 960, height)))
+    .map((group, index) => ({ ...group, parentId: samples[index][1], photos: Array(samples[index][5]).fill(group.photos[0]) }));
+  const overview = ['sichuan', 'zhejiang'].map(id => {
+    const whenExpanded = cities.filter(({ parentId }) => parentId === id);
+    return { ...region(id), representative: whenExpanded[0].representative, photos: whenExpanded.flatMap(({ photos }) => photos), whenExpanded };
+  });
+
+  for (const width of [1212, 1248, 1280]) {
+    const frame = createWorksMapFrame(width, 582);
+    const view = fitWorksMapView(anchors(overview), frame.map);
+    const groups = selectWorksMapRegions(overview, frame, view);
+    const { cards, markers } = layoutWorksMap(groups, frame, view);
+    const expected = new Set(cities.map(({ id }) => id));
+    assert.deepEqual(new Set(groups.map(({ id }) => id)), expected);
+    assert.deepEqual(new Set(cards.map(({ regionId }) => regionId)), expected);
+    for (const [index, { regionId, line, photo, rect }] of cards.entries()) {
+      assert.deepEqual(line.from, markers.find(({ group }) => group.id === regionId).point);
+      close(rect.width / rect.height, photo.width / photo.height);
+      for (const other of cards.slice(index + 1)) assert.equal(intersection(line, other.line), false);
+    }
+  }
+});
+
+test('总览展签达到容量时保持省级，窄窗只能放下一部分，球缘下无余量时保持省级', () => {
+  const extraProvinces = chinaSites.slice(-4).map(([id, lat, lon]) => photo(id, lat, lon));
+  const dense = groupWorksMapPhotos(locateMapPhotos([...cityPhotos, ...extraProvinces]), chinaCatalog);
+  const wide = createWorksMapFrame(1248, 582);
+  assert.equal(selectWorksMapRegions(dense, wide, fitWorksMapView(anchors(dense), wide.map)), dense);
+
+  const overview = groupWorksMapPhotos(locateMapPhotos(cityPhotos), chinaCatalog);
+  const narrow = createWorksMapFrame(848, 350);
+  const narrowView = fitWorksMapView(anchors(overview), narrow.map);
+  const partial = selectWorksMapRegions(overview, narrow, narrowView);
+  assert.deepEqual(partial.map(({ id }) => id), ['aba', 'chengdu', 'zhejiang']);
+  assert.equal(layoutWorksMap(partial, narrow, narrowView).cards.length, partial.length);
+
+  const short = createWorksMapFrame(580, 100);
+  const shortView = fitWorksMapView(anchors(overview), short.map);
+  assert.equal(layoutWorksMap(overview, short, shortView).cards.length, 0);
+  assert.equal(selectWorksMapRegions(overview, short, shortView), overview);
+
+  const singleCity = groupWorksMapPhotos(locateMapPhotos(cityPhotos.slice(0, 1)), chinaCatalog);
+  assert.deepEqual(singleCity.map(({ id }) => id), ['zhejiang']);
+  assert.equal(selectWorksMapRegions(singleCity, wide, fitWorksMapView(anchors(singleCity), wide.map)), singleCity);
+});
+
+test('自动收起或展开仅移动 GPS 自动照片，手选城市和手选省的坐标依行政层级判断', () => {
+  const [hangzhou, ningbo, chengdu] = cityPhotos;
+  const manualProvince = { ...hangzhou, id: 'manual-province', locationRegionId: 'zhejiang' };
+  const manualCity = { ...chengdu, id: 'manual-city', locationRegionId: 'ningbo' };
+  const overview = groupWorksMapPhotos(locateMapPhotos([hangzhou, manualCity, ningbo, manualProvince]), chinaCatalog);
+  const [city, province] = overview;
+  assert.equal(city.id, 'ningbo');
+  assert.deepEqual(city.photos.map(({ photo }) => photo.id), ['manual-city']);
+  assert.deepEqual(city.photos[0].coordinate, parseWorksMapCoordinate(chengdu.location));
+  assert.deepEqual(city.representative.coordinate, chinaCatalog.regionAnchor('ningbo'));
+  assert.deepEqual(province.photos.map(({ photo }) => photo.id), ['hangzhou', 'ningbo', 'manual-province']);
+
+  const groups = province.whenExpanded;
+  assert.deepEqual(groups.map(({ id }) => id), ['hangzhou', 'ningbo', 'zhejiang']);
+  assert.deepEqual(groups[1].photos.map(({ photo }) => photo.id), ['manual-city', 'ningbo']);
+  assert.deepEqual(groups[1].representative.coordinate, chinaCatalog.regionAnchor('ningbo'));
+  assert.deepEqual(groups[2].photos.map(({ photo }) => photo.id), ['manual-province']);
+  assert.deepEqual(groups[2].representative.coordinate, parseWorksMapCoordinate(hangzhou.location));
+  assert.deepEqual(groups.flatMap(({ photos }) => photos.map(({ photo }) => photo.id)).sort(),
+    ['hangzhou', 'manual-city', 'manual-province', 'ningbo']);
 });
 
 test('京津与天山的宽窄总览保留海岸取景空间，同时三地都有独立展签', () => {
@@ -309,10 +422,10 @@ test('宽窗在球体两翼放原比例照片，窄窗沿底边排列，展签�
       close(rect.width / rect.height, card.photo.width / card.photo.height);
       close(captionRect.y, bottom(rect));
       assert.ok(captionRect.x <= rect.x && right(captionRect) >= right(rect) - 1e-7);
-      assert.deepEqual(line.from, markers.find(({ group }) => group.id === card.regionId).button);
+      assert.deepEqual(line.from, markers.find(({ group }) => group.id === card.regionId).point);
       assert.ok(inside(line.from, frame.map));
       for (const marker of markers) {
-        if (marker.group.id !== card.regionId) assert.ok(distanceToLine(marker.button, line) >= 11 - 1e-7);
+        if (marker.group.id !== card.regionId) assert.ok(distanceToLine(marker.point, line) >= 11 - 1e-7);
       }
       if (frame.narrow) {
         assert.equal(side, 'bottom');
@@ -342,12 +455,12 @@ test('展签引线为下方的其他点位让出可辨认的间距', () => {
   const { cards, markers } = layoutWorksMap(regions, frame, view, 'upper');
   assert.equal(markers.length, 2);
   const upper = cards.find(card => card.photo.id === 'upper');
-  const lowerPoint = markers.find(({ group }) => group.id === 'lower').button;
+  const lowerPoint = markers.find(({ group }) => group.id === 'lower').point;
   assert.ok(Math.abs(upper.line.to.x - upper.line.from.x) > 10);
   assert.ok(distanceToLine(lowerPoint, upper.line) >= 11 - 1e-7);
 });
 
-test('北京、河北、新疆同时展示时，展签引线避开其他地区的点位短线', () => {
+test('北京、河北、新疆同时展示时，邻近点的引线各从真实位置直出', () => {
   const frame = createWorksMapFrame(1248, 520);
   const regions = individualRegions([
     photo('beijing', 39.9042, 116.4074), photo('xinjiang', 43.8256, 87.6168), photo('hebei', 38.0428, 114.5149),
@@ -355,12 +468,48 @@ test('北京、河北、新疆同时展示时，展签引线避开其他地区�
   const view = fitWorksMapView(anchors(regions), frame.map);
   const { cards, markers } = layoutWorksMap(regions, frame, view);
   assert.equal(cards.length, 3);
-  const stems = markers.filter(({ point, button }) => point !== button);
-  assert.ok(stems.some(({ group }) => group.id === 'hebei'));
-  for (const card of cards) {
-    for (const { group, point, button } of stems) {
-      if (group.id !== card.regionId) assert.equal(intersection(card.line, { from: point, to: button }), false);
-    }
+  const beijing = markers.find(({ group }) => group.id === 'beijing').point;
+  const hebei = markers.find(({ group }) => group.id === 'hebei').point;
+  const spacing = Math.hypot(beijing.x - hebei.x, beijing.y - hebei.y);
+  assert.ok(spacing < 11);
+  const beijingLine = cards.find(({ regionId }) => regionId === 'beijing').line;
+  const hebeiLine = cards.find(({ regionId }) => regionId === 'hebei').line;
+  assert.deepEqual(beijingLine.from, beijing);
+  assert.deepEqual(hebeiLine.from, hebei);
+  assert.ok(distanceToLine(hebei, beijingLine) >= spacing / 2);
+  assert.ok(distanceToLine(beijing, hebeiLine) >= spacing / 2);
+  assert.equal(intersection(beijingLine, hebeiLine), false);
+});
+
+test('截图里的五个地区各有展签，四川从真实点直连且避开重庆点位', () => {
+  const frame = createWorksMapFrame(1062, 594);
+  const view = { center: { lat: 33, lon: 101 }, scale: minWorksMapScale(frame.map) };
+  const samples = [
+    ['chongqing', 572, 318, 6000, 4000, 22],
+    ['gansu', 531.5, 273, 6000, 3375, 26],
+    ['xinjiang', 487, 272, 3375, 6000, 162],
+    ['sichuan', 556.5, 307.5, 3375, 6000, 825],
+    ['tibet', 505.5, 314.5, 6000, 4000, 79],
+  ];
+  const groups = individualRegions(samples.map(([id, x, y, width, height]) => {
+    const { lat, lon } = unprojectWorksMapPoint({ x, y }, view, frame.map);
+    return photo(id, lat, lon, width, height);
+  }));
+  groups.forEach((group, index) => {
+    group.photos = Array(samples[index][5]).fill(group.photos[0]);
+  });
+
+  const { markers, cards } = layoutWorksMap(groups, frame, view);
+  assert.deepEqual(new Set(cards.map(({ regionId }) => regionId)), new Set(groups.map(({ id }) => id)));
+  const sichuan = cards.find(({ regionId }) => regionId === 'sichuan').line;
+  const chongqing = markers.find(({ group }) => group.id === 'chongqing').point;
+  close(sichuan.from.x, 556.5);
+  close(sichuan.from.y, 307.5);
+  assert.ok(sichuan.to.x > sichuan.from.x);
+  assert.ok(distanceToLine(chongqing, sichuan) >= 11);
+  for (const [index, { regionId, line }] of cards.entries()) {
+    assert.deepEqual(line.from, markers.find(({ group }) => group.id === regionId).point);
+    for (const other of cards.slice(index + 1)) assert.equal(intersection(line, other.line), false);
   }
 });
 

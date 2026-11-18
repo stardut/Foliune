@@ -94,6 +94,7 @@ const bundle = await build({
         'export const shareAlbumAirDrop = (...args) => globalThis.albumAirDropTest(...args);',
         'export const updateGroup = (...args) => globalThis.albumCoverTest(...args);',
         'export const saveAlbumInfo = (...args) => globalThis.albumInfoSaveTest(...args);',
+        'export const setPhotoRegions = (...args) => globalThis.albumPhotoRegionTest(...args);',
         'export const cancelCuration = (...args) => globalThis.albumInfoCancelTest(...args);',
         'export const readAlbumCover = () => { throw new Error("Unexpected album cover read"); };',
         ...['prepareGroupCuration', 'setMembershipStatuses', 'updatePhoto', 'createGroup', 'commitCuration', 'deleteGroup'].map(name => `export const ${name} = () => { throw new Error('Unexpected native mutation: ${name}'); };`),
@@ -314,6 +315,95 @@ test('隔空投送区分整本相簿、选片和未选照片，取消后保留�
 function pressKey(target, key) {
   return act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
 }
+
+test('整本和多选地区弹窗按实际改动计数并保留失败后的选择', async () => {
+  const groupId = 'work-album';
+  const beijing = 'CHN:CHN-1155';
+  const tianjin = 'CHN:CHN-1816';
+  const gps = { ...photo('work', 'gps'), location: '39.916345, 116.397155', locationRegionId: beijing };
+  const manual = { ...photo('work', 'manual'), location: '现场记录', locationRegionId: tianjin };
+  const plain = { ...photo('work', 'plain'), location: '旧地点说明' };
+  const rejected = { ...photo('work', 'reject'), location: '39.084158, 117.200983' };
+  const input = {
+    ...mixed, photos: [gps, manual, plain, rejected],
+    memberships: [gps, manual, plain, rejected].map(({ id: photoId }, position) =>
+      ({ groupId, photoId, position, status: photoId === rejected.id ? 'discarded' : 'active' })),
+  };
+  const saved = [];
+  const baseline = ({ id, location, locationRegionId = '' }) => ({ id, location, locationRegionId });
+  let menu;
+  globalThis.captureAlbumTestMenu = ({ actions }) => { menu = actions; };
+  globalThis.albumPhotoRegionTest = async (...args) => {
+    saved.push(args);
+    if (saved.length === 1) throw new Error('照片拍摄地区已变化');
+    return input;
+  };
+  try {
+    await scenario('work', input, async ({ container }) => {
+      const action = (id) => menu.find((item) => item.id === id);
+      const run = (id) => act(async () => action(id).run());
+      const click = (node) => act(async () => node.click());
+      const context = (node) => act(async () => node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+      const dialog = () => container.querySelector('dialog');
+      const button = (label) => [...dialog().querySelectorAll('button')].find((node) => node.textContent === label);
+      const skip = () => dialog().querySelector('input[type="checkbox"]');
+      const summary = () => dialog().querySelector('[aria-live="polite"]').textContent;
+      async function choose(name) {
+        const field = dialog().querySelector('[role="combobox"]');
+        await click(field);
+        await act(async () => {
+          Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(field, name);
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await pressKey(field, 'Enter');
+        assert.match(field.value, new RegExp(name));
+      }
+
+      const card = container.querySelector('.album-open');
+      await context(card);
+      await run('shooting-region');
+      assert.equal(skip().checked, false);
+      assert.equal(button('保存').disabled, true);
+      await choose('天津市');
+      assert.equal(summary(), '将更新 2 张照片。');
+      await click(skip());
+      assert.equal(summary(), '将更新 1 张照片。 跳过 1 张有 GPS 坐标的照片。');
+      await choose('北京市');
+      assert.match(summary(), /^将更新 2 张照片。/);
+      await choose('天津市');
+      await click(skip());
+      await click(button('保存'));
+      const entireAlbum = [[baseline(gps), baseline(plain)], tianjin, groupId];
+      assert.deepEqual(saved, [entireAlbum]);
+      assert.equal(dialog().querySelector('[role="alert"]').textContent, '照片拍摄地区已变化');
+      assert.equal(summary(), '将更新 2 张照片。');
+      await click(button('保存'));
+      assert.equal(dialog(), null);
+
+      await click(card);
+      await click(container.querySelector('[aria-label="总览"]'));
+      const tile = (id) => container.querySelector(`[data-photo-id="${id}"] button`);
+      await context(tile(gps.id));
+      await run('select');
+      await click(tile(manual.id));
+      await click(container.querySelector('[data-testid="selection-more"]'));
+      await run('shooting-region');
+      assert.equal(skip().checked, false);
+      await choose('天津市');
+      assert.equal(summary(), '将更新 1 张照片。');
+      await click(skip());
+      assert.match(summary(), /^将更新 0 张照片。/);
+      assert.equal(button('保存').disabled, true);
+      await choose('北京市');
+      assert.match(summary(), /^将更新 1 张照片。/);
+      await click(button('保存'));
+      assert.deepEqual(saved, [entireAlbum, entireAlbum, [[baseline(manual)], beijing, groupId]]);
+    }, { expectedSnapshots: [input, input] });
+  } finally {
+    delete globalThis.captureAlbumTestMenu;
+    delete globalThis.albumPhotoRegionTest;
+  }
+});
 
 test('相簿信息在保存后关闭，只有后端返回超限候选时才进入取舍', async (t) => {
   const groupId = 'collection-album';

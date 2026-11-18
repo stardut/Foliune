@@ -5,3 +5,5 @@
 .photo-region-options > .dropdown-row { height: auto; min-height: 32px; gap: 10px; }
 .photo-region-option-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .photo-region-options small { max-width: 48%; text-align: right; color: var(--muted); overflow-wrap: anywhere; }
+.photo-region-batch-options { display: grid; gap: 7px; }
+.photo-region-batch-options > label { flex-direction: row; align-items: center; }

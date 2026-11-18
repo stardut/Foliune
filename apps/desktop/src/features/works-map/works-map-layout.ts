@@ -8,11 +8,12 @@ export interface LocatedMapPhoto<T extends MapPhoto> { photo: T; coordinate?: Ma
 export interface WorksMapView { center: MapCoordinate; scale: number }
 export interface WorksMapFrame { map: MapRect; narrow: boolean; lowerShelf: number }
 export interface WorksMapRegionGroup<T extends MapPhoto> extends WorksMapRegion {
-  // This point places the region on the map. For groups with no GPS it is an interior point of the region.
+  // Use the region's interior point when GPS is unavailable or conflicts with a manual region.
   representative: { photo: T; coordinate: MapCoordinate };
   photos: LocatedMapPhoto<T>[];
+  whenExpanded?: WorksMapRegionGroup<T>[];
 }
-export interface WorksMapRegionMarker<T extends MapPhoto> { group: WorksMapRegionGroup<T>; point: MapPoint; button: MapPoint }
+export interface WorksMapRegionMarker<T extends MapPhoto> { group: WorksMapRegionGroup<T>; point: MapPoint }
 export interface WorksMapCard<T extends MapPhoto> {
   regionId: string;
   photo: T;
@@ -31,8 +32,6 @@ interface MapLine { from: MapPoint; to: MapPoint }
 interface CardPlacement<T extends MapPhoto> { card: WorksMapCard<T>; bounds: MapRect; score: number }
 
 const coordinatePattern = /^\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*,\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*$/;
-const buttonSeparation = 30;
-const buttonRadius = 14;
 const markerClearance = 11;
 const captionHeight = 18;
 const cardGap = 12;
@@ -82,26 +81,61 @@ export function locateMapPhotos<T extends MapPhoto>(photos: readonly T[]): Locat
 export function groupWorksMapPhotos<T extends MapPhoto>(
   photos: readonly LocatedMapPhoto<T>[], regions: Pick<WorksMapRegionData, 'resolve' | 'regionById' | 'regionAnchor'>,
 ): WorksMapRegionGroup<T>[] {
-  const groups = new Map<string, {
+  type Group = {
     region: WorksMapRegion; photos: LocatedMapPhoto<T>[]; gps?: WorksMapRegionGroup<T>['representative'];
-  }>();
-  for (const item of photos) {
+    useRegionAnchor: boolean;
+  };
+  const overview = new Map<string, Group>();
+  const details = new Map<string, Group>();
+  const citiesByProvince = new Map<string, Set<string>>();
+  function add(groups: Map<string, Group>, region: WorksMapRegion, item: LocatedMapPhoto<T>, gpsRegion?: WorksMapRegion) {
     const { coordinate, photo } = item;
-    const region = coordinate ? regions.resolve(coordinate)
-      : photo.locationRegionId ? regions.regionById(photo.locationRegionId) : undefined;
-    if (!region) continue;
     let group = groups.get(region.id);
     if (!group) {
-      group = { region, photos: [] };
+      group = { region, photos: [], useRegionAnchor: false };
       groups.set(region.id, group);
     }
     group.photos.push(item);
-    if (coordinate && !group.gps) group.gps = { photo, coordinate };
+    if (coordinate) {
+      const belongsToRegion = gpsRegion?.id === region.id || gpsRegion?.parentId === region.id;
+      if (!belongsToRegion) group.useRegionAnchor = true;
+      else if (!group.gps) group.gps = { photo, coordinate };
+    }
   }
-  return [...groups.values()].flatMap(({ region, photos: members, gps }) => {
-    const coordinate = gps?.coordinate ?? regions.regionAnchor(region.id);
-    return coordinate ? [{ ...region, photos: members, representative: { photo: gps?.photo ?? members[0].photo, coordinate } }] : [];
-  }).sort((a, b) => a.id.localeCompare(b.id, 'en'));
+  for (const item of photos) {
+    const { coordinate, photo } = item;
+    const gpsRegion = coordinate && regions.resolve(coordinate);
+    const manualRegion = photo.locationRegionId ? regions.regionById(photo.locationRegionId) : undefined;
+    const region = manualRegion ?? gpsRegion;
+    if (!region) continue;
+    const parent = !manualRegion && region.parentId ? regions.regionById(region.parentId) : undefined;
+    if (parent) {
+      const cities = citiesByProvince.get(parent.id);
+      if (cities) cities.add(region.id);
+      else citiesByProvince.set(parent.id, new Set([region.id]));
+    }
+    add(overview, parent ?? region, item, gpsRegion);
+    add(details, region, item, gpsRegion);
+  }
+  function finish(groups: Iterable<Group>): WorksMapRegionGroup<T>[] {
+    return [...groups].flatMap(({ region, photos: members, gps, useRegionAnchor }) => {
+      const coordinate = !useRegionAnchor && gps ? gps.coordinate : regions.regionAnchor(region.id);
+      return coordinate ? [{ ...region, photos: members, representative: { photo: gps?.photo ?? members[0].photo, coordinate } }] : [];
+    }).sort((a, b) => a.id.localeCompare(b.id, 'en'));
+  }
+  const expanded = new Map<string, WorksMapRegionGroup<T>[]>();
+  const expandedGroups = finish([...details.values()].filter(({ region }) =>
+    (citiesByProvince.get(region.parentId ?? region.id)?.size ?? 0) > 1));
+  for (const group of expandedGroups) {
+    const id = group.parentId ?? group.id;
+    const children = expanded.get(id);
+    if (children) children.push(group);
+    else expanded.set(id, [group]);
+  }
+  return finish(overview.values()).map(group => {
+    const whenExpanded = expanded.get(group.id);
+    return whenExpanded ? { ...group, whenExpanded } : group;
+  });
 }
 
 export function createWorksMapFrame(width: number, height: number): WorksMapFrame {
@@ -263,55 +297,10 @@ export function scaleWorksMapView(view: WorksMapView, map: MapRect, target: numb
 function positionRegionMarkers<T extends MapPhoto>(
   groups: readonly WorksMapRegionGroup<T>[], map: MapRect, view: WorksMapView,
 ): WorksMapRegionMarker<T>[] {
-  const markers: WorksMapRegionMarker<T>[] = [];
-  const occupied = new Map<string, MapPoint[]>();
-  const cellOf = (value: number) => Math.floor(value / buttonSeparation);
-  function overlaps(point: MapPoint) {
-    const column = cellOf(point.x);
-    const row = cellOf(point.y);
-    for (let i = column - 1; i <= column + 1; i++) {
-      for (let j = row - 1; j <= row + 1; j++) {
-        if (occupied.get(`${i},${j}`)?.some((button) => distance(button, point) < buttonSeparation)) return true;
-      }
-    }
-    return false;
-  }
-  for (const group of groups) {
+  return groups.flatMap(group => {
     const point = projectWorksMapCoordinate(group.representative.coordinate, view, map);
-    if (!point) continue;
-    const button = overlaps(point) ? separateMarkerButton(point, map, view, overlaps) : point;
-    const key = `${cellOf(button.x)},${cellOf(button.y)}`;
-    const cell = occupied.get(key);
-    if (cell) cell.push(button);
-    else occupied.set(key, [button]);
-    markers.push({ group, point, button });
-  }
-  return markers;
-}
-
-function separateMarkerButton(
-  point: MapPoint, map: MapRect, view: WorksMapView, overlaps: (candidate: MapPoint) => boolean,
-): MapPoint {
-  const insetX = Math.min(buttonRadius, map.width / 2);
-  const insetY = Math.min(buttonRadius, map.height / 2);
-  const { center, radius: visibleRadius } = worksMapVisibleCircle(view, map);
-  let closest: MapPoint | undefined;
-  let closestDistance = Infinity;
-  for (const radius of [buttonSeparation, buttonSeparation * 2, buttonSeparation * 3]) {
-    for (let index = 0; index < 12; index++) {
-      const angle = index * Math.PI / 6;
-      const candidate = {
-        x: clamp(point.x + radius * Math.cos(angle), map.x + insetX, right(map) - insetX),
-        y: clamp(point.y + radius * Math.sin(angle), map.y + insetY, bottom(map) - insetY),
-      };
-      const offset = distance(candidate, point);
-      if (offset >= closestDistance || distance(candidate, center) > visibleRadius - 4 || overlaps(candidate)) continue;
-      closest = candidate;
-      closestDistance = offset;
-    }
-    if (closest) break;
-  }
-  return closest ?? point;
+    return point ? [{ group, point }] : [];
+  });
 }
 
 function lineCrosses(a: MapLine, b: MapLine): boolean {
@@ -363,20 +352,15 @@ function lineClearsMarkers<T extends MapPhoto>(
   const dx = line.to.x - line.from.x;
   const dy = line.to.y - line.from.y;
   const lengthSquared = dx * dx + dy * dy;
-  return !markers.some(({ group, point, button }) => {
-    if (group.id === regionId) {
-      // Its own short line joins at the button. Keep the two segments from overlapping.
-      const stemX = point.x - button.x;
-      const stemY = point.y - button.y;
-      return Math.abs(dx * stemY - dy * stemX) < 1e-7 && dx * stemX + dy * stemY > 0;
-    }
-    if (point !== button && lineCrosses(line, { from: point, to: button })) return true;
-    if (button.x < minX || button.x > maxX || button.y < minY || button.y > maxY) return false;
-    const x = button.x - line.from.x;
-    const y = button.y - line.from.y;
+  return !markers.some(({ group, point }) => {
+    if (group.id === regionId || point.x < minX || point.x > maxX || point.y < minY || point.y > maxY) return false;
+    const x = point.x - line.from.x;
+    const y = point.y - line.from.y;
+    const distanceSquared = x * x + y * y;
     const fraction = clamp((x * dx + y * dy) / lengthSquared, 0, 1);
-    // Adjacent anchors can start inside the neighboring marker's halo. Allow the line to lead away.
-    return fraction > 0 && (x - fraction * dx) ** 2 + (y - fraction * dy) ** 2 < markerClearance ** 2;
+    // Nearby halos are clipped between their real centers.
+    const clearanceSquared = distanceSquared < markerClearance ** 2 ? distanceSquared / 4 : markerClearance ** 2;
+    return (x - fraction * dx) ** 2 + (y - fraction * dy) ** 2 < clearanceSquared;
   });
 }
 
@@ -385,10 +369,9 @@ function chooseCard<T extends MapPhoto>(
   placed: readonly CardPlacement<T>[], markers: readonly WorksMapRegionMarker<T>[],
 ): CardPlacement<T> | undefined {
   const { map, narrow, lowerShelf } = frame;
-  const { group, button } = marker;
+  const { group, point } = marker;
   const { photo } = group.representative;
-  const storedRatio = (photo.width ?? 0) / (photo.height ?? 0);
-  const ratio = storedRatio > 0 && Number.isFinite(storedRatio) ? storedRatio : 1;
+  const ratio = photoRatio(photo);
   const stageHeight = bottom(map) + lowerShelf;
   const shelfTop = Math.max(bottom(map), circle.center.y + circle.radius) + shelfGap;
   const stageWidth = right(map) + map.x;
@@ -412,7 +395,7 @@ function chooseCard<T extends MapPhoto>(
     const cardSpan = onShelf ? boundsWidth : boundsHeight;
     const alongStart = onShelf ? map.x : stagePadding;
     const alongEnd = onShelf ? right(map) : stageHeight - stagePadding;
-    const ideal = onShelf ? button.x - boundsWidth / 2 : button.y - height / 2;
+    const ideal = onShelf ? point.x - boundsWidth / 2 : point.y - height / 2;
     const candidatePositions = new Set(positionOffsets.map(offset =>
       clamp(ideal + offset * (cardSpan + cardGap), alongStart, alongEnd - cardSpan),
     ));
@@ -427,8 +410,8 @@ function chooseCard<T extends MapPhoto>(
       const to = onShelf
         ? { x: rect.x + width / 2, y: rect.y }
         : { x: side === 'left' ? right(rect) : rect.x, y: rect.y + height / 2 };
-      const line = { from: button, to };
-      const score = distance(button, to);
+      const line = { from: point, to };
+      const score = distance(point, to);
       if (best && score >= best.score) continue;
       const placement = { card: { regionId: group.id, photo, rect, captionRect, side, line }, bounds, score };
       if (placed.some(existing => placementConflicts(placement, existing))) continue;
@@ -438,19 +421,67 @@ function chooseCard<T extends MapPhoto>(
   return best;
 }
 
+function cardCapacity(frame: WorksMapFrame): number {
+  return frame.narrow ? clamp(Math.floor(frame.map.width / 142), 1, 4) : 6;
+}
+
+function photoRatio(photo: MapPhoto): number {
+  const ratio = (photo.width ?? 0) / (photo.height ?? 0);
+  return ratio > 0 && Number.isFinite(ratio) ? ratio : 1;
+}
+
+export function selectWorksMapRegions<T extends MapPhoto>(
+  overview: readonly WorksMapRegionGroup<T>[], frame: WorksMapFrame, view: WorksMapView,
+): readonly WorksMapRegionGroup<T>[] {
+  const capacity = cardCapacity(frame);
+  if (overview.length >= capacity) return overview;
+  const candidates = overview.flatMap(province => province.whenExpanded
+    ? [{ province, replacement: province.whenExpanded }] : [])
+    .sort((a, b) => b.province.photos.length - a.province.photos.length);
+  if (!candidates.length) return overview;
+
+  let groups = overview;
+  let cards = layoutWorksMap(groups, frame, view).cards;
+  for (const { province, replacement } of candidates) {
+    const provinceIds = new Set(groups.filter(group => (group.parentId ?? group.id) === province.id).map(group => group.id));
+    const remaining = groups.filter(group => !provinceIds.has(group.id));
+    if (remaining.length + replacement.length > capacity) continue;
+    const expanded = [...remaining, ...replacement].sort((a, b) => a.id.localeCompare(b.id, 'en'));
+    const nextCards = layoutWorksMap(expanded, frame, view).cards;
+    const nextIds = new Set(nextCards.map(({ regionId }) => regionId));
+    if (!replacement.every(({ id }) => nextIds.has(id)) ||
+      !cards.every(({ regionId }) => provinceIds.has(regionId) || nextIds.has(regionId))) continue;
+    groups = expanded;
+    cards = nextCards;
+  }
+  return groups;
+}
+
 export function layoutWorksMap<T extends MapPhoto>(
   groups: readonly WorksMapRegionGroup<T>[], frame: WorksMapFrame, view: WorksMapView, preferredRegionId?: string,
 ): WorksMapLayout<T> {
   if (frame.map.width <= 0 || frame.map.height <= 0) return { markers: [], cards: [] };
   const markers = positionRegionMarkers(groups, frame.map, view);
   const circle = worksMapVisibleCircle(view, frame.map);
-  const maxCards = frame.narrow ? clamp(Math.floor(frame.map.width / 142), 1, 4) : 6;
+  const maxCards = cardCapacity(frame);
   const remaining = new Set(markers);
   const placed: CardPlacement<T>[] = [];
   const chosenPoints: MapPoint[] = [];
-  const preferred = markers.find(({ group }) => group.id === preferredRegionId);
+  let first = markers.find(({ group }) => group.id === preferredRegionId);
+  if (!first && markers.length > 2 && markers.length <= maxCards) {
+    if (frame.narrow) {
+      // Give the middle shelf leader room between neighbors.
+      first = [...markers].sort((a, b) => a.point.x - b.point.x)[Math.floor(markers.length / 2)];
+    } else {
+      // Reserve space for the tallest print before shorter prints divide the wings.
+      first = [...markers].sort((a, b) =>
+        photoRatio(a.group.representative.photo) - photoRatio(b.group.representative.photo) ||
+        b.group.photos.length - a.group.photos.length,
+      )[0];
+    }
+  }
   for (let attempt = 0; attempt < 24 && placed.length < maxCards && remaining.size > 0; attempt++) {
-    let candidate = attempt === 0 ? preferred : undefined;
+    let candidate = attempt === 0 ? first : undefined;
     if (!candidate) {
       let bestScore = -1;
       for (const marker of remaining) {
@@ -479,7 +510,7 @@ export function layoutWorksMap<T extends MapPhoto>(
 
 export function interpolateWorksMapLayout<T extends MapPhoto>(
   start: WorksMapLayout<T>, target: WorksMapLayout<T>, current: WorksMapLayout<T>,
-  circle: ReturnType<typeof worksMapVisibleCircle>, progress: number,
+  progress: number,
 ): WorksMapLayout<T> {
   const fromCards = start.cards;
   const toCards = target.cards;
@@ -492,29 +523,17 @@ export function interpolateWorksMapLayout<T extends MapPhoto>(
   const mixRect = (from: MapRect, to: MapRect) => ({
     x: mix(from.x, to.x), y: mix(from.y, to.y), width: mix(from.width, to.width), height: mix(from.height, to.height),
   });
-  const startMarkers = new Map(start.markers.map(marker => [marker.group.id, marker]));
-  const targetMarkers = new Map(target.markers.map(marker => [marker.group.id, marker]));
-  const markers = current.markers.map(marker => {
-    const from = startMarkers.get(marker.group.id);
-    const to = targetMarkers.get(marker.group.id);
-    if (!from || !to) return marker;
-    const button = {
-      x: marker.point.x + mix(from.button.x - from.point.x, to.button.x - to.point.x),
-      y: marker.point.y + mix(from.button.y - from.point.y, to.button.y - to.point.y),
-    };
-    if (distance(button, circle.center) > circle.radius) return marker;
-    return { ...marker, button: button.x === marker.point.x && button.y === marker.point.y ? marker.point : button };
-  });
-  const markerFor = new Map(markers.map(marker => [marker.group.id, marker]));
+  const { markers } = current;
+  const markerFor = new Map(markers.map(marker => [marker.group.id, marker.point]));
   const placed: CardPlacement<T>[] = [];
   for (const [index, from] of fromCards.entries()) {
-    const marker = markerFor.get(from.regionId);
-    if (!marker) return current;
+    const point = markerFor.get(from.regionId);
+    if (!point) return current;
     const rect = mixRect(from.rect, toCards[index].rect);
     const captionRect = mixRect(from.captionRect, toCards[index].captionRect);
     const to = from.side === 'bottom' ? { x: rect.x + rect.width / 2, y: rect.y }
       : { x: from.side === 'left' ? right(rect) : rect.x, y: rect.y + rect.height / 2 };
-    const line = { from: marker.button, to };
+    const line = { from: point, to };
     const card = { ...from, rect, captionRect, line };
     const bounds = { ...captionRect, y: rect.y, height: rect.height + captionRect.height };
     const placement = { card, bounds, score: 0 };

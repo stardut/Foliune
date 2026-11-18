@@ -1,4 +1,10 @@
-export interface WorksMapRegion { id: string; name: string; country: string }
+export interface WorksMapRegion {
+  id: string;
+  name: string;
+  country: string;
+  parentId?: string;
+  parentName?: string;
+}
 interface Coordinate { lat: number; lon: number }
 export type WorksMapRegionResolver = (coordinate: Coordinate) => WorksMapRegion | undefined;
 export interface WorksMapRegionOutline { fill: string; stroke: string }
@@ -16,6 +22,10 @@ interface PackedWorksMapRegions {
   geometry: string;
   boundaries: string;
   merged: readonly number[];
+}
+
+interface PackedChinaCityRegions extends PackedWorksMapRegions {
+  parents: readonly string[];
 }
 
 interface PackedPolygon {
@@ -238,11 +248,17 @@ function polygonAnchor(polygon: PackedPolygon, bytes: Uint8Array, matches: (coor
   return candidates.find(({ coordinate }) => matches(coordinate))?.coordinate;
 }
 
-export function createWorksMapRegionData(data: PackedWorksMapRegions, locale: 'zh-CN' | 'en' = 'zh-CN'): WorksMapRegionData {
+export function createWorksMapRegionData(
+  data: PackedWorksMapRegions,
+  locale: 'zh-CN' | 'en' = 'zh-CN',
+  parents?: readonly WorksMapRegion[],
+): WorksMapRegionData {
   const bytes = readBytes(data.geometry);
-  const labels = data.labels.map(([id, name, country, nameEn, countryEn]) => locale === 'en'
-    ? { id, name: nameEn, country: countryEn }
-    : { id, name, country });
+  const labels = data.labels.map(([id, name, country, nameEn, countryEn], index) => {
+    const region = locale === 'en' ? { id, name: nameEn, country: countryEn } : { id, name, country };
+    const parent = parents?.[index];
+    return parent ? { ...region, parentId: parent.id, parentName: parent.name } : region;
+  });
   const indexes = new Map(labels.map(({ id }, index) => [id, index]));
   const byRegion: PackedPolygon[][] = Array.from({ length: labels.length }, () => []);
   const merged = new Set(data.merged);
@@ -327,12 +343,38 @@ export function createWorksMapRegionData(data: PackedWorksMapRegions, locale: 'z
   };
 }
 
+export function createWorksMapAtlasData(
+  globalData: PackedWorksMapRegions,
+  cityData: PackedChinaCityRegions,
+  locale: 'zh-CN' | 'en' = 'zh-CN',
+): WorksMapRegionData {
+  const global = createWorksMapRegionData(globalData, locale);
+  if (cityData.parents.length !== cityData.labels.length) throw new Error('离线城市与上级地区数量不一致');
+  const parents = cityData.parents.map((id) => {
+    const parent = global.regionById(id);
+    if (!parent) throw new Error(`离线城市的上级地区不存在：${id}`);
+    return parent;
+  });
+  const cities = createWorksMapRegionData(cityData, locale, parents);
+  return {
+    regions: [...global.regions, ...cities.regions],
+    resolve: (coordinate) => cities.resolve(coordinate) ?? global.resolve(coordinate),
+    regionById: (id) => cities.regionById(id) ?? global.regionById(id),
+    regionAnchor: (id) => cities.regionAnchor(id) ?? global.regionAnchor(id),
+    get boundaries() {
+      return global.boundaries;
+    },
+    outline: (id) => cities.outline(id) ?? global.outline(id),
+  };
+}
+
 const pendingRegions = new Map<'zh-CN' | 'en', Promise<WorksMapRegionData>>();
 
 export function loadWorksMapRegionData(locale: 'zh-CN' | 'en'): Promise<WorksMapRegionData> {
   let pending = pendingRegions.get(locale);
   if (!pending) {
-    pending = import('./natural-earth-regions.json').then(({ default: data }) => createWorksMapRegionData(data, locale));
+    pending = Promise.all([import('./natural-earth-regions.json'), import('./china-city-regions.json')])
+      .then(([global, cities]) => createWorksMapAtlasData(global.default, cities.default, locale));
     pendingRegions.set(locale, pending);
   }
   return pending;

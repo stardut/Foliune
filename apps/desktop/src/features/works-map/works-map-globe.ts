@@ -1,23 +1,17 @@
 import { geoArea, geoGraticule, geoOrthographic, geoPath, type GeoPermissibleObjects } from 'd3-geo';
 import { minWorksMapScale, worksMapDrawingBounds, worksMapVisibleCircle, type MapRect, type WorksMapView } from './works-map-layout';
-import type { WorksMapRegionOutline } from './works-map-regions';
 
 type Position = [number, number];
 type Lines = { type: 'MultiLineString'; coordinates: Position[][] };
 type Areas = { type: 'MultiPolygon'; coordinates: Position[][][] };
 
-interface GeographicPath {
-  points: Position[];
-  closed: boolean;
-}
 type Vector = [number, number, number];
 interface SphericalCap { axis: Vector; cosine: number; sine: number }
 interface GlobeLayers {
   land: Areas;
   coast: Lines;
   lakes: Lines;
-  boundaries: Lines;
-  caps: Record<'land' | 'coast' | 'lakes' | 'boundaries', (SphericalCap | undefined)[]>;
+  caps: Record<'land' | 'coast' | 'lakes', (SphericalCap | undefined)[]>;
 }
 export interface WorksMapGlobeGeometry {
   overview: GlobeLayers;
@@ -27,28 +21,18 @@ export interface WorksMapGlobeColors {
   landFill: string;
   coastStroke: string;
   lakeStroke: string;
-  boundaryStroke: string;
-  selectedFill: string;
-  selectedStroke: string;
-  graticuleStroke?: string;
+  graticuleStroke: string;
 }
-interface SelectedGeometry { fill: Areas; stroke: Lines }
 
 const graticule = geoGraticule().step([30, 30]).stepMajor([90, 90]).precision(5)();
-const outlineGeometry = new WeakMap<WorksMapRegionOutline, SelectedGeometry>();
 const radians = Math.PI / 180;
 
 // The bundled Natural Earth paths use longitude and inverted latitude.
-function geographicPaths(path: string): GeographicPath[] {
-  return path.split('M').slice(1).map(part => {
-    const closed = part.endsWith('Z');
-    const coordinates = closed ? part.slice(0, -1) : part;
-    const points = coordinates.split(' ').map((coordinate): Position => {
-      const comma = coordinate.indexOf(',');
-      return [Number(coordinate.slice(0, comma)), -Number(coordinate.slice(comma + 1))];
-    });
-    return { points, closed };
-  });
+function geographicRings(path: string): Position[][] {
+  return path.split('M').slice(1).map(part => part.slice(0, -1).split(' ').map((coordinate): Position => {
+    const comma = coordinate.indexOf(',');
+    return [Number(coordinate.slice(0, comma)), -Number(coordinate.slice(comma + 1))];
+  }));
 }
 
 function signedArea(ring: readonly Position[]): number {
@@ -151,19 +135,16 @@ function coastlineSegments(ring: Position[]): Position[][] {
   return segments;
 }
 
-export function prepareWorksMapGlobe(
-  basemap: { land: string; lakes: string }, boundaries: string,
-): WorksMapGlobeGeometry {
+export function prepareWorksMapGlobe(basemap: { land: string; lakes: string }): WorksMapGlobeGeometry {
   // The atlas stores each clockwise exterior immediately before its counterclockwise holes.
   const polygons: Position[][][] = [];
   const coastline: Position[][] = [];
-  for (const { points } of geographicPaths(basemap.land)) {
+  for (const points of geographicRings(basemap.land)) {
     if (signedArea(points) <= 0 || polygons.length === 0) polygons.push([]);
     polygons[polygons.length - 1].push(closeRing(points));
     coastline.push(...coastlineSegments(points));
   }
-  const lakeLines = geographicPaths(basemap.lakes).map(({ points }) => closeRing(points));
-  const borderLines = geographicPaths(boundaries).map(({ points }) => points);
+  const lakeLines = geographicRings(basemap.lakes).map(closeRing);
 
   function layers(tolerance: number): GlobeLayers {
     const lines = (paths: Position[][]): Lines => ({
@@ -172,14 +153,12 @@ export function prepareWorksMapGlobe(
     const land: Areas = { type: 'MultiPolygon', coordinates: polygons.map(polygon => polygon.map(ring => simplifyRing(ring, tolerance))) };
     const coast = lines(coastline);
     const lakes = lines(lakeLines);
-    const boundaries = lines(borderLines);
     return {
-      land, coast, lakes, boundaries,
+      land, coast, lakes,
       caps: {
         land: land.coordinates.map(([outer]) => coveringCap(outer)),
         coast: coast.coordinates.map(coveringCap),
         lakes: lakes.coordinates.map(coveringCap),
-        boundaries: boundaries.coordinates.map(coveringCap),
       },
     };
   }
@@ -189,64 +168,6 @@ export function prepareWorksMapGlobe(
     overview: layers(.13),
     get detailed() { return detailed ??= layers(.035); },
   };
-}
-
-function containsPosition(ring: Position[], point: Position): boolean {
-  let inside = false;
-  let previous = ring[ring.length - 1];
-  for (const current of ring) {
-    if ((previous[1] > point[1]) !== (current[1] > point[1])
-      && point[0] < current[0] + (previous[0] - current[0]) * (point[1] - current[1]) / (previous[1] - current[1])) {
-      inside = !inside;
-    }
-    previous = current;
-  }
-  return inside;
-}
-
-function selectedGeometry(outline: WorksMapRegionOutline): SelectedGeometry {
-  const cached = outlineGeometry.get(outline);
-  if (cached) return cached;
-  // Merged regions may come with arbitrary winding. Nest holes first, then apply D3's winding convention.
-  const rings = geographicPaths(outline.fill).map(({ points }) => {
-    const area = signedArea(points);
-    let west = Infinity;
-    let south = Infinity;
-    let east = -Infinity;
-    let north = -Infinity;
-    for (const [lon, lat] of points) {
-      west = Math.min(west, lon);
-      south = Math.min(south, lat);
-      east = Math.max(east, lon);
-      north = Math.max(north, lat);
-    }
-    return { points, area, west, south, east, north, depth: 0, polygon: [] as Position[][] };
-  }).sort((a, b) => Math.abs(b.area) - Math.abs(a.area));
-
-  const polygons: Position[][][] = [];
-  const nested: typeof rings = [];
-  for (const ring of rings) {
-    const parent = nested.find(({ west, south, east, north, points }) =>
-      west <= ring.west && south <= ring.south && east >= ring.east && north >= ring.north && containsPosition(points, ring.points[0]));
-    ring.depth = parent ? parent.depth + 1 : 0;
-    const exterior = ring.depth % 2 === 0;
-    const points = exterior === (ring.area < 0) ? ring.points : [...ring.points].reverse();
-    if (exterior) {
-      ring.polygon = [closeRing(points)];
-      polygons.push(ring.polygon);
-    } else if (parent) {
-      ring.polygon = parent.polygon;
-      ring.polygon.push(closeRing(points));
-    }
-    nested.unshift(ring);
-  }
-  const stroke = geographicPaths(outline.stroke).map(({ points, closed }) => closed ? closeRing(points) : points);
-  const geometry: SelectedGeometry = {
-    fill: { type: 'MultiPolygon', coordinates: polygons },
-    stroke: { type: 'MultiLineString', coordinates: stroke },
-  };
-  outlineGeometry.set(outline, geometry);
-  return geometry;
 }
 
 export function worksMapGlobeProjection(view: WorksMapView, map: MapRect) {
@@ -265,12 +186,11 @@ export function worksMapGlobeProjection(view: WorksMapView, map: MapRect) {
 
 export function drawWorksMapGlobe(
   context: CanvasRenderingContext2D, geometry: WorksMapGlobeGeometry, view: WorksMapView, map: MapRect,
-  colors: WorksMapGlobeColors, selectedOutline?: WorksMapRegionOutline,
+  colors: WorksMapGlobeColors,
 ): void {
   const overviewLimit = Math.max(240, minWorksMapScale(map) * 1.12);
   const layers = view.scale <= overviewLimit ? geometry.overview : geometry.detailed;
   const project = geoPath(worksMapGlobeProjection(view, map), context);
-  const selected = selectedOutline && selectedGeometry(selectedOutline);
   const visible = visibilityTest(view, map);
 
   function fill(shape: Areas, color: string) {
@@ -293,9 +213,6 @@ export function drawWorksMapGlobe(
   fill({ ...layers.land, coordinates: layers.land.coordinates.filter((_, index) => visible(layers.caps.land[index])) }, colors.landFill);
   stroke({ ...layers.coast, coordinates: layers.coast.coordinates.filter((_, index) => visible(layers.caps.coast[index])) }, colors.coastStroke, .65);
   stroke({ ...layers.lakes, coordinates: layers.lakes.coordinates.filter((_, index) => visible(layers.caps.lakes[index])) }, colors.lakeStroke, .65);
-  if (colors.graticuleStroke) stroke(graticule, colors.graticuleStroke, .55);
-  if (selected) fill(selected.fill, colors.selectedFill);
-  stroke({ ...layers.boundaries, coordinates: layers.boundaries.coordinates.filter((_, index) => visible(layers.caps.boundaries[index])) }, colors.boundaryStroke, .65);
-  if (selected) stroke(selected.stroke, colors.selectedStroke, 1.05);
+  stroke(graticule, colors.graticuleStroke, .55);
   context.restore();
 }

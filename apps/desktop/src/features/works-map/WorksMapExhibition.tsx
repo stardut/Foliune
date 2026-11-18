@@ -254,7 +254,7 @@ export function WorksMapExhibition({ regions, atlas, onReviewChange }: {
     </div>}
     <div ref={stage} className="works-map-stage" data-loading={!atlas || undefined} data-ready={ready || undefined} data-narrow={frame?.narrow || undefined}
       data-highlighted={highlightedLine || undefined} data-dragging={!!dragOrigin || undefined}>
-      {frame && displayView && globe && <WorksMapGlobe atlas={atlas} selectedRegionId={selected?.id}
+      {frame && displayView && globe && <WorksMapGlobe atlas={atlas}
         view={displayView} map={frame.map} globe={globe} visibleRadius={visible?.radius ?? displayView.scale} />}
       {ready && <>
         <div ref={viewport} className="works-map-viewport" style={rectStyle({

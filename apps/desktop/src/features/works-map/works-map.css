@@ -50,11 +50,16 @@
 .works-map-pin:focus-visible { outline: none; }
 
 .works-map-prints { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
-.works-map-print { position: absolute; padding: 0; text-align: left; pointer-events: auto; }
+.works-map-print { position: absolute; padding: 0; text-align: left; pointer-events: none; }
+.works-map-print[data-selected] { z-index: 1; }
+.works-map-print[data-highlighted] { z-index: 2; }
+.works-map-print > :is(.works-map-print-image, .works-map-print-caption) { pointer-events: auto; }
 .works-map-print-image { position: absolute; border-radius: 3px; overflow: hidden; box-shadow: 0 4px 16px #0004; }
 .works-map-print-image::after { content: ''; position: absolute; inset: 0; border: 1px solid #ffffff26; border-radius: inherit; pointer-events: none; }
 .works-map-print[data-highlighted] .works-map-print-image::after { border-color: #d4e1f0ac; }
 .works-map-print[data-selected] .works-map-print-image::after { border-color: #edf4ffe0; }
+.works-map-print:focus-visible { outline: none; }
+:root[data-input-mode='keyboard'] .works-map-print:focus-visible .works-map-print-image::after { border-color: var(--focus); }
 .works-map-print-caption { position: absolute; display: flex; align-items: end; justify-content: center; min-width: 0; gap: 5px; color: var(--muted); white-space: nowrap; font-size: 11px; font-variant-numeric: tabular-nums; }
 .works-map-print-caption > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .works-map-print-caption > span:nth-child(2) { flex-shrink: 0; }

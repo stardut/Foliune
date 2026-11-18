@@ -1,6 +1,6 @@
 import { getLocale, photoCount, t } from '../../lib/i18n';
 import { LocateFixed, MapPin, Minus, Plus } from 'lucide-react';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { DropdownMenu } from '../../components/DropdownMenu';
 import { PhotoImage } from '../../components/PhotoImage';
 import { IconButton } from '../../components/ui';
@@ -10,7 +10,8 @@ import { useWorksMapPhotoDock } from './use-works-map-photo-dock';
 import { useWorksMapView } from './use-works-map-view';
 import { WorksMapGlobe, type WorksMapAtlas } from './WorksMapGlobe';
 import {
-  createWorksMapFrame, fitWorksMapView, interpolateWorksMapLayout, layoutWorksMap, projectWorksMapCoordinate, selectWorksMapRegions,
+  centerWorksMapView, createWorksMapFrame, fitWorksMapView, interpolateWorksMapLayout, layoutWorksMap, previewWorksMapCard,
+  projectWorksMapCoordinate, selectWorksMapRegions,
   worksMapGlobeBounds, worksMapVisibleCircle,
   type MapPoint, type MapRect, type WorksMapCard, type WorksMapRegionGroup,
 } from './works-map-layout';
@@ -21,6 +22,8 @@ const PIN_HIT_SIZE = 28;
 const PIN_RADIUS = 4;
 const PIN_HALO_RADIUS = 6;
 const PIN_VISUAL_GAP = 0.9;
+const PRINT_HOVER_TRANSFER_MS = 650;
+const PRINT_ROUTE_MS = 450;
 const REGION_BUTTONS = '.works-map-pin, .works-map-print';
 
 function rectStyle({ x, y, width, height }: MapRect) {
@@ -46,6 +49,7 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
   const [review, setReview] = useState<Review>();
   const selection = useRef<GroupSelection>(null);
   const pendingSelection = useRef(false);
+  const hoverTransfer = useRef<{ timer: number; started: number; candidate?: string }>(null);
   const restoreFocus = useRef<{ trigger?: HTMLButtonElement; regionId?: string }>(null);
 
   useLayoutEffect(() => {
@@ -63,44 +67,41 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
     onReviewChange(!!review);
     return () => { if (review) onReviewChange(false); };
   }, [review, onReviewChange]);
+  useEffect(() => () => window.clearTimeout(hoverTransfer.current?.timer), []);
 
   const frame = useMemo(() => size.width && size.height ? createWorksMapFrame(size.width, size.height) : undefined, [size]);
   const coordinates = useMemo(() => overview.map(({ representative }) => representative.coordinate), [overview]);
   const camera = useWorksMapView(coordinates, atlas ? frame?.map : undefined, stage);
   const { view, dragOrigin, zoomTransition } = camera;
-  const lastRegions = useRef<{ overview: typeof overview; regions: readonly WorksMapRegionGroup<Photo>[] }>(null);
+  const lastRegions = useRef<{ overview: typeof overview; displayed: ReturnType<typeof selectWorksMapRegions<Photo>> }>(null);
   const groupingView = dragOrigin ?? zoomTransition?.start ?? view;
   const keepGroups = !!(dragOrigin || zoomTransition || selectedId || focused || restoreFocus.current?.regionId);
-  const regions = useMemo(() => {
+  const displayed = useMemo(() => {
     // Keep the same groups throughout a gesture and while their photos or keyboard focus are active.
-    if (keepGroups && lastRegions.current?.overview === overview) return lastRegions.current.regions;
-    return frame && groupingView ? selectWorksMapRegions(overview, frame, groupingView) : overview;
+    if (keepGroups && lastRegions.current?.overview === overview) return lastRegions.current.displayed;
+    return frame && groupingView ? selectWorksMapRegions(overview, frame, groupingView) : { groups: overview, menuOnly: [] };
   }, [frame, groupingView, keepGroups, overview]);
-  useLayoutEffect(() => { lastRegions.current = { overview, regions }; }, [overview, regions]);
-  const regionsById = useMemo(() => new Map(regions.map((region) => [region.id, region])), [regions]);
+  useLayoutEffect(() => { lastRegions.current = { overview, displayed }; }, [overview, displayed]);
+  const { groups: regions, menuOnly } = displayed;
+  const regionsById = useMemo(() => new Map([...regions, ...menuOnly].map((region) => [region.id, region])), [regions, menuOnly]);
   const qualifiersByName = useMemo(() => {
     const qualifiers = new Map<string, Set<string>>();
-    for (const { name, country, parentName } of regions) {
+    for (const { name, country, parentName } of regionsById.values()) {
       const qualifier = parentName ?? country;
       const known = qualifiers.get(name);
       if (known) known.add(qualifier);
       else qualifiers.set(name, new Set([qualifier]));
     }
     return qualifiers;
-  }, [regions]);
+  }, [regionsById]);
   const displayView = useMemo(() => view ?? (frame && fitWorksMapView([], frame.map)), [frame, view]);
   const globe = useMemo(() => frame && displayView && worksMapGlobeBounds(displayView, frame.map), [frame, displayView]);
   const visible = frame && view && worksMapVisibleCircle(view, frame.map);
   const globeClipId = `${groupId}-globe`;
   const layoutView = dragOrigin ?? view;
-  const layoutAt = useMemo(() => (position: typeof view) => {
-    if (!frame || !position) return undefined;
-    const next = layoutWorksMap(regions, frame, position);
-    if (!selectedId || !next.markers.some(({ group }) => group.id === selectedId)
-      || next.cards.some(({ regionId }) => regionId === selectedId)) return next;
-    return layoutWorksMap(regions, frame, position, selectedId);
-  }, [frame, regions, selectedId]);
-  const currentLayout = useMemo(() => layoutAt(layoutView), [layoutAt, layoutView]);
+  const layoutAt = useCallback((position: typeof view) =>
+    frame && position ? layoutWorksMap(regions, frame, position) : undefined, [frame, regions]);
+  const currentLayout = useMemo(() => !zoomTransition ? layoutAt(layoutView) : undefined, [layoutAt, layoutView, zoomTransition]);
   const lastLayout = useRef({ frame, regions, layout: currentLayout });
   const transitionLayouts = useMemo(() => {
     if (!zoomTransition) return undefined;
@@ -110,12 +111,12 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
     if (dragOrigin && lastLayout.current.frame === frame && lastLayout.current.regions === regions) {
       return lastLayout.current.layout ?? currentLayout;
     }
-    if (!currentLayout || !frame || !view || !zoomTransition || !transitionLayouts?.start
-      || !transitionLayouts.target) return currentLayout;
+    if (!frame || !view || !zoomTransition || !transitionLayouts?.start
+      || !transitionLayouts.target) return currentLayout ?? layoutAt(view);
     const { start, target } = zoomTransition;
     const progress = (view.scale - start.scale) / (target.scale - start.scale);
-    return interpolateWorksMapLayout(transitionLayouts.start, transitionLayouts.target, currentLayout, progress);
-  }, [currentLayout, dragOrigin, frame, regions, transitionLayouts, view, zoomTransition]);
+    return interpolateWorksMapLayout(transitionLayouts.start, transitionLayouts.target, regions, frame, view, progress);
+  }, [currentLayout, dragOrigin, frame, layoutAt, regions, transitionLayouts, view, zoomTransition]);
   useLayoutEffect(() => { lastLayout.current = { frame, regions, layout }; }, [frame, layout, regions]);
   const pinAreas = useMemo(() => {
     const markers = layout?.markers ?? [];
@@ -131,16 +132,25 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
       }];
     }));
   }, [groupId, layout]);
-  const cardsByRegion = useMemo(() => new Map(layout?.cards.map((card) => [card.regionId, card])), [layout]);
+  const baseCardsByRegion = useMemo(() => new Map(layout?.cards.map((card) => [card.regionId, card])), [layout]);
+  const keyboardFocus = focused?.keyboard ? focused.id : undefined;
+  const highlighted = [hovered, keyboardFocus, selectedId].find((id) => layout?.markers.some(({ group }) => group.id === id));
+  const preview = useMemo(() => highlighted && frame && view && layout && !dragOrigin && !zoomTransition
+    ? previewWorksMapCard(highlighted, layout, frame, view) : undefined, [highlighted, frame, view, layout, dragOrigin, zoomTransition]);
+  const cardsByRegion = useMemo(() => {
+    if (!preview) return baseCardsByRegion;
+    return new Map(baseCardsByRegion).set(preview.regionId, preview);
+  }, [baseCardsByRegion, preview]);
   const regionsToFind = useMemo(() => {
     if (!layout) return [];
     const points = new Map(layout.markers.map(({ group, point }) => [group.id, point]));
-    return regions.filter(({ id }) => {
+    const missing = regions.filter(({ id }) => {
       const point = points.get(id);
-      return !point || (!cardsByRegion.has(id) && layout.markers.some(({ group, point: other }) =>
+      return !point || (!baseCardsByRegion.has(id) && layout.markers.some(({ group, point: other }) =>
         id !== group.id && Math.hypot(point.x - other.x, point.y - other.y) < PIN_RADIUS * 2 + 1));
-    }).sort((a, b) => a.name.localeCompare(b.name, getLocale()));
-  }, [cardsByRegion, layout, regions]);
+    });
+    return [...menuOnly, ...missing].sort((a, b) => a.name.localeCompare(b.name, getLocale()));
+  }, [baseCardsByRegion, layout, menuOnly, regions]);
   const selected = selectedId ? regionsById.get(selectedId) : undefined;
   const reviewRegion = review && regionsById.get(review.regionId);
   // Show the region name in the map's read-only review with the original library assets.
@@ -182,10 +192,20 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
   }
   function revealRegion(region: WorksMapRegionGroup<Photo>) {
     const keyboard = document.documentElement.dataset.inputMode === 'keyboard';
+    const staysInMenu = menuOnly.includes(region);
+    const trigger = staysInMenu && document.activeElement instanceof HTMLButtonElement ? document.activeElement : undefined;
     // The menu may disappear once the globe faces the chosen region.
     viewport.current?.focus({ preventScroll: true });
-    camera.centerOn(region.representative.coordinate);
-    pick(region, { keyboard });
+    if (!staysInMenu) {
+      if (region.parentId && frame && view) {
+        // A city found from the menu may be offscreen, with its province still grouped in the current view.
+        const destination = centerWorksMapView(view, region.representative.coordinate);
+        const next = selectWorksMapRegions(overview, frame, destination);
+        if (next.groups.some(({ id }) => id === region.id)) lastRegions.current = { overview, displayed: next };
+      }
+      camera.centerOn(region.representative.coordinate);
+    }
+    pick(region, { keyboard, trigger });
   }
   const clearGroup = useCallback((keyboard = false) => {
     if (!selectedId || review) return;
@@ -230,6 +250,28 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
   function regionName({ name, country, parentName }: WorksMapRegionGroup<Photo>) {
     return (qualifiersByName.get(name)?.size ?? 0) > 1 ? `${name} · ${parentName ?? country}` : name;
   }
+  function transferringToPrint(regionId: string, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!preview || regionId === hovered || preview.regionId !== hovered || !hoverTransfer.current
+      || performance.now() - hoverTransfer.current.started > PRINT_ROUTE_MS || !stage.current) return false;
+    const { from } = preview.line;
+    const rect = printRect(preview);
+    const stageBounds = stage.current.getBoundingClientRect();
+    const x = event.clientX - stageBounds.left;
+    const y = event.clientY - stageBounds.top;
+    const horizontalGap = Math.max(0, rect.x - from.x, from.x - rect.x - rect.width);
+    const verticalGap = Math.max(0, rect.y - from.y, from.y - rect.y - rect.height);
+    const [start, crossStart, cursor, crossCursor, edge, span, crossEdge, crossSpan] = horizontalGap > verticalGap
+      ? [from.x, from.y, x, y, rect.x, rect.width, rect.y, rect.height]
+      : [from.y, from.x, y, x, rect.y, rect.height, rect.x, rect.width];
+    const [near, far] = start < edge ? [edge, edge + span] : [edge + span, edge];
+    const progress = (cursor - start) / (near - start);
+    if (progress <= 0 || (cursor - start) / (far - start) > 1) return false;
+    // Protect the direction toward any part of the print, not just the end of its leader.
+    const amount = Math.min(1, progress);
+    const limit = crossStart + (crossEdge - crossStart) * amount;
+    const margin = PIN_HIT_SIZE / 2;
+    return crossCursor >= limit - margin && crossCursor <= limit + crossSpan * amount + margin;
+  }
   function regionButtonProps(region: WorksMapRegionGroup<Photo>, label: string) {
     const isSelected = selected?.id === region.id;
     return {
@@ -238,18 +280,43 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
       'aria-controls': isSelected ? groupId : undefined,
       'data-selected': isSelected || undefined,
       'data-highlighted': highlighted === region.id || undefined,
-      onPointerEnter: () => setHovered(region.id),
-      onPointerLeave: () => setHovered((current) => current === region.id ? undefined : current),
-      onFocus: ({ currentTarget }: FocusEvent<HTMLButtonElement>) =>
-        setFocused({ id: region.id, trigger: currentTarget, keyboard: document.documentElement.dataset.inputMode === 'keyboard' }),
+      onPointerEnter: (event: ReactPointerEvent<HTMLButtonElement>) => {
+        if (hoverTransfer.current && transferringToPrint(region.id, event)) {
+          hoverTransfer.current.candidate = region.id;
+          return;
+        }
+        window.clearTimeout(hoverTransfer.current?.timer);
+        hoverTransfer.current = null;
+        setSkipPrintArrival(true);
+        setHovered(region.id);
+      },
+      onPointerLeave: () => {
+        if (hoverTransfer.current?.candidate === region.id) hoverTransfer.current.candidate = undefined;
+        if (hovered !== region.id) return;
+        const clear = () => {
+          const candidate = hoverTransfer.current?.candidate;
+          hoverTransfer.current = null;
+          setHovered((current) => current === region.id ? candidate : current);
+        };
+        if (baseCardsByRegion.has(region.id)) clear();
+        // Briefly keep a temporary print reachable across the gap from its pin.
+        else hoverTransfer.current = { timer: window.setTimeout(clear, PRINT_HOVER_TRANSFER_MS), started: performance.now() };
+      },
+      onFocus: ({ currentTarget }: FocusEvent<HTMLButtonElement>) => {
+        const keyboard = document.documentElement.dataset.inputMode === 'keyboard';
+        if (keyboard) setHovered(undefined);
+        setFocused({ id: region.id, trigger: currentTarget, keyboard });
+      },
       onBlur: ({ relatedTarget }: FocusEvent<HTMLButtonElement>) => {
         if (!(relatedTarget instanceof Element && relatedTarget.matches(REGION_BUTTONS))) setFocused(undefined);
       },
-      onClick: (event: MouseEvent<HTMLButtonElement>) => pick(region, { trigger: event.currentTarget, keyboard: event.detail === 0 }),
+      onClick: (event: MouseEvent<HTMLButtonElement>) => {
+        const keyboard = event.detail === 0;
+        if (keyboard || hovered !== region.id) setHovered(undefined);
+        pick(region, { trigger: event.currentTarget, keyboard });
+      },
     };
   }
-  const keyboardFocus = focused?.keyboard ? focused.id : undefined;
-  const highlighted = [selected?.id, keyboardFocus, hovered].find((id) => layout?.markers.some(({ group }) => group.id === id));
   const highlightedLine = highlighted !== undefined && cardsByRegion.has(highlighted);
   const markerPaintOrder = [...(layout?.markers ?? [])].sort((a, b) => Number(a.group.id === highlighted) - Number(b.group.id === highlighted));
   const ready = !!(frame && view && visible && layout);
@@ -274,7 +341,8 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
         </div>
       </div>
     </div>}
-    <div ref={stage} className="works-map-stage" data-loading={!atlas || undefined} data-ready={ready || undefined} data-narrow={frame?.narrow || undefined}
+    <div ref={stage} className="works-map-stage" onPointerLeave={() => setHovered(undefined)}
+      data-loading={!atlas || undefined} data-ready={ready || undefined} data-narrow={frame?.narrow || undefined}
       data-highlighted={highlightedLine || undefined} data-dragging={!!dragOrigin || undefined}>
       {frame && displayView && globe && <WorksMapGlobe atlas={atlas}
         view={displayView} map={frame.map} globe={globe} visibleRadius={visible?.radius ?? displayView.scale} />}
@@ -289,7 +357,10 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
             {...camera.panHandlers} onPointerUp={(event) => {
               if (camera.panHandlers.onPointerUp(event)) clearGroup();
             }} onPointerDown={(event) => {
-              if (event.button === 0) viewport.current?.focus({ preventScroll: true });
+              if (event.button === 0) {
+                setHovered(undefined);
+                viewport.current?.focus({ preventScroll: true });
+              }
               camera.panHandlers.onPointerDown(event);
             }} />
         </div>
@@ -334,11 +405,11 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
           })}
         </div>
         <div className="works-map-prints" data-revealed={skipPrintArrival || undefined} onFocus={() => setSkipPrintArrival(true)}>
-          {layout.cards.map((card) => {
+          {[...cardsByRegion.values()].map((card) => {
             const region = regionsById.get(card.regionId)!;
             if (dragOrigin && !projectWorksMapCoordinate(region.representative.coordinate, view, frame.map)) return null;
             const label = regionName(region);
-            return <button type="button" className="works-map-print" key={region.id} data-region-id={region.id} title={label} style={printBounds(card)}
+            return <button type="button" className="works-map-print" key={region.id} data-region-id={region.id} title={label} style={rectStyle(printRect(card))}
               {...regionButtonProps(region, t(`${label}，${region.photos.length} 张照片，代表作 ${photoName(card.photo)}`, `${label}, ${photoCount(region.photos.length)}, cover photo ${photoName(card.photo)}`))}>
               <span className="works-map-print-image" style={printPart(card, card.rect)} aria-hidden="true"><PhotoImage photo={card.photo} thumbnailOnly /></span>
               <span className="works-map-print-caption" style={printPart(card, card.captionRect)} aria-hidden="true">
@@ -413,11 +484,11 @@ function WorksMapThumbnail({ photo, onOpen }: { photo: Photo; onOpen: (trigger: 
     onClick={(event) => onOpen(event.currentTarget)}><span className="works-map-image" aria-hidden="true"><PhotoImage photo={photo} thumbnailOnly lazy /></span></button>;
 }
 
-function printBounds({ rect, captionRect }: WorksMapCard<Photo>) {
+function printRect({ rect, captionRect }: WorksMapCard<Photo>): MapRect {
   const x = Math.min(rect.x, captionRect.x);
   const y = Math.min(rect.y, captionRect.y);
-  return rectStyle({ x, y, width: Math.max(rect.x + rect.width, captionRect.x + captionRect.width) - x,
-    height: Math.max(rect.y + rect.height, captionRect.y + captionRect.height) - y });
+  return { x, y, width: Math.max(rect.x + rect.width, captionRect.x + captionRect.width) - x,
+    height: Math.max(rect.y + rect.height, captionRect.y + captionRect.height) - y };
 }
 
 function printPart({ rect, captionRect }: WorksMapCard<Photo>, part: MapRect) {

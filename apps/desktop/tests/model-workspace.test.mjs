@@ -1,4 +1,5 @@
 import './fixtures/chinese-interface.mjs';
+import { photoWallWorkerPlugin } from './fixtures/photo-wall-worker-plugin.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
@@ -92,7 +93,7 @@ test('样片按共同高度完整适配实际宽度，混合分组留白且无�
 
 const require = createRequire(resolve('apps/desktop/package.json'));
 const { build } = createRequire(require.resolve('vite/package.json'))('esbuild');
-const compiled = await build({ entryPoints: [resolve('apps/desktop/src/features/models/ModelDetail.tsx')], bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external', write: false, logLevel: 'silent', loader: { '.css': 'empty' } });
+const compiled = await build({ entryPoints: [resolve('apps/desktop/src/features/models/ModelDetail.tsx')], bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external', write: false, logLevel: 'silent', loader: { '.css': 'empty' }, plugins: [photoWallWorkerPlugin] });
 const module = { exports: {} };
 vm.runInNewContext(compiled.outputFiles[0].text, { module, exports: module.exports, require, navigator });
 const { createElement } = require('react');
@@ -187,7 +188,7 @@ test('详情长资料保持完整内容并位于样片之前，不裁掉标签�
   assert(html.indexOf(notes) < html.indexOf('aria-label="全部样片"'));
 });
 
-const workspaceCompiled = await build({ entryPoints: [resolve('apps/desktop/src/features/models/ModelWorkspace.tsx')], bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external', write: false, logLevel: 'silent', loader: { '.css': 'empty' } });
+const workspaceCompiled = await build({ entryPoints: [resolve('apps/desktop/src/features/models/ModelWorkspace.tsx')], bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external', write: false, logLevel: 'silent', loader: { '.css': 'empty' }, plugins: [photoWallWorkerPlugin] });
 
 test('列表和详情共用删除确认，取消不请求，失败保留目标，忙时不能重复删除或关闭，成功只删除指定档案', async () => {
   let active, finishDelete, rejectDelete;

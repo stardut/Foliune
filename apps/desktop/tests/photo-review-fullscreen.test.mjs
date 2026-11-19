@@ -1,4 +1,5 @@
 import './fixtures/chinese-interface.mjs';
+import { photoWallWorkerPlugin } from './fixtures/photo-wall-worker-plugin.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
@@ -22,7 +23,7 @@ const bundle = await build({
     resolveDir: fileURLToPath(new URL('../src/features/', import.meta.url)),
   },
   bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external', write: false, loader: { '.css': 'empty' },
-  plugins: [{ name: 'review-boundaries', setup(build) {
+  plugins: [photoWallWorkerPlugin, { name: 'review-boundaries', setup(build) {
     build.onResolve({ filter: /^(?:@tauri-apps\/api\/(?:core|window|webview)|\.\.?\/.*(?:\/api|PhotoReviewImage))$/ }, ({ path }) => ({ path, namespace: 'review-boundary' }));
     build.onLoad({ filter: /.*/, namespace: 'review-boundary' }, ({ path }) => ({
       contents: {

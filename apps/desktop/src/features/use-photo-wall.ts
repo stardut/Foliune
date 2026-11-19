@@ -1,6 +1,7 @@
 import { t } from '../lib/i18n';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { EXHIBITION_LAYOUT_ERROR } from './exhibition-layout';
+import PhotoWallWorker from './photo-wall.worker?worker&inline';
 import { photoWallLayout, visibleWallRange, type PhotoWallLayout, type PhotoWallResponse, type WallLayoutInput, type WallUnit } from './photo-wall-layout';
 
 interface PublishedWall { key: string; contentKey: string; layout: PhotoWallLayout; complete: boolean }
@@ -61,7 +62,8 @@ export function usePhotoWall(canvasRef: RefObject<HTMLDivElement | null>, conten
     const timer = window.setTimeout(() => {
       setFailure(null);
       try {
-        worker = new Worker(new URL('./photo-wall.worker.ts', import.meta.url), { type: 'module' });
+        // Packaged WKWebView cannot load a Worker from the tauri: asset protocol.
+        worker = new PhotoWallWorker();
         worker.onmessage = ({ data }: MessageEvent<PhotoWallResponse>) => {
           if (!active) return;
           if ('error' in data) {

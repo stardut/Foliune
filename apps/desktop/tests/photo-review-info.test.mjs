@@ -1,4 +1,5 @@
 import './fixtures/chinese-interface.mjs';
+import { photoWallWorkerPlugin } from './fixtures/photo-wall-worker-plugin.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
@@ -22,7 +23,7 @@ const bundle = await build({
   },
   bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external',
   write: false, loader: { '.css': 'empty' },
-  plugins: [{ name: 'preview-boundaries', setup(build) {
+  plugins: [photoWallWorkerPlugin, { name: 'preview-boundaries', setup(build) {
     build.onResolve({ filter: /\/(api|PhotoReviewImage)$/ }, ({ path }) => ({ path, namespace: 'preview-boundary' }));
     build.onLoad({ filter: /.*/, namespace: 'preview-boundary' }, ({ path }) => ({
       contents: path.endsWith('/api')

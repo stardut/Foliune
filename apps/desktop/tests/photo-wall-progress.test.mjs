@@ -1,4 +1,5 @@
 import './fixtures/chinese-interface.mjs';
+import { photoWallWorkerPlugin } from './fixtures/photo-wall-worker-plugin.mjs';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +25,7 @@ const bundle = await build({
   },
   bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external', write: false, logLevel: 'silent',
   define: { 'import.meta.url': JSON.stringify('https://foliune.test/photo-wall') },
+  plugins: [photoWallWorkerPlugin],
 });
 const module = { exports: {} };
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(require, module, module.exports);

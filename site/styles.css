@@ -228,6 +228,11 @@ a:focus-visible {
   border-radius: 0.625rem;
 }
 
+.work-map-screenshot {
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
+}
+
 .feature-copy {
   grid-column: 2;
 }

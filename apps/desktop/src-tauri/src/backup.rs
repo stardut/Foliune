@@ -295,6 +295,7 @@ fn prepare_database(staging: &Path) -> Result<(), String> {
     }
     db::migrate_photos(&conn)?;
     crate::groups::init_covers(&conn)?;
+    crate::works_map_covers::init(&conn)?;
     crate::ai::init(&conn)?;
     crate::model_profiles::init(&conn)?;
     crate::social::init(&conn)?;

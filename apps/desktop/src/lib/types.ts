@@ -81,6 +81,7 @@ export interface Membership {
 export interface LibrarySnapshot {
   photos: Photo[];
   hiddenPhotoIds?: string[];
+  worksMapRegionCovers?: Record<string, string>;
   groups: Group[];
   memberships: Membership[];
 }

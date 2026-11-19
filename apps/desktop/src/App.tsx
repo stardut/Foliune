@@ -47,6 +47,14 @@ export default function App({ resumeSettings = false }: { resumeSettings?: boole
   const settingsButton = useRef<HTMLButtonElement>(null);
   const [{ snapshot }, setLibraryView] = useState<LibraryView>({ snapshot: empty, pendingCommits: [], observedPhotos: [] });
   const setSnapshot = useCallback((next: LibrarySnapshot) => setLibraryView((view) => replaceLibrarySnapshot(view, next)), []);
+  const updateWorksMapRegionCover = useCallback((regionId: string, photoId: string | null) => {
+    setLibraryView((view) => {
+      const worksMapRegionCovers = { ...view.snapshot.worksMapRegionCovers };
+      if (photoId === null) delete worksMapRegionCovers[regionId];
+      else worksMapRegionCovers[regionId] = photoId;
+      return { ...view, snapshot: { ...view.snapshot, worksMapRegionCovers } };
+    });
+  }, []);
   const [loading, setLoading] = useState(true);
   const libraryVersion = useRef<number | null>(null);
   const [externalRevision, setExternalRevision] = useState(0);
@@ -306,7 +314,7 @@ export default function App({ resumeSettings = false }: { resumeSettings?: boole
     changeSpace('search');
   }
   function renderWorkspace(result?: SearchDetail) {
-    const libraryProps = { snapshot, onSnapshot: setSnapshot, onFeedback: feedback, importDisabled: relinkBusy, onRelink: relinkPhoto, onPlay: openPlayer, onDirtyChange: setPhotoDirty, onBusyChange: setPhotoBusy };
+    const libraryProps = { snapshot, onSnapshot: setSnapshot, onWorksMapRegionCoverChange: updateWorksMapRegionCover, onFeedback: feedback, importDisabled: relinkBusy, onRelink: relinkPhoto, onPlay: openPlayer, onDirtyChange: setPhotoDirty, onBusyChange: setPhotoBusy };
     if (space === 'search') return <SearchWorkspace {...libraryProps} externalRevision={externalRevision} session={searchSession.current} workspaceVisibility={workspaceVisibility}
       onOpenBook={(id) => navigate('books', { space: 'books', id })}
       onOpenModel={(model) => navigate('models', { space: 'models', id: model.id })}

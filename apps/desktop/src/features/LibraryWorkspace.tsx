@@ -62,6 +62,7 @@ interface SearchPhotoWall {
 
 export interface LibraryWorkspaceProps {
   snapshot: LibrarySnapshot; onSnapshot: (snapshot: LibrarySnapshot) => void;
+  onWorksMapRegionCoverChange: (regionId: string, photoId: string | null) => void;
   onFeedback: (message: string, error?: boolean) => void; importDisabled?: boolean; onRelink: (photo: Photo) => Promise<void>;
   detailExtension?: (photo: Photo) => ReactNode;
   onPlay: (photoIds: string[]) => void;
@@ -71,7 +72,7 @@ export interface LibraryWorkspaceProps {
   workDirectory?: Pick<ReturnType<typeof useWorkDirectory>, 'state' | 'jobs' | 'retryJob' | 'retrying'>;
 }
 
-export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, importDisabled = false, onRelink, detailExtension, searchResults, onPlay, onDirtyChange, onBusyChange, onBrowsingIdleChange, onOpenWorkDirectorySettings, workDirectory }: LibraryWorkspaceProps & (
+export function LibraryWorkspace({ space, snapshot, onSnapshot, onWorksMapRegionCoverChange, onFeedback, importDisabled = false, onRelink, detailExtension, searchResults, onPlay, onDirtyChange, onBusyChange, onBrowsingIdleChange, onOpenWorkDirectorySettings, workDirectory }: LibraryWorkspaceProps & (
   { space: LibraryKind; searchResults?: never } | { space: 'search'; searchResults: SearchPhotoWall }
 )) {
   const [working, setBusy] = useState(false);
@@ -156,7 +157,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
     return () => { mounted.current = false; const active = draftRef.current; if (active) void api.cancelCuration(active.id).catch((cause) => onFeedback(errorMessage(cause), true)); };
   }, []);
   const library: LibraryKind = space === 'work' ? 'work' : 'collection';
-  const albumIndex = useMemo(() => space === 'search' ? null : libraryAlbums(snapshot, library), [snapshot, library, space]);
+  const albumIndex = useMemo(() => space === 'search' ? null : libraryAlbums({ photos: snapshot.photos, groups: snapshot.groups, memberships: snapshot.memberships }, library), [snapshot.photos, snapshot.groups, snapshot.memberships, library, space]);
   const hasPendingAlbum = workDirectory?.jobs.some((job) => job.createdAlbum && !albumIndex?.byGroupId.has(job.albumId));
   const currentAlbum = groupId ? albumIndex?.byGroupId.get(groupId) : undefined;
   const currentGroup = currentAlbum?.group;
@@ -560,7 +561,16 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onFeedback, impo
   }
   return <section ref={workspaceRef} className={social || collage ? undefined : `library-workspace library-${space}${singleAlbum && photos.length ? ' album-single-layout' : ''}${previewCount !== undefined ? ' search-photo-preview' : ''}`} aria-label={space === 'work' ? t('作品图库', 'Work Library') : space === 'search' ? t('照片搜索结果', 'Photo Search Results') : t('收藏图库', 'Collection Library')}>
     {worksMap && albumHome && space === 'work' && albumIndex
-      ? <WorksMap albums={albumIndex.albums} hiddenPhotoIds={snapshot.hiddenPhotoIds} onBack={() => setWorksMap(false)} onReviewChange={setMapReview} />
+      ? <WorksMap albums={albumIndex.albums} hiddenPhotoIds={snapshot.hiddenPhotoIds} onBack={() => setWorksMap(false)} onReviewChange={setMapReview}
+        regionCovers={snapshot.worksMapRegionCovers} busy={busy || importDisabled} onFeedback={onFeedback}
+        onSetCover={async (regionId, photoId) => {
+          setBusy(true);
+          try {
+            await api.setWorksMapRegionCover(regionId, photoId);
+            onWorksMapRegionCoverChange(regionId, photoId);
+            onFeedback(photoId ? t('已设置地区封面', 'Region cover set') : t('已恢复自动封面', 'Automatic cover restored'));
+          } finally { setBusy(false); }
+        }} />
       : collage ? <CollageWorkspace snapshot={snapshot} library={library} initialPhotoIds={collage.photoIds} onDirtyChange={onDirtyChange} onBusyChange={onBusyChange} onRelink={onRelink} onExit={returnToAlbum} onExported={(path) => { toast({ title: t(`已导出 ${exportedFileName(path)}`, `Exported ${exportedFileName(path)}`), dismissible: false }); returnToAlbum(); }} /> : social ? <SocialWorkspace snapshot={snapshot} initialPhotoIds={social.photoIds} onExit={returnToAlbum} onRelink={onRelink} /> : <>
     {currentGroup && space !== 'search' ? <AlbumDetailHeader
       name={currentGroup.name} homeTitle={albumHomeTitle}

@@ -10,4 +10,8 @@
   <!-- Finder draws the native icons and labels on either side of this arrow. -->
   <path d="M249 150h62m-11-8 11 8-11 8" fill="none" stroke="#55595a"
         stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <g text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif">
+    <text x="280" y="262" font-size="12" font-weight="500" fill="#444849">拖入「应用程序」后，从「应用程序」打开一次</text>
+    <text x="280" y="282" font-size="11" fill="#55595a">如被 macOS 拦截，请前往系统设置 → 隐私与安全性 → 仍要打开</text>
+  </g>
 </svg>

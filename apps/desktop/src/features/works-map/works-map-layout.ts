@@ -11,6 +11,8 @@ export interface WorksMapRegionGroup<T extends MapPhoto> extends WorksMapRegion 
   // Use the region's interior point when GPS is unavailable or conflicts with a manual region.
   representative: { photo: T; coordinate: MapCoordinate };
   photos: LocatedMapPhoto<T>[];
+  photosById?: ReadonlyMap<string, T>;
+  coverPhoto?: T;
   whenExpanded?: WorksMapRegionGroup<T>[];
 }
 export interface WorksMapRegionMarker<T extends MapPhoto> { group: WorksMapRegionGroup<T>; point: MapPoint }
@@ -84,7 +86,7 @@ export function groupWorksMapPhotos<T extends MapPhoto>(
   photos: readonly LocatedMapPhoto<T>[], regions: Pick<WorksMapRegionData, 'resolve' | 'regionById' | 'regionAnchor'>,
 ): WorksMapRegionGroup<T>[] {
   type Group = {
-    region: WorksMapRegion; photos: LocatedMapPhoto<T>[]; gps?: WorksMapRegionGroup<T>['representative'];
+    region: WorksMapRegion; photos: LocatedMapPhoto<T>[]; photosById: Map<string, T>; gps?: WorksMapRegionGroup<T>['representative'];
     useRegionAnchor: boolean;
   };
   const overview = new Map<string, Group>();
@@ -93,10 +95,11 @@ export function groupWorksMapPhotos<T extends MapPhoto>(
     const { coordinate, photo } = item;
     let group = groups.get(region.id);
     if (!group) {
-      group = { region, photos: [], useRegionAnchor: false };
+      group = { region, photos: [], photosById: new Map(), useRegionAnchor: false };
       groups.set(region.id, group);
     }
     group.photos.push(item);
+    group.photosById.set(photo.id, photo);
     if (coordinate) {
       const belongsToRegion = gpsRegion?.id === region.id || gpsRegion?.parentId === region.id;
       if (!belongsToRegion) group.useRegionAnchor = true;
@@ -114,9 +117,9 @@ export function groupWorksMapPhotos<T extends MapPhoto>(
     add(details, region, item, gpsRegion);
   }
   function finish(groups: Iterable<Group>): WorksMapRegionGroup<T>[] {
-    return [...groups].flatMap(({ region, photos: members, gps, useRegionAnchor }) => {
+    return [...groups].flatMap(({ region, photos: members, photosById, gps, useRegionAnchor }) => {
       const coordinate = !useRegionAnchor && gps ? gps.coordinate : regions.regionAnchor(region.id);
-      return coordinate ? [{ ...region, photos: members, representative: { photo: gps?.photo ?? members[0].photo, coordinate } }] : [];
+      return coordinate ? [{ ...region, photos: members, photosById, representative: { photo: gps?.photo ?? members[0].photo, coordinate } }] : [];
     }).sort((a, b) => a.id.localeCompare(b.id, 'en'));
   }
   const citiesByProvince = new Map<string, WorksMapRegionGroup<T>[]>();
@@ -131,6 +134,18 @@ export function groupWorksMapPhotos<T extends MapPhoto>(
     if (!cities) return group;
     const province = details.get(group.id);
     return { ...group, whenExpanded: province ? [...cities, ...finish([province])] : cities };
+  });
+}
+
+// Resolve against the effective group, including a province's remainder after its cities expand.
+// The index is built during grouping; view changes never rescan the photo collection.
+export function withWorksMapRegionCovers<T extends MapPhoto>(
+  groups: readonly WorksMapRegionGroup<T>[], covers: Readonly<Record<string, string>>,
+): readonly WorksMapRegionGroup<T>[] {
+  return groups.map(group => {
+    const id = covers[group.id];
+    const coverPhoto = id ? group.photosById?.get(id) : undefined;
+    return coverPhoto ? { ...group, coverPhoto } : group;
   });
 }
 
@@ -402,7 +417,7 @@ function chooseCard<T extends MapPhoto>(
 ): CardPlacement<T> | undefined {
   const { map, narrow, lowerShelf } = frame;
   const { group, point } = marker;
-  const { photo } = group.representative;
+  const photo = group.coverPhoto ?? group.representative.photo;
   const ratio = photoRatio(photo);
   const stageHeight = bottom(map) + lowerShelf;
   const shelfTop = Math.max(bottom(map), circle.center.y + circle.radius) + shelfGap;
@@ -606,7 +621,7 @@ export function layoutWorksMap<T extends MapPhoto>(
   const markers = positionRegionMarkers(groups, view, circle);
   const placed: CardPlacement<T>[] = [];
   const order = [...markers].sort((a, b) => b.group.photos.length - a.group.photos.length ||
-    photoRatio(a.group.representative.photo) - photoRatio(b.group.representative.photo));
+    photoRatio(a.group.coverPhoto ?? a.group.representative.photo) - photoRatio(b.group.coverPhoto ?? b.group.representative.photo));
   for (const marker of order) {
     const placement = chooseCard(marker, frame, circle, placed, markers);
     if (!placement) continue;
@@ -655,7 +670,7 @@ export function interpolateWorksMapLayout<T extends MapPhoto>(
     const point = markerFor.get(from.regionId);
     if (!point) continue;
     const next = targetFor.get(from.regionId);
-    const to = next?.side === from.side ? next : from;
+    const to = next?.side === from.side && next.photo.id === from.photo.id ? next : from;
     const rect = mixRect(from.rect, to.rect);
     const captionRect = mixRect(from.captionRect, to.captionRect);
     if (from.side === 'bottom') {

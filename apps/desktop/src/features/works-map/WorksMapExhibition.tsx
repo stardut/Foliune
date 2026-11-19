@@ -6,12 +6,15 @@ import { PhotoImage } from '../../components/PhotoImage';
 import { IconButton } from '../../components/ui';
 import type { Photo } from '../../lib/types';
 import { PhotoReview } from '../PhotoReview';
+import { isContextMenuTracking } from '../use-context-menu';
+import { useWorksMapRegionCoverMenu } from './use-works-map-region-cover-menu';
+import { WorksMapThumbnail } from './WorksMapThumbnail';
 import { useWorksMapPhotoDock } from './use-works-map-photo-dock';
 import { useWorksMapView } from './use-works-map-view';
 import { WorksMapGlobe, type WorksMapAtlas } from './WorksMapGlobe';
 import {
   centerWorksMapView, createWorksMapFrame, fitWorksMapView, interpolateWorksMapLayout, layoutWorksMap, previewWorksMapCard,
-  projectWorksMapCoordinate, selectWorksMapRegions,
+  projectWorksMapCoordinate, selectWorksMapRegions, withWorksMapRegionCovers,
   worksMapGlobeBounds, worksMapVisibleCircle,
   type MapPoint, type MapRect, type WorksMapCard, type WorksMapRegionGroup,
 } from './works-map-layout';
@@ -25,14 +28,19 @@ const PIN_VISUAL_GAP = 0.9;
 const PRINT_HOVER_TRANSFER_MS = 650;
 const PRINT_ROUTE_MS = 450;
 const REGION_BUTTONS = '.works-map-pin, .works-map-print';
+const EMPTY_REGION_COVERS: Readonly<Record<string, string>> = {};
 
 function rectStyle({ x, y, width, height }: MapRect) {
   return { left: x, top: y, width, height };
 }
 
-export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }: {
+export function WorksMapExhibition({ regions: overview, atlas, onReviewChange, regionCovers = EMPTY_REGION_COVERS, busy, onSetCover, onFeedback }: {
   regions: WorksMapRegionGroup<Photo>[];
   atlas: WorksMapAtlas | null;
+  regionCovers?: Readonly<Record<string, string>>;
+  busy: boolean;
+  onSetCover: (regionId: string, photoId: string | null) => Promise<void>;
+  onFeedback: (message: string, error?: boolean) => void;
   onReviewChange: (open: boolean) => void;
 }) {
   const exhibition = useRef<HTMLDivElement>(null);
@@ -83,6 +91,7 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
   }, [frame, groupingView, keepGroups, overview]);
   useLayoutEffect(() => { lastRegions.current = { overview, displayed }; }, [overview, displayed]);
   const { groups: regions, menuOnly } = displayed;
+  const coverRegions = useMemo(() => withWorksMapRegionCovers(regions, regionCovers), [regions, regionCovers]);
   const regionsById = useMemo(() => new Map([...regions, ...menuOnly].map((region) => [region.id, region])), [regions, menuOnly]);
   const qualifiersByName = useMemo(() => {
     const qualifiers = new Map<string, Set<string>>();
@@ -100,7 +109,7 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
   const globeClipId = `${groupId}-globe`;
   const layoutView = dragOrigin ?? view;
   const layoutAt = useCallback((position: typeof view) =>
-    frame && position ? layoutWorksMap(regions, frame, position) : undefined, [frame, regions]);
+    frame && position ? layoutWorksMap(coverRegions, frame, position) : undefined, [frame, coverRegions]);
   const currentLayout = useMemo(() => !zoomTransition ? layoutAt(layoutView) : undefined, [layoutAt, layoutView, zoomTransition]);
   const lastLayout = useRef({ frame, regions, layout: currentLayout });
   const transitionLayouts = useMemo(() => {
@@ -153,6 +162,7 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
   }, [baseCardsByRegion, layout, menuOnly, regions]);
   const selected = selectedId ? regionsById.get(selectedId) : undefined;
   const reviewRegion = review && regionsById.get(review.regionId);
+  const showPhotoMenu = useWorksMapRegionCoverMenu({ selected, busy, reviewOpen: !!review, regionCovers, onSetCover, onFeedback });
   // Show the region name in the map's read-only review with the original library assets.
   const reviewPhotos = useMemo(() => reviewRegion?.photos.map(({ photo }) => ({ ...photo, location: reviewRegion.name })) ?? [], [reviewRegion]);
 
@@ -230,7 +240,7 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
       pressedBackground = null;
     }
     function dismissFromKeyboard(event: KeyboardEvent) {
-      if (event.key !== 'Escape' || event.defaultPrevented || event.repeat || event.isComposing) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || event.repeat || event.isComposing || isContextMenuTracking()) return;
       event.preventDefault();
       clearGroup(true);
     }
@@ -431,7 +441,7 @@ export function WorksMapExhibition({ regions: overview, atlas, onReviewChange }:
         </header>
         <div key={selected.id} ref={strip} className="works-map-thumbnails">
           <div className="works-map-thumbnail-track">
-            {selected.photos.map(({ photo }) => <WorksMapThumbnail key={photo.id} photo={photo} onOpen={(trigger) => {
+            {selected.photos.map(({ photo }) => <WorksMapThumbnail key={photo.id} photo={photo} onMenu={showPhotoMenu} onOpen={(trigger) => {
               trigger.focus({ preventScroll: true });
               setReview({ id: photo.id, regionId: selected.id, trigger });
             }} />)}
@@ -477,12 +487,6 @@ function clipPinArea(point: MapPoint, points: readonly MapPoint[], half: number,
 }
 
 function photoName(photo: Photo) { return photo.title || photo.originalName; }
-
-function WorksMapThumbnail({ photo, onOpen }: { photo: Photo; onOpen: (trigger: HTMLButtonElement) => void }) {
-  const aspectRatio = photo.width > 0 && photo.height > 0 ? photo.width / photo.height : 1;
-  return <button type="button" className="works-map-thumbnail" style={{ aspectRatio }} aria-label={t(`查看 ${photoName(photo)}`, `View ${photoName(photo)}`)} title={photoName(photo)}
-    onClick={(event) => onOpen(event.currentTarget)}><span className="works-map-image" aria-hidden="true"><PhotoImage photo={photo} thumbnailOnly lazy /></span></button>;
-}
 
 function printRect({ rect, captionRect }: WorksMapCard<Photo>): MapRect {
   const x = Math.min(rect.x, captionRect.x);

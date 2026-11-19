@@ -72,6 +72,8 @@ export const updatePhoto = (id: string, patch: PhotoPatch, expected: PhotoPatch)
   mutate('update_photo', { id, patch, expected });
 export const setPhotoRegions = (photos: readonly PhotoRegionBaseline[], regionId: string, groupId?: string) =>
   mutate('set_photo_regions', { photos, regionId, groupId: groupId ?? null });
+export const setWorksMapRegionCover = (regionId: string, photoId: string | null) =>
+  call<void>('set_works_map_region_cover', { regionId, photoId });
 export const readPhotoMetadata = (photoId: string, expectedOriginalPath: string) =>
   call<PhotoMetadata>('read_photo_metadata', { photoId, expectedOriginalPath });
 export const addPhotosToGroup = (groupId: string, photoIds: string[]) => mutate('add_photos_to_group', { groupId, photoIds });

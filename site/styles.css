@@ -292,7 +292,7 @@ h2 {
 .download {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  align-items: end;
+  align-items: start;
   gap: clamp(1.5rem, 5vw, 5rem);
   padding: clamp(2.5rem, 6vw, 5rem) 0;
   border-block: 1px solid var(--line);
@@ -320,15 +320,45 @@ h2 {
   display: none;
 }
 
+.first-open {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.first-open h3 {
+  margin: 0 0 0.625rem;
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.first-open p + p {
+  margin-top: 0.375rem;
+}
+
+.first-open .first-open-path {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.375rem;
+  margin-top: 0.75rem;
+  color: var(--ink);
+}
+
+.first-open-path span {
+  white-space: nowrap;
+}
+
+.first-open-path strong {
+  font-weight: 600;
+}
+
 .download-note {
   margin-top: 0.75rem;
   color: var(--caption);
   font-size: 0.875rem;
-}
-
-.download-note a {
-  text-decoration: underline;
-  text-underline-offset: 0.3em;
 }
 
 .site-footer {

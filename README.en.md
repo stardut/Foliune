@@ -26,7 +26,7 @@ You can import local photos or go to **Settings → Work Folder** to link a fold
 
 Revisit work by shooting region on the offline **Work Map**. In China, provinces can expand into cities and other prefecture-level regions when there is room for their photo cards. Select a representative photograph or a point on the globe to see more work from that region. You can set a region manually for photographs without GPS data.
 
-[See the Work Map](site/assets/works-map.webp)
+[See the Work Map](site/assets/works-map-en.webp)
 
 On macOS, use AirDrop to share the originals of selected photographs or an entire album.
 

@@ -1,8 +1,8 @@
 # 应用截图 · Screenshots
 
-中英文 README 共用下列截图。
+中英文 README 使用下列截图，作品地图分别使用对应语言的版本。
 
-Both README editions use the screenshots below.
+Both README editions use the screenshots below, with a localized Work Map for each language.
 
 | 文件 / File | 来源 / Source |
 | --- | --- |
@@ -10,7 +10,8 @@ Both README editions use the screenshots below.
 | `photobook-shelf.jpg` | 2026-11-04 macOS 原生画册主页验收截图 / Native macOS photobook shelf capture |
 | `shoot-planning.png` | 用户提供的拍摄策划截图 / User-supplied shoot plan |
 | `model-profiles.png` | 用户提供的模特档案截图 / User-supplied model profiles |
-| [`works-map.webp`](../../site/assets/works-map.webp) | macOS 原生作品地图截图，来自含 20 张实拍照片的独立验收图库 / Native macOS Work Map capture from a review library of 20 photographs |
+| [`works-map.webp`](../../site/assets/works-map.webp) | 用户于 2026-11-19 提供的中文作品地图截图，原始文件 `Xnip2026-11-19_13-46-44.jpg`（2864 × 1984），完整等比缩小为 1920 × 1331 / User-supplied Chinese Work Map screenshot, resized proportionally in full |
+| [`works-map-en.webp`](../../site/assets/works-map-en.webp) | 用户于 2026-11-19 提供的英文作品地图截图，原始文件 `Xnip2026-11-19_13-46-32.jpg`（2864 × 1984），完整等比缩小为 1920 × 1331 / User-supplied English Work Map screenshot, resized proportionally in full |
 | [`photobook-spread.webp`](../../site/assets/photobook-spread.webp) | macOS 原生画册双页阅读截图 / Native macOS photobook reader in spread view |
 
 画册主页使用独立验收实例 `app.foliune.book-review` 的 macOS release 截图，原始文件为 `.build/verification/workspace-transitions/final-books-wide.png`。截图尺寸为 2640 × 1760。验收背景见[工作区切换记录](../workspace-transitions.md)。
@@ -30,11 +31,11 @@ Both README editions use the screenshots below.
 
 The spread shows [Paul Jarvis’s coast photograph](https://unsplash.com/photos/I_9ILwtsl_k) and [Jeff Sheldon’s plant photograph](https://unsplash.com/photos/rDLBArZUl1c), sourced via Lorem Picsum under the same Unsplash License.
 
-## 作品地图摄影来源 · Work Map photo credits
+## 历史作品地图摄影来源 · Previous Work Map photo credits
 
-照片在应用内按原比例缩小显示，截图和网页图也经过缩放。地图底图由 Natural Earth 提供。
+以下署名对应旧版作品地图截图，样本来自含 20 张实拍照片的独立验收图库。旧版截图已按网页尺寸缩放，底图由 Natural Earth 提供。
 
-The app displays reduced-size photographs at their original proportions. The screenshot was resized for the web. Basemap by Natural Earth.
+The credits below apply to the previous Work Map screenshot, captured from an independent review library of 20 photographs. The previous screenshot was resized for the web. Basemap by Natural Earth.
 
 | 作品 / Photograph | 摄影师 / Photographer | 许可 / License |
 | --- | --- | --- |

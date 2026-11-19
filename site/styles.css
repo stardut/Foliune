@@ -290,16 +290,38 @@ h2 {
 }
 
 .download {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  align-items: start;
-  gap: clamp(1.5rem, 5vw, 5rem);
   padding: clamp(2.5rem, 6vw, 5rem) 0;
   border-block: 1px solid var(--line);
 }
 
+.download-platforms {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(0, 0.85fr);
+  align-items: start;
+  gap: clamp(2.5rem, 7vw, 7rem);
+  margin-top: clamp(2rem, 4vw, 3rem);
+}
+
+.download-platforms h3 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.025em;
+}
+
+.download-windows h3 {
+  color: var(--muted);
+}
+
+.platform-status {
+  margin-top: 0.5rem;
+  color: var(--caption);
+  font-size: 0.9375rem;
+}
+
 .download-version {
-  margin-top: 0.75rem;
+  margin-top: 0.5rem;
   color: var(--muted);
   font-size: 0.9375rem;
   font-variant-numeric: tabular-nums;
@@ -322,13 +344,15 @@ h2 {
 
 .first-open {
   margin-top: 1.5rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--line);
+  margin-bottom: 1.25rem;
+  padding: 1.25rem 1.5rem;
+  border-radius: 0.625rem;
+  background: #ffffff0d;
   color: var(--muted);
   font-size: 0.875rem;
 }
 
-.first-open h3 {
+.first-open h4 {
   margin: 0 0 0.625rem;
   color: var(--ink);
   font-size: 0.9375rem;
@@ -371,7 +395,7 @@ h2 {
 }
 
 @media (max-width: 56rem) {
-  .hero, .feature, .feature-reversed, .download {
+  .hero, .feature, .feature-reversed, .download-platforms {
     grid-template-columns: minmax(0, 1fr);
   }
 

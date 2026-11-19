@@ -1,4 +1,5 @@
 import './fixtures/chinese-interface.mjs';
+import { photoWallWorkerPlugin } from './fixtures/photo-wall-worker-plugin.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
@@ -63,7 +64,7 @@ const bundle = await build({
   stdin: { contents: `export { LibraryWorkspace } from './LibraryWorkspace'; export { SearchWorkspace } from './search/SearchWorkspace';`, resolveDir: resolve('apps/desktop/src/features') },
   bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', packages: 'external', write: false, logLevel: 'silent',
   loader: { '.css': 'empty' },
-  plugins: [{ name: 'workspace-boundaries', setup(build) {
+  plugins: [photoWallWorkerPlugin, { name: 'workspace-boundaries', setup(build) {
     build.onResolve({ filter: /^react$/, namespace: 'workspace-boundary' }, () => ({ path: 'react', external: true }));
     build.onResolve({ filter: /\/(PhotoCanvas|PhotoDetail|CurationWorkspace|PhotoSourceDialog|AddPhotosToBook|PhotoReview|SocialWorkspace|CollageWorkspace|ToastProvider|use-context-menu|api|book-api|model-api|planning-api)$/ }, ({ path }) => ({ path, namespace: 'workspace-boundary' }));
     build.onLoad({ filter: /.*/, namespace: 'workspace-boundary' }, ({ path }) => {
@@ -134,7 +135,7 @@ async function scenario(space, input, run, options = {}) {
   const showDetail = () => { container.scrollTop = 0; root.render(h('div', null, '详情')); };
   const renderSnapshot = (next = snapshot) => act(async () => root.render(h(space === 'search' ? SearchWorkspace : LibraryWorkspace, {
     ...(space === 'search' ? { session, onOpenBook: showDetail, onOpenModel: showDetail, onOpenPlan: showDetail } : { space }),
-    snapshot: next, onSnapshot: next => calls.push(next), onFeedback: options.onFeedback ?? (() => {}), onRelink: async (photo) => relinks.push(photo.id), onPlay: (ids) => plays.push(ids), onBrowsingIdleChange,
+    snapshot: next, onSnapshot: next => calls.push(next), onFeedback: options.onFeedback ?? (() => {}), onRelink: async (photo) => relinks.push(photo.id), onPlay: (ids) => { options.onPlay?.(ids, next); plays.push(ids); }, onBrowsingIdleChange,
   })));
   try {
     await renderSnapshot(snapshot);
@@ -251,6 +252,102 @@ async function assertPhotoSort(trigger, label) {
   assert.ok(checked[0].querySelector('.dropdown-row-check'));
   await pressKey(checked[0], 'Escape');
 }
+
+for (const library of ['collection', 'work']) {
+  test(`${library} 首页相簿菜单欣赏只播放目标有效成员，沿用排序并保留首页`, async () => {
+    const first = { ...photo(library, '10'), capturedAt: '2025-01-01' };
+    const second = { ...photo(library, '2'), capturedAt: '2026-01-01' };
+    const input = {
+      ...mixed,
+      photos: [...mixed.photos, first, second],
+      memberships: [...mixed.memberships,
+        ...[first, second].map(({ id: photoId }, position) => ({ groupId: `${library}-album`, photoId, position: position + 2, status: 'active' })),
+        { groupId: `${library}-album`, photoId: 'missing', position: 4, status: 'active' },
+        { groupId: `${library}-album`, photoId: `${library === 'work' ? 'collection' : 'work'}-active`, position: 5, status: 'active' },
+      ],
+    };
+    let actions;
+    globalThis.captureAlbumTestMenu = (menu) => { actions = menu.actions; };
+    try {
+      for (const [sort, expected] of [
+        ['time-desc', [second.id, first.id, `${library}-active`]],
+        ['name-asc', [second.id, first.id, `${library}-active`]],
+        ['membership', [`${library}-active`, first.id, second.id]],
+      ]) {
+        window.localStorage.setItem('foliune.photo-sort', sort);
+        await scenario(library, input, async ({ container, plays, renderSnapshot }) => {
+          const cards = [...container.querySelectorAll('.album-open')];
+          container.scrollTop = 240;
+          await act(async () => cards[0].dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+          const play = actions.find(({ id }) => id === 'play');
+          assert.equal(play.text, '欣赏');
+          assert.equal(play.disabled, false);
+          assert.equal(play.allowed(), true);
+          await act(async () => play.run());
+          assert.deepEqual(plays, [expected]);
+          assert.equal(container.querySelector('.album-detail-header'), null);
+          assert.equal(container.querySelectorAll('.album-open').length, 2);
+          assert.equal(container.scrollTop, 240, '发起欣赏不进入详情或改变首页位置');
+
+          await act(async () => cards[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true })));
+          const emptyPlay = actions.find(({ id }) => id === 'play');
+          assert.equal(emptyPlay.disabled, true);
+          assert.equal(emptyPlay.allowed(), false);
+
+          await renderSnapshot({ ...input, memberships: input.memberships.filter(({ groupId }) => groupId !== `${library}-album`) });
+          assert.equal(play.allowed(), false, '菜单打开后成员消失时不可播放过期照片');
+        }, { withMain: true });
+      }
+    } finally { delete globalThis.captureAlbumTestMenu; }
+  });
+
+  test(`${library} 菜单打开后同步新照片，欣赏使用最新快照对应的播放器回调`, async () => {
+    const added = { ...photo(library, 'synced'), capturedAt: '2026-01-01' };
+    const updated = { ...mixed, photos: [...mixed.photos, added], memberships: [...mixed.memberships,
+      { groupId: `${library}-album`, photoId: added.id, status: 'active', position: 2 },
+    ] };
+    const opened = [];
+    let play;
+    globalThis.captureAlbumTestMenu = ({ actions }) => { play = actions.find(({ id }) => id === 'play'); };
+    try {
+      await scenario(library, mixed, async ({ container, renderSnapshot }) => {
+        await act(async () => container.querySelector('.album-open').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+        await renderSnapshot(updated);
+        assert.equal(play.allowed(), true);
+        await act(async () => play.run());
+        assert.deepEqual(opened, [[added.id, `${library}-active`]], 'App 的快照过滤不能漏掉菜单打开后同步的新照片');
+      }, { onPlay: (ids, snapshot) => opened.push(ids.filter((id) => snapshot.photos.some((photo) => photo.id === id))) });
+    } finally { delete globalThis.captureAlbumTestMenu; }
+  });
+}
+
+test('作品首页欣赏沿用相簿详情的地点分组顺序', async () => {
+  const photos = [
+    { ...photo('work', 'old-a'), location: '甲', capturedAt: '2024-01-01' },
+    { ...photo('work', 'new-a'), location: '甲', capturedAt: '2026-01-01' },
+    { ...photo('work', 'middle-b'), location: '乙', capturedAt: '2025-01-01' },
+  ];
+  const input = {
+    photos, groups: groups.filter(({ id }) => id === 'work-album'),
+    memberships: photos.map(({ id: photoId }, position) => ({ groupId: 'work-album', photoId, position, status: 'active' })),
+  };
+  let actions;
+  globalThis.captureAlbumTestMenu = (menu) => { actions = menu.actions; };
+  try {
+    await scenario('work', input, async ({ container, plays }) => {
+      await act(async () => container.querySelector('.album-open').click());
+      await openAlbumMore(albumMore(container));
+      await act(async () => [...radioGroup(menuFor(albumMore(container)), '分组方式').querySelectorAll('button')].find((item) => item.textContent === '地点').click());
+      const expected = [...container.querySelectorAll('[data-photo-id]')].map((item) => item.dataset.photoId);
+      assert.deepEqual(expected, ['work-new-a', 'work-old-a', 'work-middle-b']);
+      await act(async () => container.querySelector('[aria-label="返回作品相簿"]').click());
+      await act(async () => container.querySelector('.album-open').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+      await act(async () => actions.find(({ id }) => id === 'play').run());
+      assert.deepEqual(plays, [expected]);
+      assert.ok(container.querySelector('.album-open'));
+    });
+  } finally { delete globalThis.captureAlbumTestMenu; }
+});
 
 test('隔空投送区分整本相簿、选片和未选照片，取消后保留选择', async (t) => {
   const userAgent = t.mock.getter(window.navigator, 'userAgent', () => 'Mozilla/5.0 (Macintosh)');

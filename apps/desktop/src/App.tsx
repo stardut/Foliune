@@ -1,5 +1,6 @@
 import { t } from './lib/i18n.ts';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { Search, Settings2 } from 'lucide-react';
 import { TauriEvent } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -27,6 +28,7 @@ import { rememberUpdateNotice, useAppUpdate } from './features/use-app-update';
 import { useCliInstall, useCliInstallNotice } from './features/use-cli-install';
 import { isContextMenuTracking, subscribeContextMenu } from './features/use-context-menu';
 import { PhotoPlayer } from './features/PhotoPlayer';
+import { useAppreciationSettings } from './features/use-appreciation-settings';
 import { WorkDirectoryDiscovery } from './features/WorkDirectory';
 import { useWorkDirectory } from './features/use-work-directory';
 import { mergeWorkDirectoryAvailability, recordDirectoryCommit, replaceLibrarySnapshot, type LibraryView } from './features/work-directory-snapshot';
@@ -71,6 +73,7 @@ export default function App({ resumeSettings = false }: { resumeSettings?: boole
   const [relinkConfirmation, setRelinkConfirmation] = useState<{ path: string; resolve: (confirmed: boolean) => void } | null>(null);
   const [navigationRevision, setNavigationRevision] = useState(0);
   const [playingIds, setPlayingIds] = useState<string[] | null>(null);
+  const appreciation = useAppreciationSettings(feedback);
   const [bookDirty, setBookDirty] = useState(false);
   const [bookBusy, setBookBusy] = useState(false);
   const [modelDirty, setModelDirty] = useState(false);
@@ -308,7 +311,12 @@ export default function App({ resumeSettings = false }: { resumeSettings?: boole
     finally { setRelinkBusy(false); }
   }
   function confirmRelink(confirmed: boolean) { relinkConfirmation?.resolve(confirmed); setRelinkConfirmation(null); }
-  function openPlayer(ids: string[]) { const actual = ids.filter((id) => snapshot.photos.some((photo) => photo.id === id)); if (actual.length) setPlayingIds(actual); else feedback(t('没有可欣赏的照片', 'No photos to play.'), true); }
+  function openPlayer(ids: string[]) {
+    const actual = ids.filter((id) => snapshot.photos.some((photo) => photo.id === id));
+    if (!actual.length) { feedback(t('没有可欣赏的照片', 'No photos to play.'), true); return; }
+    // Mount the audio during the slideshow gesture, before the native Space transition.
+    flushSync(() => setPlayingIds(actual));
+  }
   function returnToSearch() {
     if (relinkBusy) { feedback(t('正在处理，请完成后再切换工作区', 'Wait for the current operation to finish before switching workspaces.')); return; }
     changeSpace('search');
@@ -329,7 +337,7 @@ export default function App({ resumeSettings = false }: { resumeSettings?: boole
       initialModel={result?.space === 'models' ? result.model : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
     if (space === 'planning') return <PlanningWorkspace snapshot={snapshot} photos={snapshot.photos} onSnapshot={setSnapshot} onDirtyChange={setPlanningDirty} onBusyChange={setPlanningBusy}
       initialPlan={result?.space === 'planning' ? result.plan : undefined} onBackToSearch={result ? returnToSearch : undefined} />;
-    return <SettingsWorkspace snapshot={snapshot} directory={workDirectory} onRestored={setSnapshot} onBusyChange={setSettingsBusy}
+    return <SettingsWorkspace appreciation={appreciation} snapshot={snapshot} directory={workDirectory} onRestored={setSnapshot} onBusyChange={setSettingsBusy}
       workspaceVisibility={workspaceVisibility} onWorkspaceVisibilityChange={changeWorkspaceVisibility}
       update={appUpdate} updateBlocked={updateBlocked} onUpdate={() => startUpdate('settings')}
       cli={cliInstall} cliBlocked={cliBlocked} onInstallCli={() => startCliInstall(false)} />;
@@ -353,7 +361,7 @@ export default function App({ resumeSettings = false }: { resumeSettings?: boole
     {relinkConfirmation && <Modal title={t('确认替换照片', 'Replace this photo?')} onClose={() => confirmRelink(false)}><p className="replacement-copy">{t('将用所选文件替换此照片；所有相簿和画册中的引用都会使用该文件', 'This photo will use the selected file in every album and photo book that references it.')}</p><p className="replacement-path">{relinkConfirmation.path}</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => confirmRelink(false)}>{t('取消', 'Cancel')}</button><button type="button" className="button button-primary" onClick={() => confirmRelink(true)}>{t('确认替换', 'Replace Photo')}</button></div></Modal>}
     {pendingClose && <Modal title={t('放弃修改并关闭窗口？', 'Discard changes and close the window?')} onClose={() => { if (!closing) setPendingClose(false); }}><p className="replacement-copy">{t('当前修改尚未保存，关闭窗口将放弃这些修改。', 'Closing the window will discard your unsaved changes.')}</p><div className="form-actions"><button type="button" className="button" autoFocus disabled={closing} onClick={() => setPendingClose(false)}>{t('继续编辑', 'Keep Editing')}</button><button type="button" className="button" disabled={closing || workspaceBusy} onClick={() => void discardAndClose()}>{closing ? t('正在关闭…', 'Closing…') : t('放弃并关闭', 'Discard and Close')}</button></div></Modal>}
     {pendingSpace && <Modal title={t('离开未保存的修改？', 'Discard unsaved changes?')} onClose={() => setPendingSpace(null)}><p className="replacement-copy">{t('当前修改尚未保存。离开将放弃这些修改。', 'Leaving this workspace will discard your unsaved changes.')}</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setPendingSpace(null)}>{t('继续编辑', 'Keep Editing')}</button><button type="button" className="button" disabled={workspaceBusy} onClick={() => { if (workspaceBusy) return; setBookDirty(false); setPhotoDirty(false); setModelDirty(false); setPlanningDirty(false); changeSpace(pendingSpace.space, pendingSpace.target); }}>{t('放弃并离开', 'Discard and Leave')}</button></div></Modal>}
-    {playingIds && <PhotoPlayer photos={snapshot.photos} photoIds={playingIds} onClose={() => setPlayingIds(null)} onRelink={relinkPhoto} onFeedback={feedback} />}
+    {playingIds && <PhotoPlayer preferences={appreciation.preferences} music={appreciation.music} analysis={appreciation.analysis} photos={snapshot.photos} photoIds={playingIds} onClose={() => setPlayingIds(null)} onRelink={relinkPhoto} onFeedback={feedback} />}
     {appUpdate.dialogOpen && (appUpdate.status.type === 'updating' || appUpdate.status.type === 'updateError') &&
       <AppUpdateDialog status={appUpdate.status} retryBlocked={updateBlocked} onRetry={() => startUpdate('retry')} onClose={appUpdate.closeDialog} />}
     <WorkDirectoryDiscovery directory={workDirectory} idle={discoveryIdle} />

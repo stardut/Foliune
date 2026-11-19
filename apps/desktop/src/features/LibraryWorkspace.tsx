@@ -231,8 +231,8 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onWorksMapRegion
   const openPhotoMenu = usePhotoMenu(menuContext, (message) => onFeedback(message, true));
   const syncingAlbums = useMemo(() => new Set(workDirectory?.jobs.filter((job) => job.status !== 'failed' || workDirectory.retrying?.has(job.id)).map((job) => job.albumId)), [workDirectory?.jobs, workDirectory?.retrying]);
   const hiddenPhotoIds = useMemo(() => new Set(snapshot.hiddenPhotoIds), [snapshot.hiddenPhotoIds]);
-  const albumMenuState = useRef({ context: menuContext, busy: busy || importDisabled, albumIndex, syncingAlbums, hiddenPhotoIds });
-  albumMenuState.current = { context: menuContext, busy: busy || importDisabled, albumIndex, syncingAlbums, hiddenPhotoIds };
+  const albumMenuState = useRef({ context: menuContext, busy: busy || importDisabled, albumIndex, syncingAlbums, hiddenPhotoIds, onPlay });
+  albumMenuState.current = { context: menuContext, busy: busy || importDisabled, albumIndex, syncingAlbums, hiddenPhotoIds, onPlay };
   const openAlbumMenu = useContextMenu('album', menuContext, (message) => onFeedback(message, true));
   useEffect(() => { setSelected([]); }, [space, groupId, status, searchTerm, searchPreview]);
   useEffect(() => {
@@ -442,9 +442,17 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onWorksMapRegion
     const allowed = () => albumMenuState.current.context === context && !albumMenuState.current.busy && !!target();
     const canDelete = () => allowed() && !albumMenuState.current.syncingAlbums.has(group.id);
     const count = target()?.photos.length ?? 0;
+    const canPlay = () => allowed() && !!target()?.photos.length;
     const canShare = () => allowed() && count > 0 && target()?.photos.length === count;
     const canSetRegion = () => allowed() && !!target()?.photos.some(({ id }) => !albumMenuState.current.hiddenPhotoIds.has(id));
     void openAlbumMenu([
+      { id: 'play', text: t('欣赏', 'Slideshow'), disabled: !canPlay(), allowed: canPlay, run: () => {
+        const current = target();
+        if (!current) return;
+        const sections = group.library === 'work' && workView !== 'none' && (photoSort === 'time-asc' || photoSort === 'time-desc')
+          ? workPhotoSections(current.photos, workView, photoSort, workView === 'location' ? t('未填写地点', 'No Location') : t('未归入项目', 'No Project')) : undefined;
+        albumMenuState.current.onPlay((sections ? sections.flatMap(([, items]) => items) : sortAlbumPhotos(current.photos, photoSort)).map((photo) => photo.id));
+      } },
       { id: 'info', text: t('相簿信息…', 'Album Info…'), disabled: busy || importDisabled, allowed, run: () => { const current = target(); if (current) setGroupForm(current.group); } },
       ...(group.library === 'work' ? [{ id: 'shooting-region', text: albumPhotoRegionLabel, disabled: !canSetRegion(), allowed: canSetRegion, run: () => { const current = target(); if (current) openPhotoRegionBatch(current); } }] : []),
       ...(supportsAirDrop ? [{ id: 'airdrop', text: albumAirDropLabel(count), disabled: !canShare(), allowed: canShare, run: () => void shareAirDrop(group.id) }] : []),

@@ -14,6 +14,8 @@ import { CliInstallSettings } from './CliInstallSettings';
 import type { useAppUpdate } from './use-app-update';
 import type { useCliInstall } from './use-cli-install';
 import type { useWorkDirectory } from './use-work-directory';
+import { AppreciationSettings } from './AppreciationSettings';
+import type { useAppreciationSettings } from './use-appreciation-settings';
 import './settings.css';
 
 type BackupOperation = 'export' | 'choose' | 'restore';
@@ -43,7 +45,8 @@ export function LanguageSettings({ disabled }: { disabled: boolean }) {
   </section>;
 }
 
-export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChange, workspaceVisibility, onWorkspaceVisibilityChange, update, updateBlocked, onUpdate, cli, cliBlocked, onInstallCli }: {
+export function SettingsWorkspace({ appreciation, snapshot, directory, onRestored, onBusyChange, workspaceVisibility, onWorkspaceVisibilityChange, update, updateBlocked, onUpdate, cli, cliBlocked, onInstallCli }: {
+  appreciation: ReturnType<typeof useAppreciationSettings>;
   snapshot: LibrarySnapshot;
   directory: ReturnType<typeof useWorkDirectory>;
   onRestored: (snapshot: LibrarySnapshot) => void;
@@ -136,6 +139,7 @@ export function SettingsWorkspace({ snapshot, directory, onRestored, onBusyChang
   return <section>
     <WorkspaceHeader title={t('设置', 'Settings')} count={`${photoCount(snapshot.photos.length)} · ${albumCount(snapshot.groups.length)}`} />
     <LanguageSettings disabled={updateBlocked || backupBusy || directoryBusy || installingCli} />
+    <AppreciationSettings settings={appreciation} disabled={updateBlocked || backupBusy || directoryBusy || installingCli} />
     <AppUpdateSettings update={update} updateBlocked={updateBlocked || backupBusy || directoryBusy} onUpdate={onUpdate} />
     <CliInstallSettings cli={cli} blocked={cliBlocked || backupBusy || directoryBusy} onInstall={onInstallCli} />
     <WorkDirectorySettings directory={directory} disabled={backupBusy || installingCli} />

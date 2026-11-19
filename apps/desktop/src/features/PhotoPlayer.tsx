@@ -1,174 +1,203 @@
 import { t } from '../lib/i18n';
 import { presentModal } from '../lib/modal-stack';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { ArrowLeft, ArrowRight, Maximize2, Music2, Pause, Play, Repeat2, Settings2, Shuffle, Volume2, X } from 'lucide-react';
+import { isTauri } from '@tauri-apps/api/core';
+import { Busy } from '../components/ui';
+import { PhotoUnavailable } from '../components/PhotoImage';
 import type { Photo } from '../lib/types';
-import { pickMusic, releaseMusic, type MusicTrack } from '../lib/music-api';
-import { DropdownSelect } from '../components/DropdownSelect';
-import { IconButton } from '../components/ui';
-import { playerNeighbor, PlayerFrames, usePlayerPresentation } from './PlayerPresentation';
+import type { MusicTrack } from '../lib/music-api';
+import type { BeatAnalysis } from '../lib/music-beats';
+import type { AppreciationPreferences } from '../lib/appreciation-preferences';
+import { BUILTIN_MUSIC } from '../lib/player-music';
+import { playerCompositionNeighbor, PlayerFrames, usePlayerPresentation } from './PlayerPresentation';
+import { usePlayerClock } from './usePlayerClock';
+import { useReviewFullscreen } from './use-review-fullscreen';
 import './player.css';
 
-const playbackIntervals = [3, 5, 6, 10, 15, 30, 60].map((value) => ({ value, label: t(`${value} 秒`, `${value} sec`) }));
-
-export function PhotoPlayer({ photos, photoIds, onClose, onRelink, onFeedback }: { photos: Photo[]; photoIds: string[]; onClose: () => void; onRelink: (photo: Photo) => Promise<void>; onFeedback: (message: string, error?: boolean) => void }) {
+export function PhotoPlayer({ photos, photoIds, preferences, music, analysis, onClose, onRelink, onFeedback }: {
+  photos: Photo[]; photoIds: string[]; preferences: AppreciationPreferences; music: MusicTrack | null; analysis: BeatAnalysis | null;
+  onClose: () => void; onRelink: (photo: Photo) => Promise<void>; onFeedback: (message: string, error?: boolean) => void;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const stage = useRef<HTMLDivElement>(null);
-  const settingsToggle = useRef<HTMLButtonElement>(null);
-  const settingsId = useId();
   const audio = useRef<HTMLAudioElement>(null);
-  const [order, setOrder] = useState(photoIds);
-  const [index, setIndex] = useState(0);
+  const [native] = useState(isTauri);
+  const [order] = useState(() => {
+    const order = [...photoIds];
+    if (preferences.random) {
+      // Keep the entry photo; shuffle the remaining photos once per visit.
+      for (let i = order.length - 1; i > 1; i--) {
+        const j = 1 + Math.floor(Math.random() * i);
+        [order[i], order[j]] = [order[j], order[i]];
+      }
+    }
+    return order;
+  });
+  const [{ index, accent, direction }, setCursor] = useState({ index: 0, accent: false, direction: 1 as 1 | -1 });
   const requestedIndex = useRef(0);
+  const [stageAspect, setStageAspect] = useState(() => {
+    if (!native) return 0;
+    const { width, height } = window.screen;
+    const inset = width <= 700 ? 18 : Math.min(48, Math.max(20, width * .03));
+    return (width - inset * 2) / (height - inset * 2);
+  });
   const [playing, setPlaying] = useState(photoIds.length > 1);
-  const [random, setRandom] = useState(false);
-  const [loop, setLoop] = useState(true);
-  const [seconds, setSeconds] = useState(6);
-  const [settings, setSettings] = useState(false);
-  const [visible, setVisible] = useState(true);
-  const [music, setMusic] = useState<MusicTrack | null>(null);
-  const musicRef = useRef<MusicTrack | null>(null);
-  const alive = useRef(true);
-  const [volume, setVolume] = useState(.45);
-  const [error, setError] = useState('');
-  const [pickingMusic, setPickingMusic] = useState(false);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastActivity = useRef(0);
-  const hoveringTools = useRef(false);
-  const awake = visible || !playing || settings;
+  const [failedMusic, setFailedMusic] = useState<string | null>(null);
+  const notices = useRef(new Map<string, string>());
+  const { seconds, volume, loop } = preferences;
+  const [entryReady, setEntryReady] = useState(!native);
+  const [preparationVisible, setPreparationVisible] = useState(false);
+  const screen = useReviewFullscreen(entryReady ? 'direct' : undefined, () => onClose());
+  const [revealed, setRevealed] = useState(!native);
+  const [leaving, setLeaving] = useState(false);
+  const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const photosById = useMemo(() => new Map(photos.map((photo) => [photo.id, photo])), [photos]);
-  const presentation = usePlayerPresentation(photosById, order, index, loop);
-  const { displayed, requested } = presentation;
-  const shownId = displayed?.frame.id;
-  const shownIndex = shownId && shownId !== order[index] ? order.indexOf(shownId) : index;
-  const requestedVisible = displayed?.frame.key === requested.key && displayed.status !== 'thumbnail';
-  const seek = useCallback((next: number) => {
+  const presentation = usePlayerPresentation(photosById, order, index, loop, { stageAspect, accent, direction, preloadAdjacent: entryReady });
+  const { displayed, requestedVisible, compositions } = presentation;
+  const stageVisible = revealed && !screen.transitioning && !leaving;
+  const imageFailed = requestedVisible && displayed?.status === 'error';
+  const preparationFailures = !entryReady ? presentation.requested.frames.filter((frame) => !frame.src || presentation.decoded.get(frame.key) === 'error') : [];
+  const preparationFailed = preparationFailures.length > 0;
+  const builtin = BUILTIN_MUSIC.find((track) => track.id === music?.id);
+  const activeMusic = music?.id !== failedMusic ? music : null;
+  const grid = activeMusic ? builtin?.grid ?? (analysis?.status === 'ready' ? analysis.grid : null) : null;
+
+  const seek = useCallback((next: number, direction: 1 | -1 = 1, accent = false) => {
     requestedIndex.current = next;
-    setIndex(next);
+    setCursor({ index: next, direction, accent });
   }, []);
-  const advance = useCallback((direction: number) => {
-    const next = playerNeighbor(requestedIndex.current, direction, order.length, loop);
-    if (next === null) setPlaying(false);
-    else seek(next);
-  }, [order.length, loop, seek]);
+  const canNavigate = compositions.length > 1;
+  const advance = useCallback((direction: 1 | -1, accent = false) => {
+    if (!canNavigate) return false;
+    const next = playerCompositionNeighbor(compositions, requestedIndex.current, direction, loop);
+    if (next === null) return false;
+    setPlaying(true);
+    seek(next, direction, accent);
+    return true;
+  }, [canNavigate, compositions, loop, seek]);
+  const advanceOnClock = useCallback((accent: boolean) => {
+    if (!advance(1, accent)) setPlaying(false);
+  }, [advance]);
+  usePlayerClock({
+    audioRef: audio, musicId: activeMusic?.id ?? null, grid,
+    playing: playing && canNavigate && stageVisible, ready: requestedVisible && displayed?.status === 'ready',
+    frameKey: JSON.stringify([index, order[index]]), seconds, onAdvance: advanceOnClock,
+  });
+
+  useLayoutEffect(() => {
+    if (native && (!entryReady || screen.transitioning || (!screen.fullscreen && !screen.error))) return;
+    const element = stage.current!;
+    const measure = () => setStageAspect(element.clientHeight ? element.clientWidth / element.clientHeight : 0);
+    measure();
+    const observer = new window.ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [native, entryReady, screen.fullscreen, screen.error, screen.transitioning]);
+  useLayoutEffect(() => {
+    if (requestedVisible && displayed?.status === 'ready') setEntryReady(true);
+  }, [requestedVisible, displayed?.status]);
   useEffect(() => {
-    alive.current = true;
+    if (entryReady) return;
+    const timer = setTimeout(() => setPreparationVisible(true), 200);
+    return () => clearTimeout(timer);
+  }, [entryReady]);
+  useLayoutEffect(() => {
+    const element = stage.current!;
+    const measuredAspect = element.clientHeight ? element.clientWidth / element.clientHeight : 0;
+    // The completion render can still hold the old window's composition until
+    // the measurement above commits. Reveal only a scene built for this size.
+    if (entryReady && (!native || screen.fullscreen || screen.error) && !screen.transitioning && stageAspect > 0 && stageAspect === measuredAspect && requestedVisible) setRevealed(true);
+  }, [native, entryReady, screen.fullscreen, screen.error, screen.transitioning, stageAspect, requestedVisible]);
+  useLayoutEffect(() => {
+    if (screen.transitioning || !screen.error) return;
+    if (leaving && !screen.fullscreen) onClose();
+    else setLeaving(false);
+  }, [screen.transitioning, screen.error]);
+  useLayoutEffect(() => {
+    (stageVisible ? stage.current : dialog.current)?.focus({ preventScroll: true });
+  }, [stageVisible]);
+  useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const musicElement = audio.current;
     const dismissModal = presentModal(dialog.current!);
-    stage.current?.focus({ preventScroll: true });
-    reveal();
+    (stageVisible ? stage.current : dialog.current)?.focus({ preventScroll: true });
     return () => {
-      alive.current = false;
-      if (hideTimer.current !== null) clearTimeout(hideTimer.current);
-      hideTimer.current = null;
       dismissModal();
-      if (musicElement) { musicElement.pause(); musicElement.removeAttribute('src'); musicElement.load(); }
-      const old = musicRef.current; musicRef.current = null;
-      if (old) void releaseMusic(old.id).catch((cause) => onFeedback(t(`清理欣赏配乐失败：${errorMessage(cause)}`, `Could not remove slideshow music: ${errorMessage(cause)}`), true));
+      musicElement?.pause();
+      if (exitTimer.current !== null) clearTimeout(exitTimer.current);
       previous?.focus();
+      // Surface failures after returning, keeping the photo stage free of notifications.
+      for (const message of notices.current.values()) onFeedback(message, true);
+      notices.current.clear();
     };
   }, []);
-  useEffect(() => { if (requestedVisible && displayed?.status === 'error') setPlaying(false); }, [requestedVisible, displayed]);
-  useEffect(() => {
-    if (!playing || !requestedVisible || order.length < 2) return;
-    const timer = setTimeout(() => advance(1), seconds * 1000); return () => clearTimeout(timer);
-  }, [playing, displayed, requestedVisible, seconds, order, advance]);
-  useEffect(() => {
-    const element = audio.current; if (!element) return;
-    element.volume = volume;
-    if (playing && music) void element.play().catch(() => { if (alive.current && musicRef.current?.id === music.id) setError(t('音乐未能开始播放，请点击播放重试。', 'Music could not start. Press Play to try again.')); });
-    else element.pause();
-  }, [playing, music, volume]);
-  function checkIdle() {
-    hideTimer.current = null;
-    const focused = document.activeElement;
-    if (hoveringTools.current || (dialog.current?.contains(focused) && focused?.closest('.player-top, .player-controls'))) return;
-    const remaining = 2800 - (Date.now() - lastActivity.current);
-    if (remaining > 0) hideTimer.current = setTimeout(checkIdle, remaining);
-    else setVisible(false);
-  }
-  function reveal() {
-    if (!alive.current) return;
-    lastActivity.current = Date.now();
-    setVisible(true);
-    if (hideTimer.current === null) hideTimer.current = setTimeout(checkIdle, 2800);
-  }
-  const toolbarEvents = {
-    onPointerEnter: () => { hoveringTools.current = true; reveal(); },
-    onPointerLeave: () => { hoveringTools.current = false; reveal(); },
-  };
-  function closeSettings() {
-    setSettings(false);
-    settingsToggle.current?.focus({ preventScroll: true });
-    reveal();
-  }
-  async function fullscreen() {
-    try { if (document.fullscreenElement) await document.exitFullscreen(); else await dialog.current?.requestFullscreen(); }
-    catch { setError(t('当前系统窗口不支持全屏，请使用系统窗口的全屏入口。', 'This window cannot enter full screen from the player. Use the system window controls.')); }
-  }
-  function shuffle() {
-    const next = !random; setRandom(next);
-    const id = order[requestedIndex.current];
-    if (next) { const others = [...photoIds]; if (id) others.splice(others.indexOf(id), 1); for (let i = others.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [others[i], others[j]] = [others[j], others[i]]; } setOrder(id ? [id, ...others] : others); seek(0); }
-    else { setOrder(photoIds); seek(Math.max(0, photoIds.indexOf(id))); }
-  }
-  async function chooseMusic() {
-    setPickingMusic(true); setError('');
-    try {
-      const chosen = await pickMusic(); if (!chosen) return;
-      if (!alive.current) { await releaseMusic(chosen.id); return; }
-      const old = musicRef.current;
-      stopMusic(); musicRef.current = chosen; setMusic(chosen);
-      if (old) await releaseMusic(old.id);
+  const musicRevealed = useRef(false);
+  useLayoutEffect(() => {
+    if (!audio.current) return;
+    // Begin play in the original user activation, silently prepare through decode
+    // and the native Space change, then start the audible track with the work.
+    if (stageVisible && !musicRevealed.current) {
+      audio.current.currentTime = 0;
+      musicRevealed.current = true;
     }
-    catch (cause) { if (alive.current) setError(errorMessage(cause)); else onFeedback(t(`清理欣赏配乐失败：${errorMessage(cause)}`, `Could not remove slideshow music: ${errorMessage(cause)}`), true); }
-    finally { if (alive.current) setPickingMusic(false); }
+    audio.current.volume = stageVisible ? volume : 0;
+  }, [volume, stageVisible]);
+  useLayoutEffect(() => {
+    const element = audio.current!;
+    if (!playing || !activeMusic || imageFailed || leaving) { element.pause(); return; }
+    let active = true;
+    void element.play().catch(() => {
+      if (active) failMusic(t('欣赏配乐未能播放，已按设定时间切换照片。可在设置中更换配乐。', 'Slideshow music could not play. Photos used the selected timing. Choose another track in Settings.'));
+    });
+    return () => { active = false; };
+  }, [playing, activeMusic, imageFailed, leaving]);
+
+  function failMusic(message: string) {
+    if (!music || notices.current.has(music.id)) return;
+    console.error(message);
+    notices.current.set(music.id, message);
+    setFailedMusic(music.id);
   }
-  function stopMusic() { const element = audio.current; if (element) { element.pause(); element.removeAttribute('src'); element.load(); } }
-  async function removeMusic() { const old = musicRef.current; stopMusic(); musicRef.current = null; setMusic(null); if (old) { try { await releaseMusic(old.id); } catch (cause) { setError(t(`清理欣赏配乐失败：${errorMessage(cause)}`, `Could not remove slideshow music: ${errorMessage(cause)}`)); } } }
-  return <dialog ref={dialog} className={`photo-player ${awake ? 'player-awake' : ''}`} aria-label={t('照片欣赏播放器', 'Photo Slideshow')}
-    onPointerMove={reveal} onPointerDown={reveal} onFocusCapture={reveal} onBlurCapture={reveal}
-    onCancel={(event) => {
-      event.preventDefault();
-      if (settings) closeSettings();
-    }} onKeyDown={(event) => {
+  function closePlayer() {
+    if (leaving) return;
+    const complete = () => { onClose(); return true; };
+    if (!screen.fullscreen) { complete(); return; }
+    flushSync(() => setLeaving(true));
+    // Fade the photo and its mat back to the live album before native resizing.
+    // Keep a bounded rendering handoff even without motion: Space changes can
+    // suspend rAF, so neither exit path may depend on a frame or animation event.
+    exitTimer.current = setTimeout(() => {
+      exitTimer.current = null;
+      if (!screen.exit(complete)) complete();
+    }, !stageVisible || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 32 : 160);
+  }
+  return <dialog ref={dialog} className="photo-player" aria-label={t('照片欣赏', 'Photo Slideshow')} data-fullscreen={screen.fullscreen || undefined}
+    onCancel={(event) => { event.preventDefault(); closePlayer(); }} onKeyDown={(event) => {
       if (event.defaultPrevented || event.nativeEvent.isComposing) return;
-      if (event.key === 'Escape' && (settings || event.repeat)) {
+      if (event.key === 'Escape') {
         event.preventDefault(); event.stopPropagation();
-        if (!event.repeat) closeSettings();
+        if (!event.repeat) closePlayer();
         return;
       }
-      // Tab's default focus search must see the controls after inert is removed.
-      if (!awake && event.key === 'Tab') flushSync(reveal); else reveal();
-      if (event.altKey || event.ctrlKey || event.metaKey || event.target instanceof HTMLInputElement ||
-        (event.target instanceof HTMLElement && event.target.matches('[role="combobox"]'))) return;
-      if (event.key === ' ' && (event.target === stage.current || event.target === dialog.current)) {
-        event.preventDefault();
-        if (!event.repeat) setPlaying((value) => !value);
-      }
+      if (!stageVisible || event.altKey || event.ctrlKey || event.metaKey || event.target instanceof HTMLInputElement) return;
       if (event.key === 'ArrowLeft') { event.preventDefault(); advance(-1); }
       if (event.key === 'ArrowRight') { event.preventDefault(); advance(1); }
-      if (event.key.toLowerCase() === 'f') void fullscreen();
     }}>
-    <div className="player-top" inert={!awake} {...toolbarEvents}><button className="text-button" type="button" onClick={onClose}><X size={17} />{t('返回', 'Back')}</button><span>{(shownId && photosById.get(shownId)?.title) || t('照片欣赏', 'Photo Slideshow')}</span><IconButton label={t('切换全屏', 'Toggle Full Screen')} onClick={() => void fullscreen()}><Maximize2 size={17} /></IconButton></div>
-    <div ref={stage} className="player-stage" tabIndex={-1} role="group" aria-label={t('照片预览', 'Photo Preview')} aria-keyshortcuts="Space ArrowLeft ArrowRight"><PlayerFrames presentation={presentation} onRelink={onRelink} /></div>
-    {error && <div className="player-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError('')}>{t('关闭', 'Close')}</button></div>}
-    <div className="player-controls" inert={!awake} {...toolbarEvents}>
-      <IconButton label={t('上一张', 'Previous Photo')} disabled={!loop && index === 0} onClick={() => advance(-1)}><ArrowLeft size={18} /></IconButton>
-      <IconButton label={playing ? t('暂停', 'Pause') : t('播放', 'Play')} onClick={() => { setPlaying(!playing); reveal(); }}>{playing ? <Pause size={18} /> : <Play size={18} />}</IconButton>
-      <IconButton label={t('下一张', 'Next Photo')} disabled={!loop && index === order.length - 1} onClick={() => advance(1)}><ArrowRight size={18} /></IconButton>
-      <span className="player-counter">{String(shownIndex + 1).padStart(2, '0')} / {order.length}</span><span className="player-divider" />
-      <IconButton label={random ? t('关闭随机播放', 'Turn Off Shuffle') : t('随机播放', 'Shuffle')} active={random} onClick={shuffle}><Shuffle size={16} /></IconButton>
-      <IconButton label={loop ? t('关闭循环', 'Turn Off Repeat') : t('循环播放', 'Repeat')} active={loop} onClick={() => setLoop(!loop)}><Repeat2 size={17} /></IconButton>
-      <button ref={settingsToggle} type="button" className={`icon-button ${settings ? 'is-active' : ''}`} aria-label={t('播放与音乐设置', 'Playback and Music Settings')} title={t('播放与音乐设置', 'Playback and Music Settings')} aria-expanded={settings} aria-controls={settings ? settingsId : undefined}
-        onClick={() => { if (settings) closeSettings(); else setSettings(true); }}><Settings2 size={17} /></button>
+    <div className="player-surface" data-visible={stageVisible}>
+      <div ref={stage} className="player-stage" aria-hidden={!stageVisible} inert={!stageVisible}
+        tabIndex={-1} role="group" aria-label={t('照片预览', 'Photo Preview')} aria-keyshortcuts="ArrowLeft ArrowRight Escape"><PlayerFrames presentation={presentation} onRelink={onRelink} /></div>
     </div>
-    {settings && <section id={settingsId} className="player-settings" aria-label={t('播放设置', 'Playback Settings')}><div className="player-settings-title"><h2>{t('播放与音乐', 'Playback and Music')}</h2><IconButton label={t('关闭播放设置', 'Close Playback Settings')} onClick={closeSettings}><X size={15} /></IconButton></div>
-      <DropdownSelect label={t('每张停留', 'Time per Photo')} field value={seconds} options={playbackIntervals} onChange={setSeconds} />
-      <button type="button" className="button" disabled={pickingMusic} onClick={() => void chooseMusic()}><Music2 size={14} />{pickingMusic ? t('正在选择…', 'Choosing…') : t('选择本地音乐', 'Choose Local Music')}</button>{music && <><p className="player-music-name">{music.name}</p><label className="volume-label"><Volume2 size={14} /><input aria-label={t('音乐音量', 'Music Volume')} type="range" min="0" max="1" step=".05" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /><span>{Math.round(volume * 100)}%</span></label><button type="button" className="text-button" onClick={() => void removeMusic()}>{t('移除音乐', 'Remove Music')}</button></>}<p className="muted">{t('配乐仅用于当前欣赏会话。', 'Music is used for this slideshow session only.')}</p></section>}
-    <audio ref={audio} src={music?.url} loop onError={() => setError(t('音乐无法读取或格式不受当前系统支持，请重新选择。', 'Could not read the music file or its format is unsupported. Choose another file.'))} />
+    {!revealed && !leaving && (preparationVisible || preparationFailed) && <div className="player-preparation">
+      {preparationFailed ? <div role="alert">{preparationFailures.map((frame) => frame.photo
+        ? <PhotoUnavailable key={frame.key} photo={frame.photo} onRelink={onRelink} />
+        : <p key={frame.key}>{t('此照片不在当前图库中', 'This photo is unavailable in the current library')}</p>)}</div>
+        : <Busy label={t('正在准备照片…', 'Preparing photos…')} />}
+      <button type="button" className="player-preparation-cancel" onClick={closePlayer}>{t('取消', 'Cancel')}</button>
+    </div>}
+    {screen.error && <p className="player-fullscreen-error" role="alert">{screen.error} {screen.fullscreen
+      ? t('按 Escape 重试退出。', 'Press Escape to retry leaving full screen.')
+      : t('按 Escape 返回。', 'Press Escape to return.')}</p>}
+    <audio ref={audio} src={activeMusic?.url} loop onError={() => failMusic(t('欣赏配乐无法读取或格式不受支持，已按设定时间切换照片。可在设置中更换配乐。', 'Slideshow music could not be read or is unsupported. Photos used the selected timing. Choose another track in Settings.'))} />
   </dialog>;
 }
-function errorMessage(cause: unknown) { return cause instanceof Error ? cause.message : String(cause); }

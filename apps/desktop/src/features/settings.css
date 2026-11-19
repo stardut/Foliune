@@ -57,3 +57,11 @@
 .ai-results article > p { color: var(--muted); font-size: 12px; line-height: 1.8; margin: 0 0 12px; }
 .ai-results article > p > span { display: block; }
 .ai-results article > div { font-size: 12px; line-height: 1.9; white-space: pre-wrap; }
+
+.settings-appreciation-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; max-width: 680px; margin-top: 18px; }
+.settings-appreciation-volume > span { display: flex; align-items: center; gap: 12px; min-height: 36px; }
+.settings-appreciation-volume input { min-width: 0; flex: 1; }
+.settings-appreciation-volume output { min-width: 4ch; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+.settings-appreciation-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; max-width: 680px; margin-top: 18px; }
+.settings-appreciation-actions label { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; font-size: 13px; }
+@media (max-width: 700px) { .settings-appreciation-fields { grid-template-columns: minmax(0, 1fr); } }

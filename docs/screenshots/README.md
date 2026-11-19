@@ -10,8 +10,8 @@ Both README editions use the screenshots below, with a localized Work Map for ea
 | `photobook-shelf.jpg` | 2026-11-04 macOS 原生画册主页验收截图 / Native macOS photobook shelf capture |
 | `shoot-planning.png` | 用户提供的拍摄策划截图 / User-supplied shoot plan |
 | `model-profiles.png` | 用户提供的模特档案截图 / User-supplied model profiles |
-| [`works-map.webp`](../../site/assets/works-map.webp) | 用户于 2026-11-19 提供的中文作品地图截图，原始文件 `Xnip2026-11-19_13-46-44.jpg`（2864 × 1984），完整等比缩小为 1920 × 1331 / User-supplied Chinese Work Map screenshot, resized proportionally in full |
-| [`works-map-en.webp`](../../site/assets/works-map-en.webp) | 用户于 2026-11-19 提供的英文作品地图截图，原始文件 `Xnip2026-11-19_13-46-32.jpg`（2864 × 1984），完整等比缩小为 1920 × 1331 / User-supplied English Work Map screenshot, resized proportionally in full |
+| [`works-map.webp`](../../site/assets/works-map.webp) | 用户于 2026-11-19 提供的中文作品地图截图，原始文件 `Xnip2026-11-19_13-46-44.jpg`（2864 × 1984），从 (118, 82) 裁取 2628 × 1748 窗口内容，去除外部白边与投影后等比缩小为 1920 × 1278 / User-supplied Chinese Work Map screenshot, cropped to the window content at (118, 82), 2628 × 1748, then resized proportionally without the outer white matte and shadow |
+| [`works-map-en.webp`](../../site/assets/works-map-en.webp) | 用户于 2026-11-19 提供的英文作品地图截图，原始文件 `Xnip2026-11-19_13-46-32.jpg`（2864 × 1984），从 (118, 82) 裁取 2628 × 1748 窗口内容，去除外部白边与投影后等比缩小为 1920 × 1278 / User-supplied English Work Map screenshot, cropped to the window content at (118, 82), 2628 × 1748, then resized proportionally without the outer white matte and shadow |
 | [`photobook-spread.webp`](../../site/assets/photobook-spread.webp) | macOS 原生画册双页阅读截图 / Native macOS photobook reader in spread view |
 
 画册主页使用独立验收实例 `app.foliune.book-review` 的 macOS release 截图，原始文件为 `.build/verification/workspace-transitions/final-books-wide.png`。截图尺寸为 2640 × 1760。验收背景见[工作区切换记录](../workspace-transitions.md)。

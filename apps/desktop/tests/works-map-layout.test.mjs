@@ -12,7 +12,7 @@ const compiled = ts.transpileModule(source, {
 const {
   centerWorksMapView, createWorksMapFrame, fitWorksMapView, groupWorksMapPhotos, interpolateWorksMapLayout, layoutWorksMap, locateMapPhotos,
   maxWorksMapScale, minWorksMapScale, panWorksMapView, parseWorksMapCoordinate, previewWorksMapCard, projectWorksMapCoordinate, selectWorksMapRegions,
-  unprojectWorksMapPoint, worksMapDrawingBounds, worksMapGlobeBounds, worksMapVisibleCircle, zoomWorksMapView,
+  unprojectWorksMapPoint, worksMapDrawingBounds, worksMapGlobeBounds, worksMapVisibleCircle, withWorksMapRegionCovers, zoomWorksMapView,
 } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 
 const photo = (id, lat, lon, width = 6000, height = 4000) =>
@@ -598,4 +598,90 @@ test('最大缩放能拉开 3.2 倍时仍拥挤的点位，可见的每个点都
   assert.ok(edgeGap(oldLimit) < 8);
   assert.ok(edgeGap(maximum) > 12);
   assert.deepEqual(new Set(maximum.cards.map(card => card.regionId)), new Set(groups.map(group => group.id)));
+});
+
+
+test('地区封面最后设置覆盖、恢复自动，自动代表坐标与投影点位保持不动', () => {
+  const originals = [photo('auto', 39.918, 116.391), photo('portrait', 39.9, 116.4, 4000, 6000), photo('square', 39.88, 116.38, 4000, 4000)];
+  const overview = groupWorksMapPhotos(locateMapPhotos(originals), gpsRegions(() => region('beijing')));
+  const frame = createWorksMapFrame(1248, 582);
+  const view = fitWorksMapView(anchors(overview), frame.map);
+  const before = layoutWorksMap(overview, frame, view);
+  for (const id of ['portrait', 'square']) {
+    const covered = withWorksMapRegionCovers(overview, { beijing: id });
+    assert.equal(covered[0].representative, overview[0].representative);
+    assert.equal(covered[0].photos, overview[0].photos);
+    const layout = layoutWorksMap(covered, frame, view);
+    assert.equal(layout.cards[0].photo.id, id);
+    close(layout.cards[0].rect.width / layout.cards[0].rect.height, originals.find(photo => photo.id === id).width / originals.find(photo => photo.id === id).height);
+    assert.deepEqual(layout.markers.map(({ point }) => point), before.markers.map(({ point }) => point));
+    assert.deepEqual(layout.cards[0].line.from, before.cards[0].line.from);
+  }
+  const portraitCover = withWorksMapRegionCovers(overview, { beijing: 'portrait' });
+  const targetView = zoomWorksMapView(view, frame.map, 1.2);
+  const target = layoutWorksMap(portraitCover, frame, targetView);
+  const intermediate = interpolateWorksMapLayout(before, target, portraitCover, frame,
+    zoomWorksMapView(view, frame.map, 1.1), .5);
+  assert.equal(intermediate.cards[0].photo.id, 'auto', '缩放过程中返回的封面写入不拉伸旧画幅，停稳布局再显示新封面');
+  close(intermediate.cards[0].rect.width / intermediate.cards[0].rect.height, 1.5);
+  assert.equal(withWorksMapRegionCovers(overview, {})[0], overview[0]);
+  assert.equal(layoutWorksMap(withWorksMapRegionCovers(overview, {}), frame, view).cards[0].photo.id, 'auto');
+});
+
+test('封面仅从当前有效组解析：无效、废弃隐藏后缺席及已换地区的照片回落自动', () => {
+  const auto = photo('auto', 39.9, 116.4);
+  const chosen = photo('chosen', 39.8, 116.3);
+  const catalog = gpsRegions(({ lat }) => region(lat < 30 ? 'south' : 'north'));
+  const original = groupWorksMapPhotos(locateMapPhotos([auto, chosen]), catalog);
+  assert.equal(withWorksMapRegionCovers(original, { north: 'chosen' })[0].coverPhoto, chosen);
+  for (const active of [[auto], [auto, { ...chosen, location: '20, 110' }]]) {
+    const next = groupWorksMapPhotos(locateMapPhotos(active), catalog);
+    const covered = withWorksMapRegionCovers(next, { north: 'chosen' });
+    const north = covered.find(({ id }) => id === 'north');
+    assert.equal(north.coverPhoto, undefined);
+    assert.equal(north.representative.photo.id, 'auto');
+  }
+  assert.equal(withWorksMapRegionCovers(original, { north: 'unknown' })[0], original[0]);
+});
+
+test('省市封面独立，展开省的菜单余组不借用城市照片，选择封面不改变分组依据', () => {
+  const [hangzhou, ningbo] = cityPhotos;
+  const province = { ...hangzhou, id: 'manual-province', locationRegionId: 'zhejiang' };
+  const overview = groupWorksMapPhotos(locateMapPhotos([hangzhou, ningbo, province]), chinaCatalog);
+  const settings = { zhejiang: 'ningbo', hangzhou: 'hangzhou', ningbo: 'ningbo' };
+  const coveredOverview = withWorksMapRegionCovers(overview, settings);
+  assert.equal(coveredOverview[0].coverPhoto.id, 'ningbo');
+  assert.equal(coveredOverview[0].whenExpanded, overview[0].whenExpanded);
+  assert.deepEqual(anchors(coveredOverview), anchors(overview));
+  const frame = createWorksMapFrame(1248, 582);
+  const view = fitWorksMapView(anchors(overview), frame.map);
+  const displayed = selectWorksMapRegions(overview, frame, view);
+  const groups = withWorksMapRegionCovers(displayed.groups, settings);
+  assert.deepEqual(groups.map(({ id, coverPhoto }) => [id, coverPhoto.id]), [['hangzhou', 'hangzhou'], ['ningbo', 'ningbo']]);
+  assert.equal(withWorksMapRegionCovers(displayed.menuOnly, settings)[0].coverPhoto, undefined);
+  assert.equal(withWorksMapRegionCovers(displayed.menuOnly, { ...settings, zhejiang: 'manual-province' })[0].coverPhoto.id, 'manual-province');
+  assert.equal(groups[0].representative, displayed.groups[0].representative);
+});
+
+test('临时地区封面采用自选照片，悬停及布局解析不遍历组内照片', () => {
+  const frame = createWorksMapFrame(848, 315);
+  const items = locations.map(([id, lat, lon]) => photo(id, lat, lon));
+  const groups = groupWorksMapPhotos(locateMapPhotos(items), gpsRegions(({ lat, lon }) => region(`${lat}-${lon}`)));
+  const view = { center: { lat: 0, lon: 3 }, scale: minWorksMapScale(frame.map) };
+  const ordinary = layoutWorksMap(groups, frame, view);
+  const hidden = ordinary.markers.find(({ group }) => !ordinary.cards.some(card => card.regionId === group.id)).group;
+  const chosen = { ...hidden.representative.photo, id: 'chosen' };
+  hidden.photosById.set(chosen.id, chosen);
+  const originalPhotos = hidden.photos;
+  hidden.photos = new Proxy(originalPhotos, { get(target, key) {
+    if (key === Symbol.iterator || key === 'map' || key === 'find') throw new Error('不应重新遍历照片');
+    return Reflect.get(target, key);
+  } });
+  const covered = withWorksMapRegionCovers(groups, { [hidden.id]: chosen.id });
+  const layout = layoutWorksMap(covered, frame, view);
+  const temporary = previewWorksMapCard(hidden.id, layout, frame, view);
+  assert.equal(temporary.photo, chosen);
+  close(temporary.rect.width / temporary.rect.height, chosen.width / chosen.height);
+  assert.deepEqual(temporary.line.from, ordinary.markers.find(({ group }) => group.id === hidden.id).point);
+  assert.deepEqual(layout.markers.map(({ point }) => point), ordinary.markers.map(({ point }) => point));
 });

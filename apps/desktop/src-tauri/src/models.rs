@@ -77,6 +77,7 @@ pub struct Snapshot {
     pub photos: Vec<Photo>,
     pub groups: Vec<Group>,
     pub memberships: Vec<Membership>,
+    pub works_map_region_covers: std::collections::HashMap<String, String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_photo_ids: Vec<String>,
 }

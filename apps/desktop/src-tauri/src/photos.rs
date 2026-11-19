@@ -709,7 +709,7 @@ pub(crate) fn apply_patch(conn: &Connection, id: &str, patch: Value) -> Result<(
     Ok(())
 }
 
-fn valid_location_region_id(id: &str) -> bool {
+pub(crate) fn valid_location_region_id(id: &str) -> bool {
     // The atlas uses a three-letter country code and a subdivision code or name.
     // The picker checks membership in the bundled atlas, which is kept in the frontend.
     id.len() <= 128

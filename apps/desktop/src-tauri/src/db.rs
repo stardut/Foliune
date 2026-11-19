@@ -59,6 +59,7 @@ impl Store {
         ).map_err(|e| e.to_string())?;
         migrate_photos(&conn)?;
         crate::groups::init_covers(&conn)?;
+        crate::works_map_covers::init(&conn)?;
         crate::books::init(&conn)?;
         crate::ai::init(&conn)?;
         crate::model_profiles::init(&conn)?;
@@ -368,6 +369,7 @@ fn read_snapshot(conn: &Connection, include_hidden: bool) -> Result<Snapshot, St
         photos,
         groups,
         memberships,
+        works_map_region_covers: crate::works_map_covers::read(conn)?,
         hidden_photo_ids,
     })
 }

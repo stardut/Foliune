@@ -9,9 +9,13 @@ import { groupWorksMapPhotos, locateMapPhotos } from './works-map-layout';
 import { loadWorksMapRegionData } from './works-map-regions';
 import './works-map.css';
 
-export function WorksMap({ albums, hiddenPhotoIds, onBack, onReviewChange }: {
+export function WorksMap({ albums, hiddenPhotoIds, onBack, onReviewChange, regionCovers, busy, onSetCover, onFeedback }: {
   albums: LibraryAlbum[];
   hiddenPhotoIds?: string[];
+  regionCovers?: Record<string, string>;
+  busy: boolean;
+  onSetCover: (regionId: string, photoId: string | null) => Promise<void>;
+  onFeedback: (message: string, error?: boolean) => void;
   onBack: () => void;
   onReviewChange: (open: boolean) => void;
 }) {
@@ -47,6 +51,7 @@ export function WorksMap({ albums, hiddenPhotoIds, onBack, onReviewChange }: {
     </header>
     {!hasPhotos || (atlas && !regions.length) ? <EmptyState title={t('暂无可归入地区的作品', 'No photos match a region')} />
       : data === 'failed' ? <div role="alert"><EmptyState title={t('无法读取离线地图', 'Could not load the offline map')} /></div>
-        : <WorksMapExhibition regions={regions} atlas={atlas} onReviewChange={onReviewChange} />}
+        : <WorksMapExhibition regions={regions} atlas={atlas} onReviewChange={onReviewChange}
+          regionCovers={regionCovers} busy={busy} onSetCover={onSetCover} onFeedback={onFeedback} />}
   </>;
 }

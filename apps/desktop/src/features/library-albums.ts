@@ -5,7 +5,7 @@ export interface LibraryAlbum {
   photos: Photo[];
 }
 
-export function libraryAlbums(snapshot: LibrarySnapshot, library: LibraryKind) {
+export function libraryAlbums(snapshot: Pick<LibrarySnapshot, 'photos' | 'groups' | 'memberships'>, library: LibraryKind) {
   const photosById = new Map<string, Photo>();
   for (const photo of snapshot.photos) {
     if (photo.library === library) photosById.set(photo.id, photo);

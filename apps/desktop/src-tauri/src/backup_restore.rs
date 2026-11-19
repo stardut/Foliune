@@ -40,6 +40,7 @@ pub(super) fn validate_data(conn: &Connection) -> Result<(), String> {
         return Err(tr("相簿封面的照片关系或取景范围无效", "The album cover photo reference or crop is invalid").into());
     }
     crate::books::validate_archive(conn)?;
+    crate::works_map_covers::validate_archive(conn)?;
     crate::model_profiles::validate_all(conn)?;
     crate::social::validate_all(conn)?;
     crate::planning::validate_all(conn)
@@ -66,6 +67,7 @@ pub(super) fn merge(store: &Store, root: &Path, archive: &Path) -> Result<Restor
             .map_err(|error| error.to_string())?;
         let photo_count = copy_photos(&tx, root, &mut created)?;
         let skipped_membership_count = merge_albums(&tx)?;
+        crate::works_map_covers::merge_archive(&tx)?;
         let skipped_document_count = merge_documents(&tx)?;
         let unresolved_work_photo_count = merge_work_directory(&tx)?;
         validate_data(&tx).map_err(|error| {

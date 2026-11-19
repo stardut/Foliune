@@ -33,6 +33,7 @@ mod png_export;
 mod restart_gate;
 mod social;
 mod work_directory;
+mod works_map_covers;
 
 use db::Store;
 use locale::tr;
@@ -139,6 +140,18 @@ async fn set_photo_regions(
 }
 
 #[tauri::command]
+async fn set_works_map_region_cover(
+    app: AppHandle,
+    region_id: String,
+    photo_id: Option<String>,
+) -> Result<(), String> {
+    db::with_connection(app, move |conn| {
+        works_map_covers::save(conn, &region_id, photo_id.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
 async fn add_photos_to_group(
     app: AppHandle,
     group_id: String,
@@ -211,6 +224,7 @@ pub fn run() {
             delete_group,
             update_photo,
             set_photo_regions,
+            set_works_map_region_cover,
             photo_metadata::read_photo_metadata,
             add_photos_to_group,
             set_membership_statuses,

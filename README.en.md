@@ -40,7 +40,7 @@ Turn one page at a time or view a full spread. When you’re ready to share the 
 
 ### Viewing
 
-Give photographs the screen. Play them in order or at random, decide how long to stay with each one, and choose some local music for the session if you like.
+Give photographs the screen. Play them in order or at random, let the beat guide the transitions, and add your own music for the session if you like.
 
 ## Before the next shoot
 

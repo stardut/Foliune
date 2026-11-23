@@ -5,37 +5,48 @@ import { pickMusic, releaseMusic, type MusicTrack } from '../lib/music-api';
 import { analyzeMusicBeats, type BeatAnalysis } from '../lib/music-beats';
 import { BUILTIN_MUSIC } from '../lib/player-music';
 
+export type MusicSource = 'builtin' | 'local' | 'off';
+
 export function useAppreciationSettings(onFeedback: (message: string, error?: boolean) => void) {
   const [preferences, setPreferences] = useState(readAppreciationPreferences);
-  const [localMusic, setLocalMusic] = useState<MusicTrack | null>(null);
-  const [analysisState, setAnalysis] = useState<{ id: string; result: BeatAnalysis } | null>(null);
+  const [localMusic, setLocalMusic] = useState<readonly MusicTrack[]>([]);
+  const [useLocalMusic, setUseLocalMusic] = useState(false);
+  const [analysis, setAnalysis] = useState<ReadonlyMap<string, BeatAnalysis>>(new Map());
   const [picking, setPicking] = useState(false);
-  const localRef = useRef<MusicTrack | null>(null);
-  const alive = useRef(true);
+  const preferencesRef = useRef(preferences);
+  const localRef = useRef<readonly MusicTrack[]>([]);
+  const analysisRef = useRef(new Map<string, BeatAnalysis>());
+  const analysisQueue = useRef(Promise.resolve());
+  const importController = useRef<AbortController | null>(null);
   const feedback = useRef(onFeedback);
   feedback.current = onFeedback;
-  const music = localMusic ?? BUILTIN_MUSIC.find((track) => track.id === preferences.musicId) ?? null;
-  const analysis = analysisState?.id === localMusic?.id ? analysisState?.result ?? null : null;
+  const musicSource: MusicSource = !preferences.musicEnabled ? 'off' : useLocalMusic && localMusic.length ? 'local' : 'builtin';
+  const playlist: readonly MusicTrack[] = musicSource === 'off' ? [] : musicSource === 'local' ? localMusic : BUILTIN_MUSIC;
 
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-      const old = localRef.current;
-      localRef.current = null;
-      if (old) void release(old);
-    };
+  useEffect(() => () => {
+    importController.current?.abort();
+    const old = localRef.current;
+    localRef.current = [];
+    for (const track of old) void release(track);
   }, []);
   useEffect(() => {
-    setAnalysis(null);
-    if (!localMusic) return;
     const controller = new AbortController();
-    void analyzeMusicBeats(localMusic.url, controller.signal).then((result) => {
-      if (!controller.signal.aborted) setAnalysis({ id: localMusic.id, result });
-    }).catch((cause: unknown) => {
-      if (controller.signal.aborted) return;
-      console.error('无法分析欣赏配乐：', cause);
-      setAnalysis({ id: localMusic.id, result: { status: 'fixed', reason: 'read-failed' } });
+    // A cancelled decode may still be finishing; wait before decoding another whole file.
+    analysisQueue.current = analysisQueue.current.then(async () => {
+      for (const track of localMusic) {
+        if (controller.signal.aborted) break;
+        if (analysisRef.current.has(track.id)) continue;
+        let result: BeatAnalysis;
+        try { result = await analyzeMusicBeats(track.url, controller.signal); }
+        catch (cause) {
+          if (controller.signal.aborted) break;
+          console.error('无法分析欣赏配乐：', cause);
+          result = { status: 'fixed', reason: 'read-failed' };
+        }
+        if (controller.signal.aborted) break;
+        analysisRef.current.set(track.id, result);
+        setAnalysis(new Map(analysisRef.current));
+      }
     });
     return () => controller.abort();
   }, [localMusic]);
@@ -45,36 +56,50 @@ export function useAppreciationSettings(onFeedback: (message: string, error?: bo
     catch (cause) { feedback.current(t(`清理欣赏配乐失败：${errorMessage(cause)}`, `Could not remove slideshow music: ${errorMessage(cause)}`), true); }
   }
   function change(patch: Partial<AppreciationPreferences>) {
-    const next = { ...preferences, ...patch };
+    const next = { ...preferencesRef.current, ...patch };
     try { saveAppreciationPreferences(next); }
     catch { feedback.current(t('无法保存欣赏设置', 'Could not save slideshow settings.'), true); return false; }
+    preferencesRef.current = next;
     setPreferences(next);
     return true;
   }
-  function changeMusic(id: string) {
-    if (id === localRef.current?.id) return;
-    if (!change({ musicId: id })) return;
-    const old = localRef.current;
-    localRef.current = null;
-    setAnalysis(null);
-    setLocalMusic(null);
-    if (old) void release(old);
+  function changeMusic(source: MusicSource) {
+    if (source === 'local' && !localRef.current.length) return;
+    if (!change({ musicEnabled: source !== 'off' })) return;
+    if (source !== 'off') setUseLocalMusic(source === 'local');
   }
   async function chooseMusic() {
-    if (picking) return;
+    if (importController.current) return;
+    const controller = new AbortController();
+    importController.current = controller;
     setPicking(true);
     try {
-      const chosen = await pickMusic();
-      if (!chosen) return;
-      if (!alive.current) { await release(chosen); return; }
-      const old = localRef.current;
-      localRef.current = chosen;
-      setAnalysis(null);
-      setLocalMusic(chosen);
-      if (old) await release(old);
-    } catch (cause) { feedback.current(errorMessage(cause), true); }
-    finally { if (alive.current) setPicking(false); }
+      const chosen = await pickMusic(controller.signal);
+      if (controller.signal.aborted) {
+        for (const track of chosen.tracks) await release(track);
+        return;
+      }
+      if (chosen.tracks.length) {
+        localRef.current = [...localRef.current, ...chosen.tracks];
+        setLocalMusic(localRef.current);
+        if (preferencesRef.current.musicEnabled || change({ musicEnabled: true })) setUseLocalMusic(true);
+      }
+      if (chosen.failures.length) feedback.current(t('音乐未能添加：', 'Could not add music: ') + chosen.failures.map(({ name, message }) => `${name}：${message}`).join('\n'), true);
+    } catch (cause) { if (!controller.signal.aborted) feedback.current(errorMessage(cause), true); }
+    finally {
+      if (importController.current === controller) importController.current = null;
+      if (!controller.signal.aborted) setPicking(false);
+    }
   }
-  return { preferences, music, localMusic, analysis, picking, change, changeMusic, chooseMusic };
+  function clearLocalMusic() {
+    const old = localRef.current;
+    localRef.current = [];
+    setLocalMusic([]);
+    setUseLocalMusic(false);
+    analysisRef.current.clear();
+    setAnalysis(new Map());
+    for (const track of old) void release(track);
+  }
+  return { preferences, playlist, musicSource, localMusic, analysis, picking, change, changeMusic, chooseMusic, clearLocalMusic };
 }
 function errorMessage(cause: unknown) { return cause instanceof Error ? cause.message : String(cause); }

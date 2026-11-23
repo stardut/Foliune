@@ -20,6 +20,13 @@ window.matchMedia = () => motionPreference;
 const playerStyle = document.head.appendChild(document.createElement('style'));
 playerStyle.textContent = await readFile(new URL('../src/features/player.css', import.meta.url), 'utf8');
 
+window.HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,frost-fixture';
+window.HTMLCanvasElement.prototype.getContext = () => ({
+  drawImage() {},
+  getImageData: (_, __, width, height) => ({ data: new Uint8ClampedArray(width * height * 4) }),
+  createImageData: (width, height) => ({ data: new Uint8ClampedArray(width * height * 4) }),
+  putImageData() {},
+});
 const pending = new WeakMap();
 window.HTMLImageElement.prototype.decode = function () {
   if (!pending.has(this)) {
@@ -63,7 +70,7 @@ const complete = (image, ready = true) => act(async () => {
   else pending.get(image).reject(new Error('invalid original'));
 });
 
-async function scenario(t, run, { host, preferences = {}, music = null, sample = photos, mac = false, stageSize = { width: 1000, height: 700 }, screenSize = { width: 1600, height: 900 } } = {}) {
+async function scenario(t, run, { host, preferences = {}, music = null, playlist = music ? [music] : [], sample = photos, mac = false, stageSize = { width: 1000, height: 700 }, screenSize = { width: 1600, height: 900 } } = {}) {
   if (host) globalThis.playerWindow = host;
   t.mock.getter(window.navigator, 'userAgent', () => mac ? 'Macintosh' : 'Windows');
   Object.defineProperty(window.screen, 'width', { configurable: true, value: screenSize.width });
@@ -85,8 +92,8 @@ async function scenario(t, run, { host, preferences = {}, music = null, sample =
     return h('div', null,
       h('main', { className: 'source-album' }, h('img', { src: '/live-album.jpg', alt: '来源相簿' })),
       open && h(PhotoPlayer, {
-      photos: snapshot, photoIds: ids, preferences: { seconds: 6, volume: .35, random: false, loop: true, musicId: 'off', ...preferences },
-      music, analysis: null, onClose: () => setOpen(false), onFeedback: message => feedback.push(message),
+      photos: snapshot, photoIds: ids, preferences: { random: false, loop: true, preferFill: false, groupPortraits: false, musicEnabled: false, ...preferences },
+      playlist, analysis: new Map(), onClose: () => setOpen(false), onFeedback: message => feedback.push(message),
       onRelink: async (photo) => setSnapshot(previous => previous.map(item => item.id === photo.id
         ? { ...item, originalUrl: '/replacement.jpg', originalPath: '/replacement.jpg' } : item)),
     }));
@@ -134,12 +141,10 @@ test('首张缩略图承托，原图交接重新计时，纯照片舞台没有�
     assert.equal(current(), first);
     await complete(next);
     assert.equal(current(), next);
-    assert.equal(stage().querySelector('[data-role=outgoing] img'), first);
-    await tick(320);
-    assert.equal(stage().querySelector('[data-role=outgoing]'), null);
+    assert.equal(stage().querySelector('[data-role=outgoing]'), null, '整张就绪后立即交接，没有旧照片退场层');
     const third = image('c');
     await complete(third);
-    await tick(5679);
+    await tick(5999);
     assert.equal(current(), next);
     await tick(1);
     assert.equal(current(), third);
@@ -171,7 +176,8 @@ test('设置中的乱序和循环用于新会话，连续方向键按实际队�
     assert.equal(current(), first);
     await complete(image('e'));
     assert.equal(current(), image('e'));
-    assert.equal(current().closest('[data-effect]').dataset.effect, 'glide');
+    assert.equal(stage().querySelector('[data-effect]'), null, '连续手动切换同样不产生归位动效');
+    assert.equal(stage().querySelector('[data-role=outgoing]'), null);
     await reduce();
     assert.equal(stage().querySelector('[data-role=outgoing]'), null);
     await complete(image('f'));
@@ -263,7 +269,7 @@ test('原生入场透出真实来源相簿，最终整组准备好才把照片�
     assert.equal(container.querySelector('.source-album img'), sourcePhoto, '来源保持真实节点，不替换为截图');
     assert.match(sourcePhoto.src, /live-album-updated/);
     assert.equal(stage().querySelectorAll('[data-role=current] img').length, 3);
-  }, { mac: true, screenSize: { width: 700, height: 900 }, stageSize: { width: 700, height: 900 }, sample: photos.map(photo => ({ ...photo, width: 600, height: 900 })), host: {
+  }, { mac: true, preferences: { groupPortraits: true }, screenSize: { width: 700, height: 900 }, stageSize: { width: 700, height: 900 }, sample: photos.map(photo => ({ ...photo, width: 600, height: 900 })), host: {
     async isFullscreen() { return full; },
     async setFullscreen() {},
     async listen(event, listener) { listeners.add(listener); return () => listeners.delete(listener); },
@@ -345,14 +351,14 @@ test('AppKit 完成前透出相簿，完成后按当前尺寸准备整组，切�
     assert.equal(hidden(), false);
     assert.equal(stage().querySelectorAll('[data-role=current] img').length, 3);
     assert.equal(image('a'), first, '原生切换中保留解码的真实图片节点');
-    await tick(999);
+    await tick(5999);
     assert.equal(current(), first);
     await tick(1);
     await complete(image('d'));
     await complete(image('e'));
     await complete(image('f'));
     assert.equal(current(), image('d'));
-  }, { mac: true, screenSize: { width: 700, height: 900 }, preferences: { seconds: 1 }, stageSize: { width: 700, height: 900 }, sample: photos.map(photo => ({ ...photo, width: 600, height: 900 })), host: {
+  }, { mac: true, screenSize: { width: 700, height: 900 }, preferences: { groupPortraits: true }, stageSize: { width: 700, height: 900 }, sample: photos.map(photo => ({ ...photo, width: 600, height: 900 })), host: {
     async isFullscreen() { return full; },
     async setFullscreen() {},
     async listen(event, listener) { assert.equal(event, 'review-fullscreen-changed'); listeners.add(listener); return () => listeners.delete(listener); },
@@ -469,7 +475,7 @@ test('音频错误有记录并在返回后反馈，不遮挡照片且固定时�
     await tick(6000);
     assert.equal(current(), image('b'));
     await key('Escape');
-    assert.match(feedback[0], /配乐无法读取/);
+    assert.match(feedback[0], /无法读取/);
   }, { music: { id: 'builtin-mist-walk', name: '雾中慢行', url: '/music/mist-walk.wav' } });
 });
 
@@ -508,7 +514,7 @@ test('首组三张全部解码后直接请求全屏，快路径不显示加载�
     assert.equal(image('d'), null);
     assert.deepEqual(requests, []);
     assert(activations.length > 0, '挂载时即调用 play，保留点击激活');
-    assert(activations.every(({ volume, muted }) => volume === 0 && !muted), '预备期仅将音量置零，保留已授权的有声播放');
+    assert(activations.every(({ volume, muted }) => volume === 1 && muted), '预备期静音，不改变跟随系统的音量');
     const audio = container.querySelector('audio');
     audio.currentTime = 8;
     await complete(originals[0]);
@@ -520,15 +526,17 @@ test('首组三张全部解码后直接请求全屏，快路径不显示加载�
     assert.deepEqual(requests, [true]);
     await tick(500);
     assert.equal(container.querySelector('.player-preparation'), null, '快速解码后原生切换再慢也不补出加载浮层');
-    assert.equal(audio.volume, 0);
+    assert.equal(audio.volume, 1);
+    assert.equal(audio.muted, true);
     full = true;
     await act(async () => { for (const listener of listeners) listener({ payload: true }); });
     assert.equal(window.getComputedStyle(stage().parentElement).opacity, '1');
-    assert.equal(audio.volume, .35);
+    assert.equal(audio.volume, 1);
+    assert.equal(audio.muted, false);
     assert.equal(audio.currentTime, 0, '第一组显影时从曲首开始放音');
     assert.equal(stage().querySelectorAll('[data-role=current] img').length, 3);
     for (let i = 0; i < originals.length; i++) assert.equal(image(ids[i]) === originals[i], true, '预备和舞台使用同一解码节点');
-  }, { mac: true, stageSize: { width: 1600, height: 900 }, sample: photos.map(photo => ({ ...photo, width: 600, height: 900 })),
+  }, { mac: true, preferences: { groupPortraits: true }, stageSize: { width: 1600, height: 900 }, sample: photos.map(photo => ({ ...photo, width: 600, height: 900 })),
     music: { id: 'builtin-mist-walk', name: '雾中慢行', url: '/music/mist-walk.wav' }, host: {
       async isFullscreen() { return full; },
       async setFullscreen(value) { requests.push(value); },
@@ -595,9 +603,165 @@ test('预备首组中一张失败立即可见反馈和重连，不把失败当�
     assert.deepEqual(requests, []);
     await key('Escape');
     assert.equal(container.querySelector('dialog'), null);
-  }, { sample: photos.map(photo => ({ ...photo, width: 600, height: 900 })), host: {
+  }, { preferences: { groupPortraits: true }, sample: photos.map(photo => ({ ...photo, width: 600, height: 900 })), host: {
     async isFullscreen() { return false; },
     async setFullscreen(value) { requests.push(value); },
     async onResized() { return () => {}; },
   } });
+});
+
+test('贴屏首组隐藏预载，原生完成后以真实舞台重判cover并复用原图节点', async t => {
+  t.mock.getter(window.HTMLImageElement.prototype, 'naturalWidth', () => 1500);
+  t.mock.getter(window.HTMLImageElement.prototype, 'naturalHeight', () => 1000);
+  for (const [screenSize, stageSize, expected] of [
+    [{ width: 1600, height: 1000 }, { width: 1600, height: 900 }, 'contain'],
+    [{ width: 1600, height: 900 }, { width: 1600, height: 1000 }, 'cover'],
+  ]) {
+    globalThis.isTauri = true;
+    let full = false;
+    const listeners = new Set(), requests = [];
+    await scenario(t, async ({ stage, current, image }) => {
+      const first = image('a');
+      assert.equal(first.closest('.player-frame').dataset.fit, undefined, '未知真实原图尺寸时只做隐藏预载');
+      await complete(first);
+      assert.deepEqual(requests, [true]);
+      assert.equal(window.getComputedStyle(stage().parentElement).opacity, '0', '屏幕预测不会在原生完成前露出裁切图');
+      full = true;
+      await act(async () => { for (const listener of listeners) listener({ payload: true }); });
+      assert.equal(current(), first);
+      assert.equal(first.closest('.player-frame').dataset.fit, expected);
+      assert.equal(window.getComputedStyle(first).objectFit, expected);
+      assert.equal(window.getComputedStyle(stage().parentElement).opacity, '1');
+      assert.equal(stage().querySelector('.player-mat') === null, expected === 'cover');
+    }, { mac: true, screenSize, stageSize, preferences: { preferFill: true },
+      sample: photos.map(photo => ({ ...photo, width: 1500, height: 1000 })), host: {
+        async isFullscreen() { return full; },
+        async setFullscreen(value) { requests.push(value); },
+        async listen(event, listener) { listeners.add(listener); return () => listeners.delete(listener); },
+      } });
+  }
+});
+
+
+test('未配置竖幅组图时宽屏连续竖幅逐张播放，方向键与自动时钟各前进一张', async t => {
+  await scenario(t, async ({ stage, current, image, key, tick }) => {
+    await complete(image('a'));
+    assert.equal(stage().querySelectorAll('.player-frame[data-role=current] img').length, 1);
+    await complete(image('b'));
+    await key('ArrowRight');
+    assert.equal(current(), image('b'));
+    await complete(image('c'));
+    await tick(6000);
+    assert.equal(current(), image('c'));
+    assert.equal(stage().querySelectorAll('.player-frame[data-role=current] img').length, 1);
+  }, { stageSize: { width: 1600, height: 900 }, sample: photos.map(photo => ({ ...photo, width: 600, height: 900 })) });
+});
+
+test('StrictMode 欣赏同一音频节点每轮播完全部曲目，轮间不连播同曲且保留照片游标', async t => {
+  const playlist = ['one', 'two', 'three'].map(id => ({ id, name: id, url: `/${id}.wav` }));
+  let random = 0;
+  t.mock.method(Math, 'random', () => random);
+  const activations = [];
+  t.mock.method(window.HTMLMediaElement.prototype, 'play', function () {
+    activations.push(this);
+    return Promise.resolve();
+  });
+  await scenario(t, async ({ container, current, image }) => {
+    await complete(image('a'));
+    const first = current(), audio = container.querySelector('audio');
+    assert.equal(audio.loop, false);
+    const rounds = [];
+    for (let round = 0; round < 4; round++) {
+      const played = [];
+      for (let index = 0; index < playlist.length; index++) {
+        played.push(audio.getAttribute('src'));
+        random = round % 2 ? 0 : .999;
+        await act(async () => audio.dispatchEvent(new Event('ended')));
+        assert.equal(container.querySelector('audio'), audio, '切曲保留原激活的媒体节点');
+        assert.equal(current(), first, '音乐换曲不改变照片或其顺序');
+      }
+      assert.deepEqual([...played].sort(), playlist.map(track => track.url).sort(), '包括首轮在内，每轮每曲恰好一次');
+      if (round) assert.notEqual(rounds.at(-1).at(-1), played[0], '相邻轮边界避免重复');
+      rounds.push(played);
+    }
+    assert(activations.length >= 13);
+    assert(activations.every(element => element === audio));
+    assert.equal(audio.volume, 1);
+    assert.equal(audio.muted, false);
+  }, { playlist });
+});
+
+test('配乐失败在本轮及后续轮跳过，全部失败后停止重试且退出反馈每曲一次', async t => {
+  const playlist = ['one', 'two', 'three'].map(id => ({ id, name: id, url: `/${id}.wav` }));
+  t.mock.method(Math, 'random', () => 0);
+  let calls = 0;
+  t.mock.method(window.HTMLMediaElement.prototype, 'play', function () { calls++; return Promise.resolve(); });
+  await scenario(t, async ({ container, image, key, feedback }) => {
+    await complete(image('a'));
+    const audio = container.querySelector('audio');
+    const failed = audio.getAttribute('src');
+    await act(async () => audio.dispatchEvent(new Event('error')));
+    assert.notEqual(audio.getAttribute('src'), failed);
+    for (let i = 0; i < 6; i++) {
+      await act(async () => audio.dispatchEvent(new Event('ended')));
+      assert.notEqual(audio.getAttribute('src'), failed, '故障曲目不在下一轮复活');
+    }
+    for (let i = 0; i < 2; i++) await act(async () => audio.dispatchEvent(new Event('error')));
+    assert.equal(audio.getAttribute('src'), null);
+    const stoppedCalls = calls;
+    await act(async () => {
+      audio.dispatchEvent(new Event('error'));
+      audio.dispatchEvent(new Event('ended'));
+    });
+    assert.equal(calls, stoppedCalls, '已无可用曲目时不会反复重启失败音源');
+    assert.deepEqual(feedback, []);
+    await key('Escape');
+    assert.equal(feedback.length, 3);
+  }, { playlist });
+});
+
+test('仅一首配乐自然循环，节点不变且音量保持系统控制', async t => {
+  let calls = 0;
+  t.mock.method(window.HTMLMediaElement.prototype, 'play', function () { calls++; return Promise.resolve(); });
+  await scenario(t, async ({ container }) => {
+    const audio = container.querySelector('audio');
+    const before = calls;
+    audio.currentTime = 24;
+    await act(async () => audio.dispatchEvent(new Event('ended')));
+    assert.equal(container.querySelector('audio'), audio);
+    assert.equal(audio.currentTime, 0);
+    assert.equal(calls, before + 1);
+    assert.equal(audio.volume, 1);
+  }, { playlist: [{ id: 'single', name: 'Single', url: '/single.wav' }] });
+});
+
+test('欣赏自动切图记住向前方向，连续方向键按最近有效切换更新三加一预载', async t => {
+  await scenario(t, async ({ stage, current, image, key, tick }) => {
+    const active = () => [...stage().querySelectorAll('.player-frame img')].map(img => img.getAttribute('src')).sort();
+    assert.deepEqual(active(), ['/a-thumb.jpg', '/a.jpg', '/b.jpg', '/f.jpg']);
+    await complete(image('a'));
+    await complete(image('b'));
+    await tick(6000);
+    assert.equal(current(), image('b'));
+    assert.deepEqual(active(), ['/a.jpg', '/b.jpg', '/c.jpg', '/d.jpg', '/e.jpg']);
+    await key('ArrowLeft');
+    assert.equal(current(), image('a'));
+    assert.deepEqual(active(), ['/a.jpg', '/b.jpg', '/d.jpg', '/e.jpg', '/f.jpg']);
+    await key('ArrowRight');
+    assert.deepEqual(active(), ['/a.jpg', '/b.jpg', '/c.jpg', '/d.jpg', '/e.jpg']);
+    assert.equal(stage().querySelector('[data-role=outgoing]'), null, '增加预读不添加过渡层');
+  });
+});
+
+test('欣赏非循环起点的无效按键不建立方向或扩大初始窗口', async t => {
+  await scenario(t, async ({ stage, image, key }) => {
+    const originals = () => [...stage().querySelectorAll('.player-frame img')]
+      .map(img => img.getAttribute('src')).filter(src => !src.includes('thumb')).sort();
+    assert.deepEqual(originals(), ['/a.jpg', '/b.jpg']);
+    await complete(image('a'));
+    await key('ArrowLeft');
+    assert.deepEqual(originals(), ['/a.jpg', '/b.jpg']);
+    await key('ArrowRight');
+    assert.deepEqual(originals(), ['/a.jpg', '/b.jpg', '/c.jpg', '/d.jpg', '/e.jpg']);
+  }, { preferences: { loop: false } });
 });

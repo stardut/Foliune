@@ -7,18 +7,19 @@ import { isLocalPhoto, photoUnavailableLabel } from '../lib/photo-availability';
 import { ReviewPresentation, type ReviewFrame, type ReviewPresentationState } from './review-presentation';
 import { ReviewZoom } from './review-zoom';
 
-export function useReviewPresentation(photos: Photo[], requestedId: string, direction: number, reduced: boolean, photoIndices?: ReadonlyMap<string, number>) {
+export function useReviewPresentation(photos: Photo[], requestedId: string, direction: number, reduced: boolean,
+  { photoIndices, directionalPreload = false }: { photoIndices?: ReadonlyMap<string, number>; directionalPreload?: boolean } = {}) {
   const controller = useRef<ReviewPresentation | null>(null);
   const initialPhoto = () => photoIndices ? photos[photoIndices.get(requestedId) ?? -1] : photos.find((photo) => photo.id === requestedId);
   const [state, setState] = useState<ReviewPresentationState>(() => {
-    controller.current = new ReviewPresentation(initialPhoto(), setNext);
+    controller.current = new ReviewPresentation(initialPhoto(), setNext, directionalPreload);
     return controller.current.state;
   });
   // The callback is invoked only after mount, never during initialization.
   function setNext(next: ReviewPresentationState) { setState(next); }
   useLayoutEffect(() => {
     // StrictMode remounts effects: create a fresh, bounded controller after cleanup.
-    if (!controller.current) controller.current = new ReviewPresentation(initialPhoto(), setNext);
+    if (!controller.current) controller.current = new ReviewPresentation(initialPhoto(), setNext, directionalPreload);
     controller.current.update(photos, requestedId, direction, reduced, photoIndices);
   }, [photos, requestedId, direction, reduced, photoIndices]);
   useLayoutEffect(() => () => { controller.current?.dispose(); controller.current = null; }, []);

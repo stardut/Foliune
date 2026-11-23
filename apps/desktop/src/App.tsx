@@ -312,7 +312,8 @@ export default function App({ resumeSettings = false }: { resumeSettings?: boole
   }
   function confirmRelink(confirmed: boolean) { relinkConfirmation?.resolve(confirmed); setRelinkConfirmation(null); }
   function openPlayer(ids: string[]) {
-    const actual = ids.filter((id) => snapshot.photos.some((photo) => photo.id === id));
+    const photoIds = new Set(snapshot.photos.map((photo) => photo.id));
+    const actual = ids.filter((id) => photoIds.has(id));
     if (!actual.length) { feedback(t('没有可欣赏的照片', 'No photos to play.'), true); return; }
     // Mount the audio during the slideshow gesture, before the native Space transition.
     flushSync(() => setPlayingIds(actual));
@@ -361,7 +362,7 @@ export default function App({ resumeSettings = false }: { resumeSettings?: boole
     {relinkConfirmation && <Modal title={t('确认替换照片', 'Replace this photo?')} onClose={() => confirmRelink(false)}><p className="replacement-copy">{t('将用所选文件替换此照片；所有相簿和画册中的引用都会使用该文件', 'This photo will use the selected file in every album and photo book that references it.')}</p><p className="replacement-path">{relinkConfirmation.path}</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => confirmRelink(false)}>{t('取消', 'Cancel')}</button><button type="button" className="button button-primary" onClick={() => confirmRelink(true)}>{t('确认替换', 'Replace Photo')}</button></div></Modal>}
     {pendingClose && <Modal title={t('放弃修改并关闭窗口？', 'Discard changes and close the window?')} onClose={() => { if (!closing) setPendingClose(false); }}><p className="replacement-copy">{t('当前修改尚未保存，关闭窗口将放弃这些修改。', 'Closing the window will discard your unsaved changes.')}</p><div className="form-actions"><button type="button" className="button" autoFocus disabled={closing} onClick={() => setPendingClose(false)}>{t('继续编辑', 'Keep Editing')}</button><button type="button" className="button" disabled={closing || workspaceBusy} onClick={() => void discardAndClose()}>{closing ? t('正在关闭…', 'Closing…') : t('放弃并关闭', 'Discard and Close')}</button></div></Modal>}
     {pendingSpace && <Modal title={t('离开未保存的修改？', 'Discard unsaved changes?')} onClose={() => setPendingSpace(null)}><p className="replacement-copy">{t('当前修改尚未保存。离开将放弃这些修改。', 'Leaving this workspace will discard your unsaved changes.')}</p><div className="form-actions"><button type="button" className="button" autoFocus onClick={() => setPendingSpace(null)}>{t('继续编辑', 'Keep Editing')}</button><button type="button" className="button" disabled={workspaceBusy} onClick={() => { if (workspaceBusy) return; setBookDirty(false); setPhotoDirty(false); setModelDirty(false); setPlanningDirty(false); changeSpace(pendingSpace.space, pendingSpace.target); }}>{t('放弃并离开', 'Discard and Leave')}</button></div></Modal>}
-    {playingIds && <PhotoPlayer preferences={appreciation.preferences} music={appreciation.music} analysis={appreciation.analysis} photos={snapshot.photos} photoIds={playingIds} onClose={() => setPlayingIds(null)} onRelink={relinkPhoto} onFeedback={feedback} />}
+    {playingIds && <PhotoPlayer preferences={appreciation.preferences} playlist={appreciation.playlist} analysis={appreciation.analysis} photos={snapshot.photos} photoIds={playingIds} onClose={() => setPlayingIds(null)} onRelink={relinkPhoto} onFeedback={feedback} />}
     {appUpdate.dialogOpen && (appUpdate.status.type === 'updating' || appUpdate.status.type === 'updateError') &&
       <AppUpdateDialog status={appUpdate.status} retryBlocked={updateBlocked} onRetry={() => startUpdate('retry')} onClose={appUpdate.closeDialog} />}
     <WorkDirectoryDiscovery directory={workDirectory} idle={discoveryIdle} />

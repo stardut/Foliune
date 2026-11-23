@@ -47,7 +47,7 @@ export function PhotoReview({ photos, initialPhotoId, context, busy, onClose, on
   const [requestedId, setRequestedId] = useState(initialPhotoId);
   const request = useRef({ id: initialPhotoId, direction: 0 });
   const reduced = !!useReducedMotion();
-  const { state: images, controller } = useReviewPresentation(photos, requestedId, request.current.direction, reduced);
+  const { state: images, controller } = useReviewPresentation(photos, requestedId, request.current.direction, reduced, { directionalPreload: true });
   const [awake, setAwake] = useState(true);
   const visible = useRef(true);
   const active = useRef(true);

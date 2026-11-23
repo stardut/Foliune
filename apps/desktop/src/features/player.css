@@ -2,28 +2,32 @@
 .photo-player::backdrop { background: transparent; }
 .player-surface { position: absolute; inset: 0; background: var(--photo-mat); opacity: 1; }
 .player-surface[data-visible=false] { opacity: 0; pointer-events: none; }
-.player-stage { container-type: size; --player-gap: clamp(12px, 1.25vw, 24px); position: absolute; inset: clamp(20px, 3vw, 48px); display: flex; align-items: center; justify-content: center; }
+.player-stage { container-type: size; --player-gap: 3px; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .player-stage:focus-visible { outline: none; }
-.player-frame { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: transparent; }
+.player-mat { position: absolute; inset: 0; pointer-events: none; }
+.player-mat-wing { position: absolute; overflow: hidden; isolation: isolate; }
+.player-mat-textures { position: absolute; inset: -64px; filter: blur(20px) saturate(.95) brightness(.94); }
+.player-mat-textures > canvas { position: absolute; top: 0; height: 100%; }
+.player-mat-wing::before, .player-mat-wing::after { content: ''; position: absolute; inset: 0; pointer-events: none; }
+.player-mat-wing::before { z-index: 1; background-image: var(--player-frost); background-size: 96px 96px; opacity: .055; mix-blend-mode: soft-light; }
+.player-mat-wing[data-edge=left]::after { background: linear-gradient(90deg, rgba(12,13,14,.62), rgba(12,13,14,.06)); }
+.player-mat-wing[data-edge=right]::after { background: linear-gradient(270deg, rgba(12,13,14,.62), rgba(12,13,14,.06)); }
+.player-mat-wing[data-edge=top]::after { background: linear-gradient(180deg, rgba(12,13,14,.62), rgba(12,13,14,.06)); }
+.player-mat-wing[data-edge=bottom]::after { background: linear-gradient(0deg, rgba(12,13,14,.62), rgba(12,13,14,.06)); }
+.player-seam { position: absolute; width: var(--player-gap); background: #141516; pointer-events: none; }
+.player-frame { z-index: 2; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: transparent; }
 .player-frame.image-unavailable { background: transparent; }
 .player-frame.image-unavailable > img { visibility: hidden; }
 .player-frame .missing-photo { position: absolute; inset: 0; justify-content: center; }
 .player-frame[data-role=prepared] { visibility: hidden; }
-.player-frame[data-role=outgoing] { z-index: 1; visibility: hidden; pointer-events: none; }
 .player-frame > img { display: block; width: 100%; height: 100%; object-fit: contain; }
-.player-waiting { position: absolute; right: 0; bottom: -23px; width: 12px; height: 12px; border: 1px solid var(--line); border-top-color: var(--muted); border-radius: 50%; pointer-events: none; }
+.player-frame[data-fit=cover] > img { object-fit: cover; object-position: center; }
+.player-waiting { position: absolute; z-index: 5; right: 18px; bottom: 18px; width: 12px; height: 12px; border: 1px solid var(--line); border-top-color: var(--muted); border-radius: 50%; pointer-events: none; }
 @media (prefers-reduced-motion: no-preference) {
   .player-surface { transition: opacity 140ms ease-in-out; }
-  .player-frame[data-role=outgoing] { visibility: visible; animation: player-dissolve var(--player-transition, 320ms) ease-in-out forwards; }
-  .player-frame[data-effect=glide] > img { animation: player-glide var(--player-transition, 320ms) cubic-bezier(.2,.65,.3,1); }
-  .player-frame[data-effect=gather] > img { animation: player-gather var(--player-transition, 320ms) cubic-bezier(.2,.65,.3,1); }
   .player-waiting { animation: player-wait 1s linear infinite; }
 }
-@keyframes player-dissolve { to { opacity: 0; } }
-@keyframes player-glide { from { transform: translateX(calc(var(--player-direction, 1) * clamp(12px, 1.4cqw, 26px))); } }
-@keyframes player-gather { from { transform: translate(calc(var(--player-slot, 0) * clamp(14px, 1.8cqw, 32px)), 9px) scale(.975); } }
 @keyframes player-wait { to { transform: rotate(360deg); } }
-@media (max-width: 700px) { .player-stage { inset: 18px; } }
 .player-fullscreen-error { position: absolute; z-index: 5; inset: auto 24px 24px; margin: 0; text-align: center; color: var(--danger); font-size: 12px; }
 .player-preparation { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 22px; padding: 16px 18px; border: 1px solid var(--glass-line); border-radius: 12px; background: var(--glass); box-shadow: var(--glass-shadow); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); }
 .player-preparation .busy { min-height: 0; gap: 10px; white-space: nowrap; color: var(--ink); }

@@ -51,7 +51,7 @@ macOS 的 `context_menu.rs` / `context_menu_macos.m` 只在主窗口保存原始
 - `src-tauri/src/books.rs`、`book_layout.rs`、`book_export.rs`：画册文档、编辑保存、初始排版和 HTML 导出。
 - `src-tauri/src/ai.rs`、`ai_settings.rs`、`credentials.rs`：官方 API 请求与结果存储、单一接入配置、系统凭据。
 - `src-tauri/src/backup.rs`、`backup_restore.rs`：一致性备份、备份校验和单图库增量合并。
-- `src-tauri/src/music.rs`：管理当前应用运行期间的本地配乐缓存。设置中选中的本地音乐可供多次欣赏，换曲或应用退出时释放副本。内置曲目及播放偏好由前端偏好存储保存。
+- `src-tauri/src/music.rs`：管理当前应用运行期间的本地配乐缓存。设置中批量添加的本地音乐可供同一会话多次欣赏，清空列表或应用退出时释放副本。前端偏好存储保存是否启用配乐与照片播放偏好。本地曲目与播放队列保留在会话中。
 - `src-tauri/src/model_profiles.rs`：当前图库的模特档案、有序样片引用及每份档案的可选标签目录，事务校验并保存。删除档案时复用图库引用检查。`tag_options` 为可空JSON列，旧记录null由编辑器采用初始目录，显式空数组保留全部删除结果；启动及备份恢复的init在旧表缺列时增加该列，不清旧数据。
 - `src-tauri/src/social.rs`：保留首版历史排版数据的结构与恢复校验。当前模拟界面不再调用草稿接口，本轮不破坏性删除旧数据。
 - `src-tauri/src/content_refs.rs`：上述两个模块共用的文案、时间戳和稳定照片引用校验，不承担图库导入与画册排版。

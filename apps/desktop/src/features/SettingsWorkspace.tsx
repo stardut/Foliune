@@ -139,7 +139,6 @@ export function SettingsWorkspace({ appreciation, snapshot, directory, onRestore
   return <section>
     <WorkspaceHeader title={t('设置', 'Settings')} count={`${photoCount(snapshot.photos.length)} · ${albumCount(snapshot.groups.length)}`} />
     <LanguageSettings disabled={updateBlocked || backupBusy || directoryBusy || installingCli} />
-    <AppreciationSettings settings={appreciation} disabled={updateBlocked || backupBusy || directoryBusy || installingCli} />
     <AppUpdateSettings update={update} updateBlocked={updateBlocked || backupBusy || directoryBusy} onUpdate={onUpdate} />
     <CliInstallSettings cli={cli} blocked={cliBlocked || backupBusy || directoryBusy} onInstall={onInstallCli} />
     <WorkDirectorySettings directory={directory} disabled={backupBusy || installingCli} />
@@ -165,6 +164,7 @@ export function SettingsWorkspace({ appreciation, snapshot, directory, onRestore
         </button>
       </div>
     </section>
+    <AppreciationSettings settings={appreciation} disabled={updateBlocked || backupBusy || directoryBusy || installingCli} />
     {exportOptionsOpen && <Modal title={t('选择备份范围', 'Choose What to Back Up')} onClose={() => setExportOptionsOpen(false)}>
       <div className="settings-backup-options">
         <button type="button" className="button" disabled={directoryBusy || operation !== null} onClick={() => exportBackup('metadata')}>

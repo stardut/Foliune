@@ -26,8 +26,9 @@ export const albumSortIcons: Record<PhotoSort, LucideIcon> = {
   'name-desc': ArrowDownZA,
 };
 
-export function AlbumSortButton<Sort extends PhotoSort>({ label, value, labels, onChange, disabled, onBeforeOpen, onOpenChange }: {
+export function AlbumSortButton<Sort extends PhotoSort>({ label, value, labels, title, onChange, disabled, onBeforeOpen, onOpenChange }: {
   label: string; value: Sort; labels: Record<Sort, string>; onChange: (value: Sort) => void;
+  title?: string;
   disabled: boolean; onBeforeOpen: () => void; onOpenChange: (open: boolean) => void;
 }) {
   const Icon: LucideIcon = albumSortIcons[value];
@@ -36,6 +37,6 @@ export function AlbumSortButton<Sort extends PhotoSort>({ label, value, labels, 
     const OptionIcon: LucideIcon = albumSortIcons[id];
     return { id, label: labels[id], icon: <OptionIcon size={15} aria-hidden="true" />, checked: value === id, run: () => onChange(id) };
   });
-  return <DropdownMenu label={label} triggerLabel={description} icon={<Icon size={17} aria-hidden="true" />}
+  return <DropdownMenu label={label} triggerLabel={description} title={title} icon={<Icon size={17} aria-hidden="true" />}
     groups={[{ items: options }]} disabled={disabled} onBeforeOpen={onBeforeOpen} onOpenChange={onOpenChange} />;
 }

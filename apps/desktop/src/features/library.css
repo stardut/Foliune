@@ -4,6 +4,11 @@
 .library-workspace { padding-bottom: 16px; }
 .library-workspace h1 { overflow-wrap: anywhere; }
 .library-workspace .workspace-tools { gap: 5px; }
+.album-home-actions { display: flex; align-items: center; gap: 5px; }
+.album-home-actions .icon-button { position: relative; }
+:root[data-input-mode="keyboard"] .album-home-actions .icon-button:focus-visible:not([aria-expanded="true"])::after { content: attr(aria-label); position: absolute; z-index: 25; top: calc(100% + 7px); left: 50%; transform: translateX(-50%); padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-solid); color: var(--ink); font-size: 11px; font-weight: 400; line-height: 1.4; white-space: nowrap; pointer-events: none; }
+.library-workspace .album-home-create { margin-inline-start: 7px; border-color: var(--line); }
+.library-workspace .album-home-create:hover:not(:disabled) { border-color: var(--control-line); }
 .work-directory-settings-link { margin-top: 8px; }
 .library-workspace .segmented { margin-left: 9px; }
 .library-workspace .view-tabs { margin: -8px 0 26px; }

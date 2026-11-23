@@ -1,28 +1,26 @@
-import { BUILTIN_MUSIC } from './player-music';
-
-export const appreciationIntervals = [3, 5, 6, 10, 15, 30, 60] as const;
+export const DEFAULT_APPRECIATION_SECONDS = 6;
 export interface AppreciationPreferences {
-  seconds: number;
-  volume: number;
   random: boolean;
   loop: boolean;
-  musicId: string;
+  preferFill: boolean;
+  groupPortraits: boolean;
+  musicEnabled: boolean;
 }
 export const defaultAppreciationPreferences: AppreciationPreferences = {
-  seconds: 6, volume: .35, random: false, loop: true, musicId: BUILTIN_MUSIC[0].id,
+  random: false, loop: true, preferFill: false, groupPortraits: false, musicEnabled: true,
 };
 const key = 'foliune.appreciation';
 
 export function readAppreciationPreferences(): AppreciationPreferences {
   try {
-    const saved = JSON.parse(window.localStorage.getItem(key) ?? 'null') as Partial<AppreciationPreferences> | null;
+    const saved = JSON.parse(window.localStorage.getItem(key) ?? 'null') as (Partial<AppreciationPreferences> & { musicId?: string }) | null;
     if (!saved) return defaultAppreciationPreferences;
     return {
-      seconds: appreciationIntervals.some((seconds) => seconds === saved.seconds) ? saved.seconds! : defaultAppreciationPreferences.seconds,
-      volume: typeof saved.volume === 'number' && Number.isFinite(saved.volume) && saved.volume >= 0 && saved.volume <= 1 ? saved.volume : defaultAppreciationPreferences.volume,
       random: typeof saved.random === 'boolean' ? saved.random : defaultAppreciationPreferences.random,
       loop: typeof saved.loop === 'boolean' ? saved.loop : defaultAppreciationPreferences.loop,
-      musicId: saved.musicId === 'off' || BUILTIN_MUSIC.some((track) => track.id === saved.musicId) ? saved.musicId! : defaultAppreciationPreferences.musicId,
+      preferFill: typeof saved.preferFill === 'boolean' ? saved.preferFill : defaultAppreciationPreferences.preferFill,
+      groupPortraits: typeof saved.groupPortraits === 'boolean' ? saved.groupPortraits : defaultAppreciationPreferences.groupPortraits,
+      musicEnabled: typeof saved.musicEnabled === 'boolean' ? saved.musicEnabled : saved.musicId !== 'off',
     };
   } catch { return defaultAppreciationPreferences; }
 }

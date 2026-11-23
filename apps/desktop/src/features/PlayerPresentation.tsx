@@ -1,35 +1,43 @@
 import { t } from '../lib/i18n';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { PhotoUnavailable } from '../components/PhotoImage';
 import { canReadOriginal, originalReadUrl } from '../lib/photo-availability';
 import type { Photo } from '../lib/types';
+import { photoPreloadOffsets } from '../lib/photo-preload';
+import { neutralPlayerEdges, neutralPlayerMat, playerMatColors, reportPlayerMatFailure, samplePlayerMat, type PlayerEdges, type PlayerMatSample, type PlayerMatTexture } from './player-mat';
 
 type Frame = { id: string; photo?: Photo; key: string; src?: string };
 type ImageFrame = Frame & { photo: Photo; src: string };
 type FrameStatus = 'ready' | 'error';
+type DecodedFrame = PlayerMatSample & { status: FrameStatus; width: number; height: number };
 export type PlayerComposition = { start: number; end: number };
-type Scene = PlayerComposition & { anchorId: string; key: string; frame: Frame; frames: Frame[] };
+type Scene = PlayerComposition & { fit: 'contain' | 'cover'; key: string; frame: Frame; frames: Frame[] };
 type DisplayedScene = Scene & { status: FrameStatus | 'thumbnail' };
-type Transition = { outgoing: Scene; effect: 'dissolve' | 'gather' | 'glide'; duration: number; direction: number };
-type PresentationOptions = { stageAspect?: number; accent?: boolean; direction?: number; preloadAdjacent?: boolean };
-const reducedMotionQuery = '(prefers-reduced-motion: reduce)';
-
-function subscribeToReducedMotion(callback: () => void) {
-  const query = window.matchMedia(reducedMotionQuery);
-  query.addEventListener('change', callback);
-  return () => query.removeEventListener('change', callback);
-}
-function prefersReducedMotion() { return window.matchMedia(reducedMotionQuery).matches; }
+type PresentationOptions = { stageAspect?: number; groupPortraits?: boolean; preferFill?: boolean; preloadAdjacent?: boolean; direction?: number };
 
 export function playerNeighbor(index: number, direction: number, length: number, loop: boolean) {
   const next = index + direction;
   if (next >= 0 && next < length) return next;
-  return loop && length > 0 ? (next + length) % length : null;
+  return loop && length > 0 ? ((next % length) + length) % length : null;
+}
+
+function photoAspect(photo: Pick<Photo, 'width' | 'height'> | undefined) {
+  if (!photo || !(photo.width > 0 && photo.height > 0)) return null;
+  const ratio = photo.width / photo.height;
+  return Number.isFinite(ratio) && ratio > 0 ? ratio : null;
+}
+
+export function playerPhotoFit(photo: Pick<Photo, 'width' | 'height'> | undefined, stageAspect: number, preferFill: boolean): 'contain' | 'cover' {
+  const ratio = photoAspect(photo);
+  if (!preferFill || ratio === null || !Number.isFinite(stageAspect) || stageAspect <= 0) return 'contain';
+  const retainedArea = Math.min(ratio, stageAspect) / Math.max(ratio, stageAspect);
+  // Only absorb floating-point rounding at the inclusive 7% area-loss boundary.
+  return retainedArea >= .93 - Number.EPSILON * 2 ? 'cover' : 'contain';
 }
 
 function portraitRatio(photo: Photo | undefined) {
-  return photo && photo.width > 0 && photo.height > 0 && photo.width / photo.height < .9
-    ? photo.width / photo.height : null;
+  const ratio = photoAspect(photo);
+  return ratio !== null && ratio < .9 ? ratio : null;
 }
 
 /** Partition the existing browsing order; the last group never borrows from the beginning. */
@@ -50,8 +58,9 @@ export function buildPlayerCompositions(photos: ReadonlyMap<string, Photo>, orde
         if (remaining < candidate) continue;
         let ratio = 0;
         for (let offset = 0; offset < candidate; offset++) ratio += portraitRatio(photos.get(order[start + offset]))!;
-        // Keep the common image height at least ~80% of the available stage height.
-        if ((ratio + .035 * (candidate - 1)) / stageAspect <= 1.25) { count = candidate; break; }
+        // Three pictures should retain almost the full height; prefer a pair over letterboxing.
+        const minimumHeight = candidate === 3 ? .88 : .8;
+        if (ratio / stageAspect <= 1 / minimumHeight) { count = candidate; break; }
       }
     }
     scenes.push({ start, end: start + count - 1 });
@@ -72,11 +81,11 @@ function frameFor(id: string, photo: Photo | undefined, session: string, occurre
 }
 
 export function usePlayerPresentation(photos: ReadonlyMap<string, Photo>, order: string[], index: number, loop: boolean,
-  { stageAspect = 0, accent = false, direction = 1, preloadAdjacent = true }: PresentationOptions = {}) {
+  { stageAspect = 0, preloadAdjacent = true, preferFill = false, groupPortraits = false, direction = 0 }: PresentationOptions = {}) {
   const [session] = useState(() => crypto.randomUUID());
-  const reduced = useSyncExternalStore(subscribeToReducedMotion, prefersReducedMotion);
-  const [decoded, setDecoded] = useState(new Map<string, FrameStatus>());
-  const compositions = useMemo(() => buildPlayerCompositions(photos, order, stageAspect), [photos, order, stageAspect]);
+  const [decoded, setDecoded] = useState(new Map<string, DecodedFrame>());
+  const compositions = useMemo(() => groupPortraits ? buildPlayerCompositions(photos, order, stageAspect)
+    : order.map((_, index) => ({ start: index, end: index })), [photos, order, stageAspect, groupPortraits]);
   const occurrences = useMemo(() => {
     // A saved photo book can use the same photo on more than one page.
     const counts = new Map<string, number>();
@@ -86,109 +95,164 @@ export function usePlayerPresentation(photos: ReadonlyMap<string, Photo>, order:
       return count;
     });
   }, [order]);
-  function sceneAt(position: number): Scene {
-    const range = compositions.find((scene) => position >= scene.start && position <= scene.end) ?? { start: position, end: position };
+  function sceneAt(range: PlayerComposition): Scene {
     const frames = order.slice(range.start, range.end + 1).map((id, offset) => frameFor(id, photos.get(id), session, occurrences[range.start + offset]));
     if (!frames.length) frames.push(frameFor('', undefined, session));
     const frame = frames[0];
-    return { ...range, anchorId: order[position] ?? '', frames, frame, key: JSON.stringify([range.start, ...frames.map((item) => item.key)]) };
+    const fit = frames.length === 1 && frame.src && decoded.get(frame.key)?.status !== 'error'
+      ? playerPhotoFit(decoded.get(frame.key), stageAspect, preferFill) : 'contain';
+    return { ...range, fit, frames, frame, key: JSON.stringify([range.start, fit, ...frames.map((item) => item.key)]) };
   }
-  const requested = sceneAt(index);
+  const compositionIndex = compositions.findIndex((scene) => index >= scene.start && index <= scene.end);
+  const requested = sceneAt(compositions[compositionIndex] ?? { start: index, end: index });
   const [displayed, setDisplayed] = useState<DisplayedScene | null>(() => {
     const photo = requested.frame.photo;
     return requested.frames.length === 1 && requested.frame.src && photo?.thumbnailAvailable && photo.thumbnailUrl && photo.thumbnailUrl !== requested.frame.src
       ? { ...requested, status: 'thumbnail' } : null;
   });
-  const [transition, setTransition] = useState<Transition | null>(null);
-  const activeTransition = reduced ? null : transition;
-  const adjacent = [playerCompositionNeighbor(compositions, index, 1, loop), playerCompositionNeighbor(compositions, index, -1, loop)];
+  const nextPosition = playerNeighbor(compositionIndex, 1, compositions.length, loop);
+  const nextScene = nextPosition === null ? null : sceneAt(compositions[nextPosition]);
+  const nextReady = !nextScene || nextScene.frames.every((frame) => !frame.src || decoded.has(frame.key));
+  const adjacent = [...new Set(photoPreloadOffsets(direction)
+    .map((offset) => playerNeighbor(compositionIndex, offset, compositions.length, loop)))]
+    .filter((position): position is number => position !== null && position !== compositionIndex)
+    .map((position) => position === nextPosition ? nextScene! : sceneAt(compositions[position]));
   const frames = new Map<string, ImageFrame>();
-  const capacity = Math.max(4, requested.frames.length * 4, (displayed?.frames.length ?? 0) * 4, (activeTransition?.outgoing.frames.length ?? 0) * 4);
   function keep(scene: Scene | undefined | null) {
     for (const frame of scene?.frames ?? []) {
-      if (frame.src && frame.photo && !frames.has(frame.key) && frames.size < capacity) {
+      if (frame.src && frame.photo && !frames.has(frame.key)) {
         frames.set(frame.key, { ...frame, photo: frame.photo, src: frame.src });
       }
     }
   }
   keep(displayed);
   keep(requested);
-  keep(activeTransition?.outgoing);
-  if (preloadAdjacent) for (const position of adjacent) if (position !== null) keep(sceneAt(position));
+  if (preloadAdjacent) for (const scene of adjacent) keep(scene);
 
-  const onDecoded = useCallback((key: string, status: FrameStatus) => {
-    setDecoded((previous) => previous.get(key) === status ? previous : new Map(previous).set(key, status));
+  const onDecoded = useCallback((key: string, result: DecodedFrame) => {
+    setDecoded((previous) => previous.get(key)?.status === result.status ? previous : new Map(previous).set(key, result));
   }, []);
   function discardThumbnail(key: string) {
     setDisplayed((previous) => previous?.status === 'thumbnail' && previous.frame.key === key ? null : previous);
   }
-  const statuses = requested.frames.map((frame) => frame.src ? decoded.get(frame.key) : 'error');
+  const statuses = requested.frames.map((frame) => frame.src ? decoded.get(frame.key)?.status : 'error');
   const targetStatus = statuses.every(Boolean) ? (statuses.includes('error') ? 'error' : 'ready') : undefined;
   useLayoutEffect(() => {
     if ([...decoded.keys()].some((key) => !frames.has(key))) {
       setDecoded((previous) => new Map([...previous].filter(([key]) => frames.has(key))));
     }
     if (!targetStatus || (displayed?.key === requested.key && displayed.status === targetStatus)) return;
-    // Resizing a composition keeps its anchor and does not replay a scene transition.
-    const changedAnchor = displayed?.anchorId !== requested.anchorId;
-    const outgoing = !reduced && changedAnchor && displayed?.status === 'ready' && targetStatus === 'ready' ? displayed : null;
-    const targetPhoto = requested.frame.photo;
-    const wideSingle = requested.frames.length === 1 && targetPhoto && targetPhoto.width / targetPhoto.height >= 1.65;
-    const effect = outgoing?.frames.length !== requested.frames.length ? 'gather'
-      : requested.frames.length > 1 || wideSingle ? 'glide' : 'dissolve';
-    setTransition(outgoing ? { outgoing, effect, duration: accent ? 150 : 320, direction } : null);
     setDisplayed({ ...requested, status: targetStatus });
   });
-  useEffect(() => {
-    if (!activeTransition) return;
-    const timer = setTimeout(() => setTransition(null), activeTransition.duration);
-    return () => clearTimeout(timer);
-  }, [activeTransition]);
-  useEffect(() => { if (reduced) setTransition(null); }, [reduced]);
-
   const requestedVisible = displayed?.key === requested.key && displayed.status !== 'thumbnail';
   const displayedRange = displayed ? { start: displayed.start, end: displayed.end } : null;
-  return { displayed, requested, frames, transition: activeTransition, onDecoded, discardThumbnail, compositions, requestedVisible, displayedRange, decoded };
+  return { displayed, requested, frames, nextReady, onDecoded, discardThumbnail, compositions, requestedVisible, displayedRange, decoded };
+}
+
+function sceneGeometry(scene: Scene) {
+  const ratios = scene.frames.map((frame) => photoAspect(frame.photo) ?? 1);
+  const total = ratios.reduce((sum, ratio) => sum + ratio, 0);
+  const gaps = scene.frames.length - 1;
+  const width = `min(100cqw, calc(100cqh * ${total} + var(--player-gap) * ${gaps}))`;
+  const imageWidth = `(${width} - var(--player-gap) * ${gaps})`;
+  const height = `(${imageWidth} / ${total})`;
+  const left = `((100% - ${width}) / 2)`;
+  const top = `((100% - ${height}) / 2)`;
+  return { ratios, total, gaps, imageWidth, height, left, top };
 }
 
 function placement(scene: Scene, key: string): CSSProperties {
-  const ratios = scene.frames.map((frame) => frame.photo && frame.photo.width > 0 && frame.photo.height > 0 ? frame.photo.width / frame.photo.height : 1);
-  const total = ratios.reduce((sum, ratio) => sum + ratio, 0);
+  if (scene.fit === 'cover') return { width: '100%', left: 0 };
+  const { ratios, total, imageWidth, left } = sceneGeometry(scene);
   const position = scene.frames.findIndex((frame) => frame.key === key);
   const leading = ratios.slice(0, position).reduce((sum, ratio) => sum + ratio, 0) / total;
-  const width = ratios[position] / total;
-  const gaps = scene.frames.length - 1;
-  const groupWidth = `min(100cqw, calc(100cqh * ${total} + var(--player-gap) * ${gaps}))`;
-  const imageWidth = `(${groupWidth} - var(--player-gap) * ${gaps})`;
   return {
-    width: `calc(${imageWidth} * ${width})`,
-    left: `calc((100% - ${groupWidth}) / 2 + ${imageWidth} * ${leading} + var(--player-gap) * ${position})`,
-    '--player-slot': position - gaps / 2,
-  } as CSSProperties;
+    width: `calc(${imageWidth} * ${ratios[position] / total})`,
+    left: `calc(${left} + ${imageWidth} * ${leading} + var(--player-gap) * ${position})`,
+  };
+}
+
+function PlayerMatTextureCanvas({ texture, style }: { texture: PlayerMatTexture; style: CSSProperties }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(() => {
+    const element = canvas.current!;
+    element.width = texture.width; element.height = texture.height;
+    try {
+      const context = element.getContext('2d');
+      if (!context) throw new Error('欣赏材质画布不可用');
+      const image = context.createImageData(texture.width, texture.height);
+      image.data.set(texture.pixels);
+      context.putImageData(image, 0, 0);
+    } catch (cause) { reportPlayerMatFailure(cause); }
+    return () => { element.width = 0; element.height = 0; };
+  }, [texture]);
+  return <canvas ref={canvas} width={texture.width} height={texture.height} style={style} />;
+}
+
+function PlayerMat({ scene, samples }: {
+  scene: Scene; samples: Map<string, DecodedFrame>;
+}) {
+  if (scene.fit === 'cover') return null;
+  const { ratios, total, gaps, imageWidth, height, left, top } = sceneGeometry(scene);
+  const colors = playerMatColors(scene.frames.map((frame, index) => ({ edges: samples.get(frame.key)?.edges ?? neutralPlayerEdges, ratio: ratios[index] })));
+  const rgb = (edge: keyof PlayerEdges) => `rgb(${colors[edge].join(' ')})`;
+  const frost = scene.frames.map(frame => samples.get(frame.key)?.frost).find(Boolean);
+  // A contain-fit group touches either the horizontal or vertical bounds.
+  // Four sized backgrounds cover only its whitespace, remaining transparent
+  // behind the photographs; the scene commits its mat and photos together.
+  return <>
+    <div className="player-mat" data-role="current" aria-hidden="true" style={{
+      backgroundImage: `linear-gradient(90deg, #0c0d0e, ${rgb('left')}), linear-gradient(270deg, #0c0d0e, ${rgb('right')}), linear-gradient(180deg, #0c0d0e, ${rgb('top')}), linear-gradient(0deg, #0c0d0e, ${rgb('bottom')})`,
+      backgroundSize: `calc(${left}) 100%, calc(${left}) 100%, 100% calc(${top}), 100% calc(${top})`,
+      backgroundPosition: 'left center, right center, center top, center bottom', backgroundRepeat: 'no-repeat',
+    }}>
+      {(['left', 'right', 'top', 'bottom'] as const).map((edge) => {
+        const vertical = edge === 'left' || edge === 'right';
+        const selection = vertical ? [edge === 'left' ? 0 : scene.frames.length - 1] : scene.frames.map((_, index) => index);
+        const position: CSSProperties = vertical
+          ? { width: `calc(${left})`, height: '100%', top: 0, [edge]: 0 }
+          : { width: '100%', height: `calc(${top})`, left: 0, [edge]: 0 };
+        return <div key={edge} className="player-mat-wing" data-edge={edge} style={{ ...position, '--player-frost': frost ? `url("${frost}")` : 'none' } as CSSProperties}>
+          <div className="player-mat-textures">{selection.map((index) => {
+            const texture = samples.get(scene.frames[index].key)?.textures?.[edge];
+            if (!texture) return null;
+            const leading = vertical ? 0 : ratios.slice(0, index).reduce((sum, ratio) => sum + ratio, 0) / total;
+            return <PlayerMatTextureCanvas key={scene.frames[index].key} texture={texture} style={{ left: `${leading * 100}%`, width: `${vertical ? 100 : ratios[index] / total * 100}%` }} />;
+          })}</div>
+        </div>;
+      })}
+    </div>
+    {Array.from({ length: gaps }, (_, position) => {
+      const leading = ratios.slice(0, position + 1).reduce((sum, ratio) => sum + ratio, 0) / total;
+      return <div key={position} className="player-seam" data-role="current" aria-hidden="true" style={{
+        left: `calc(${left} + ${imageWidth} * ${leading} + var(--player-gap) * ${position})`,
+        top: `calc(${top})`, height: `calc(${height})`,
+      }} />;
+    })}
+  </>;
 }
 
 export function PlayerFrames({ presentation, onRelink }: {
   presentation: ReturnType<typeof usePlayerPresentation>; onRelink: (photo: Photo) => Promise<void>;
 }) {
-  const { displayed, requested, frames, transition, onDecoded, discardThumbnail, decoded } = presentation;
+  const { displayed, requested, frames, onDecoded, discardThumbnail, decoded } = presentation;
   const thumbnail = displayed?.status === 'thumbnail' ? displayed.frame.photo : undefined;
   const waiting = requested.frames.some((frame) => frame.src) && (displayed?.key !== requested.key || displayed.status === 'thumbnail');
-  const transitionStyle = transition ? { '--player-transition': `${transition.duration}ms`, '--player-direction': transition.direction } as CSSProperties : {};
   return <>
+    {displayed && <PlayerMat scene={displayed} samples={decoded} />}
     {[...frames.values()].map((frame) => {
       const current = displayed?.status !== 'thumbnail' && displayed?.frames.some((item) => item.key === frame.key);
-      const outgoing = transition?.outgoing.frames.some((item) => item.key === frame.key);
-      const role = current ? 'current' : outgoing ? 'outgoing' : 'prepared';
-      const scene = current ? displayed! : outgoing ? transition!.outgoing : requested;
-      const failed = current && decoded.get(frame.key) === 'error';
+      const role = current ? 'current' : 'prepared';
+      const scene = current ? displayed! : requested;
+      const failed = current && decoded.get(frame.key)?.status === 'error';
       return <div key={frame.key} className={`player-frame${failed ? ' image-asset image-unavailable' : ''}`} data-role={role}
-        data-effect={current ? transition?.effect : undefined} style={{ ...(role !== 'prepared' ? placement(scene, frame.key) : {}), ...transitionStyle }}
+        data-fit={current ? scene.fit : undefined} style={current ? placement(scene, frame.key) : undefined}
         aria-hidden={!current} inert={!current}>
         <PlayerFrameImage frame={frame} priority={requested.frames.some((item) => item.key === frame.key) ? 'high' : 'low'} onDecoded={onDecoded} />
         {failed && <PhotoUnavailable photo={frame.photo} onRelink={onRelink} />}
       </div>;
     })}
-    {displayed && thumbnail && <div className="player-frame" data-role="current">
+    {displayed && thumbnail && <div className="player-frame" data-role="current" data-fit={displayed.fit}>
       <img src={thumbnail.thumbnailUrl} width={thumbnail.width} height={thumbnail.height} alt={thumbnail.title || thumbnail.originalName}
         draggable={false} onError={() => discardThumbnail(displayed.frame.key)} />
     </div>}
@@ -209,19 +273,24 @@ function PlayerWaiting() {
 }
 
 function PlayerFrameImage({ frame, priority, onDecoded }: {
-  frame: ImageFrame; priority: 'high' | 'low'; onDecoded: (key: string, status: FrameStatus) => void;
+  frame: ImageFrame; priority: 'high' | 'low'; onDecoded: (key: string, result: DecodedFrame) => void;
 }) {
   const image = useRef<HTMLImageElement>(null);
   useLayoutEffect(() => {
     const element = image.current!;
     let mounted = true;
     void element.decode().then(
-      () => { if (mounted) onDecoded(frame.key, element.naturalWidth > 0 ? 'ready' : 'error'); },
-      () => { if (mounted) onDecoded(frame.key, 'error'); },
+      () => {
+        if (!mounted) return;
+        const width = element.naturalWidth, height = element.naturalHeight;
+        const ready = width > 0;
+        onDecoded(frame.key, { ...(ready ? samplePlayerMat(element) : neutralPlayerMat), status: ready ? 'ready' : 'error', width, height });
+      },
+      () => { if (mounted) onDecoded(frame.key, { ...neutralPlayerMat, status: 'error', width: 0, height: 0 }); },
     );
     return () => { mounted = false; };
   }, [frame.key, onDecoded]);
   const { photo } = frame;
   return <img ref={image} src={frame.src} width={photo.width} height={photo.height}
-    alt={photo.title || photo.originalName} decoding="async" fetchPriority={priority} draggable={false} />;
+    alt={photo.title || photo.originalName} crossOrigin="anonymous" decoding="async" fetchPriority={priority} draggable={false} />;
 }

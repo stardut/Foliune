@@ -1,4 +1,4 @@
-.settings-content { padding: 22px 24px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--panel); }
+.settings-content { padding: 22px 24px; border: 1px solid #ffffff1c; border-radius: var(--radius-panel); background: var(--glass); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: inset 0 1px 0 #ffffff10, 0 3px 9px #00000026; }
 .settings-content + .settings-content { margin-top: 16px; }
 .settings-content h2 { font-size: 16px; font-weight: 500; margin: 0; }
 .settings-content > p { margin: 8px 0 16px; }
@@ -58,10 +58,17 @@
 .ai-results article > p > span { display: block; }
 .ai-results article > div { font-size: 12px; line-height: 1.9; white-space: pre-wrap; }
 
-.settings-appreciation-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; max-width: 680px; margin-top: 18px; }
-.settings-appreciation-volume > span { display: flex; align-items: center; gap: 12px; min-height: 36px; }
-.settings-appreciation-volume input { min-width: 0; flex: 1; }
-.settings-appreciation-volume output { min-width: 4ch; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
-.settings-appreciation-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; max-width: 680px; margin-top: 18px; }
-.settings-appreciation-actions label { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; font-size: 13px; }
-@media (max-width: 700px) { .settings-appreciation-fields { grid-template-columns: minmax(0, 1fr); } }
+.settings-appreciation-layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); align-items: start; gap: 24px 32px; max-width: 860px; margin-top: 18px; }
+.settings-appreciation-column { display: grid; align-content: start; gap: 14px; min-width: 0; }
+.settings-appreciation-column > label { width: min(180px, 100%); }
+.settings-appreciation-music { display: flex; align-items: flex-end; gap: 12px; }
+.settings-appreciation-music > label { flex: 1; min-width: 0; }
+.settings-appreciation-music > .button { white-space: nowrap; }
+.settings-appreciation-local { display: flex; align-items: center; justify-content: space-between; gap: 16px; font-size: 12px; }
+.settings-appreciation-local .text-button { font-size: 12px; }
+.settings-appreciation-toggles { display: flex; flex-wrap: wrap; gap: 4px 20px; }
+.settings-appreciation-toggles label { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; min-height: 32px; font-size: 13px; cursor: pointer; }
+.settings-appreciation-status { margin: -6px 0 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .settings-appreciation-layout { grid-template-columns: minmax(0, 1fr); max-width: 440px; }
+}

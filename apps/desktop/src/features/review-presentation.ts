@@ -1,5 +1,6 @@
 import type { Photo } from '../lib/types';
 import { canReadOriginal, originalReadUrl } from '../lib/photo-availability.ts';
+import { photoPreloadOffsets } from '../lib/photo-preload';
 
 type FrameKind = 'image' | 'thumbnail' | 'error';
 export interface ReviewFrame { key: number; photo: Photo; src: string; kind: FrameKind; }
@@ -10,7 +11,7 @@ export interface ReviewPresentationState {
 const identity = (photo: Photo) => JSON.stringify([photo.id, photo.originalUrl, photo.originalAvailable, photo.availability]);
 
 // Only detached preload images live here. Eviction never changes a displayed
-// DOM image's src; completed resources outside the three-slot window are released.
+// DOM image's src; resources outside the current preload window are released.
 class ReviewImageCache {
   private entries = new Map<string, { image: HTMLImageElement; pending: boolean; promise: Promise<boolean> }>();
   constructor(private readonly readSession: string) {}
@@ -21,10 +22,10 @@ class ReviewImageCache {
       if (entry.pending) entry.image.removeAttribute('src');
     }
   }
-  load(photo: Photo) {
+  load(photo: Photo, priority: 'high' | 'low') {
     const key = identity(photo), previous = this.entries.get(key);
-    if (previous) return previous.promise;
-    const image = new Image(); image.decoding = 'async'; image.src = originalReadUrl(photo, this.readSession);
+    if (previous) { previous.image.fetchPriority = priority; return previous.promise; }
+    const image = new Image(); image.decoding = 'async'; image.fetchPriority = priority; image.src = originalReadUrl(photo, this.readSession);
     const entry = { image, pending: true, promise: Promise.resolve(false) };
     entry.promise = image.decode().then(() => image.naturalWidth > 0, () => false).then((ready) => { entry.pending = false; return ready; });
     this.entries.set(key, entry);
@@ -49,11 +50,12 @@ export class ReviewPresentation {
   private photos: Photo[] = [];
   private photoIndices: ReadonlyMap<string, number> = new Map();
   private requestedId: string;
+  private preloadDirection = 0;
   private reduced = false;
   private disposed = false;
   private loadingTimer: ReturnType<typeof setTimeout> | undefined;
   private transitionTimer: ReturnType<typeof setTimeout> | undefined;
-  constructor(initial: Photo | undefined, private publish: (state: ReviewPresentationState) => void) {
+  constructor(initial: Photo | undefined, private publish: (state: ReviewPresentationState) => void, private directionalPreload = false) {
     this.requestedId = initial?.id || '';
     this.state = { current: initial && !canReadOriginal(initial) ? this.frame(initial, 'error')
       : initial?.thumbnailAvailable && initial.thumbnailUrl ? this.frame(initial, 'thumbnail') : null,
@@ -72,10 +74,13 @@ export class ReviewPresentation {
     if (this.disposed) return;
     if (photoIndices) this.photoIndices = photoIndices;
     else if (photos !== this.photos) this.photoIndices = new Map(photos.map((photo, index) => [photo.id, index]));
-    this.photos = photos; this.requestedId = requestedId; this.reduced = reduced;
     const index = this.photoIndices.get(requestedId) ?? -1;
     const target = photos[index];
-    const window = target ? [target, photos[index - 1], photos[index + 1]].filter((photo): photo is Photo => !!photo && canReadOriginal(photo)) : [];
+    if (target && requestedId !== this.requestedId && direction !== 0) this.preloadDirection = direction;
+    this.photos = photos; this.requestedId = requestedId; this.reduced = reduced;
+    const neighbors = target ? photoPreloadOffsets(this.directionalPreload ? this.preloadDirection : 0)
+      .map((offset) => photos[index + offset]).filter((photo): photo is Photo => !!photo && canReadOriginal(photo)) : [];
+    const window = target ? [target, ...neighbors].filter(canReadOriginal) : [];
     this.cache.retain(window);
     const exists = (frame: ReviewFrame | null) => !frame || this.photoIndices.has(frame.photo.id);
     if (!exists(this.state.current) || !exists(this.state.outgoing)) this.set({
@@ -92,7 +97,7 @@ export class ReviewPresentation {
     if (key === this.targetKey) {
       this.target = target;
       if (reduced && (this.state.outgoing || this.state.entering)) { this.stopTransition(); this.set({ outgoing: null, entering: false }); }
-      for (const neighbor of window) if (neighbor.id !== target.id) void this.cache.load(neighbor);
+      for (const neighbor of neighbors) void this.cache.load(neighbor, 'low');
       return;
     }
     this.target = target; this.targetKey = key;
@@ -101,16 +106,16 @@ export class ReviewPresentation {
     const outgoing = this.state.outgoing;
     const current = outgoing?.kind === 'image' && identity(outgoing.photo) === key ? outgoing : this.state.current;
     this.set({ current, incoming: null, outgoing: null, entering: false, waiting: false, direction });
-    if (!canReadOriginal(target)) { this.set({ current: this.frame(target, 'error') }); return; }
-    if (current?.kind !== 'image' || identity(current.photo) !== key) {
+    if (!canReadOriginal(target)) this.set({ current: this.frame(target, 'error') });
+    else if (current?.kind !== 'image' || identity(current.photo) !== key) {
       this.loadingTimer = setTimeout(() => { if (this.valid(generation)) this.set({ waiting: true }); }, 350);
-      void this.cache.load(target).then((ready) => {
+      void this.cache.load(target, 'high').then((ready) => {
         if (!this.valid(generation)) return;
         if (ready) this.set({ incoming: this.frame(this.target!, 'image') });
         else this.failTarget();
       });
     }
-    for (const neighbor of window.slice(1)) void this.cache.load(neighbor);
+    for (const neighbor of neighbors) void this.cache.load(neighbor, 'low');
   }
   private valid(generation: number) { return !this.disposed && generation === this.generation; }
   // Preloading does not prove that the newly mounted DOM image can paint.

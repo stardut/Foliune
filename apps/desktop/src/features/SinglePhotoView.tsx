@@ -25,7 +25,7 @@ export function SinglePhotoView({ photos, selected, initialCursor, rememberCurso
   const requestedIndex = indexOf(request);
   const requestedId = photos[requestedIndex].id;
   const reduced = !!useReducedMotion();
-  const { state: images, controller } = useReviewPresentation(photos, requestedId, request.direction, reduced, photoIndices);
+  const { state: images, controller } = useReviewPresentation(photos, requestedId, request.direction, reduced, { photoIndices });
   const currentId = images.current?.photo.id;
   const currentIndex = currentId === undefined ? undefined : photoIndices.get(currentId);
   const current = currentIndex === undefined ? undefined : photos[currentIndex];

@@ -8,15 +8,16 @@ import { PhotoUnavailable } from '../components/PhotoImage';
 import type { Photo } from '../lib/types';
 import type { MusicTrack } from '../lib/music-api';
 import type { BeatAnalysis } from '../lib/music-beats';
-import type { AppreciationPreferences } from '../lib/appreciation-preferences';
+import { DEFAULT_APPRECIATION_SECONDS, type AppreciationPreferences } from '../lib/appreciation-preferences';
 import { BUILTIN_MUSIC } from '../lib/player-music';
+import { createPlayerPlaylist } from '../lib/player-playlist';
 import { playerCompositionNeighbor, PlayerFrames, usePlayerPresentation } from './PlayerPresentation';
 import { usePlayerClock } from './usePlayerClock';
 import { useReviewFullscreen } from './use-review-fullscreen';
 import './player.css';
 
-export function PhotoPlayer({ photos, photoIds, preferences, music, analysis, onClose, onRelink, onFeedback }: {
-  photos: Photo[]; photoIds: string[]; preferences: AppreciationPreferences; music: MusicTrack | null; analysis: BeatAnalysis | null;
+export function PhotoPlayer({ photos, photoIds, preferences, playlist, analysis, onClose, onRelink, onFeedback }: {
+  photos: Photo[]; photoIds: string[]; preferences: AppreciationPreferences; playlist: readonly MusicTrack[]; analysis: ReadonlyMap<string, BeatAnalysis>;
   onClose: () => void; onRelink: (photo: Photo) => Promise<void>; onFeedback: (message: string, error?: boolean) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -34,18 +35,22 @@ export function PhotoPlayer({ photos, photoIds, preferences, music, analysis, on
     }
     return order;
   });
-  const [{ index, accent, direction }, setCursor] = useState({ index: 0, accent: false, direction: 1 as 1 | -1 });
+  const [{ index, direction }, setRequest] = useState({ index: 0, direction: 0 });
   const requestedIndex = useRef(0);
   const [stageAspect, setStageAspect] = useState(() => {
     if (!native) return 0;
     const { width, height } = window.screen;
-    const inset = width <= 700 ? 18 : Math.min(48, Math.max(20, width * .03));
-    return (width - inset * 2) / (height - inset * 2);
+    return width / height;
   });
   const [playing, setPlaying] = useState(photoIds.length > 1);
-  const [failedMusic, setFailedMusic] = useState<string | null>(null);
+  const [{ musicQueue, firstMusic }] = useState(() => {
+    const musicQueue = createPlayerPlaylist(playlist);
+    return { musicQueue, firstMusic: musicQueue.next() };
+  });
+  const [musicEntry, setMusicEntry] = useState({ track: firstMusic });
+  const music = musicEntry.track;
   const notices = useRef(new Map<string, string>());
-  const { seconds, volume, loop } = preferences;
+  const { loop } = preferences;
   const [entryReady, setEntryReady] = useState(!native);
   const [preparationVisible, setPreparationVisible] = useState(false);
   const screen = useReviewFullscreen(entryReady ? 'direct' : undefined, () => onClose());
@@ -53,36 +58,33 @@ export function PhotoPlayer({ photos, photoIds, preferences, music, analysis, on
   const [leaving, setLeaving] = useState(false);
   const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const photosById = useMemo(() => new Map(photos.map((photo) => [photo.id, photo])), [photos]);
-  const presentation = usePlayerPresentation(photosById, order, index, loop, { stageAspect, accent, direction, preloadAdjacent: entryReady });
+  const presentation = usePlayerPresentation(photosById, order, index, loop, { stageAspect, preloadAdjacent: entryReady, preferFill: preferences.preferFill, groupPortraits: preferences.groupPortraits, direction });
   const { displayed, requestedVisible, compositions } = presentation;
   const stageVisible = revealed && !screen.transitioning && !leaving;
   const imageFailed = requestedVisible && displayed?.status === 'error';
-  const preparationFailures = !entryReady ? presentation.requested.frames.filter((frame) => !frame.src || presentation.decoded.get(frame.key) === 'error') : [];
+  const preparationFailures = !entryReady ? presentation.requested.frames.filter((frame) => !frame.src || presentation.decoded.get(frame.key)?.status === 'error') : [];
   const preparationFailed = preparationFailures.length > 0;
   const builtin = BUILTIN_MUSIC.find((track) => track.id === music?.id);
-  const activeMusic = music?.id !== failedMusic ? music : null;
-  const grid = activeMusic ? builtin?.grid ?? (analysis?.status === 'ready' ? analysis.grid : null) : null;
+  const localAnalysis = music ? analysis.get(music.id) : undefined;
+  const grid = music ? builtin?.grid ?? (localAnalysis?.status === 'ready' ? localAnalysis.grid : null) : null;
 
-  const seek = useCallback((next: number, direction: 1 | -1 = 1, accent = false) => {
-    requestedIndex.current = next;
-    setCursor({ index: next, direction, accent });
-  }, []);
   const canNavigate = compositions.length > 1;
-  const advance = useCallback((direction: 1 | -1, accent = false) => {
+  const advance = useCallback((direction: 1 | -1) => {
     if (!canNavigate) return false;
     const next = playerCompositionNeighbor(compositions, requestedIndex.current, direction, loop);
     if (next === null) return false;
     setPlaying(true);
-    seek(next, direction, accent);
+    requestedIndex.current = next;
+    setRequest({ index: next, direction });
     return true;
-  }, [canNavigate, compositions, loop, seek]);
-  const advanceOnClock = useCallback((accent: boolean) => {
-    if (!advance(1, accent)) setPlaying(false);
+  }, [canNavigate, compositions, loop]);
+  const advanceOnClock = useCallback(() => {
+    if (!advance(1)) setPlaying(false);
   }, [advance]);
   usePlayerClock({
-    audioRef: audio, musicId: activeMusic?.id ?? null, grid,
+    audioRef: audio, musicId: music?.id ?? null, grid,
     playing: playing && canNavigate && stageVisible, ready: requestedVisible && displayed?.status === 'ready',
-    frameKey: JSON.stringify([index, order[index]]), seconds, onAdvance: advanceOnClock,
+    nextReady: presentation.nextReady, frameKey: JSON.stringify([index, order[index]]), seconds: DEFAULT_APPRECIATION_SECONDS, onAdvance: advanceOnClock,
   });
 
   useLayoutEffect(() => {
@@ -141,23 +143,26 @@ export function PhotoPlayer({ photos, photoIds, preferences, music, analysis, on
       audio.current.currentTime = 0;
       musicRevealed.current = true;
     }
-    audio.current.volume = stageVisible ? volume : 0;
-  }, [volume, stageVisible]);
+    audio.current.volume = 1;
+    audio.current.muted = !stageVisible;
+  }, [stageVisible]);
   useLayoutEffect(() => {
     const element = audio.current!;
-    if (!playing || !activeMusic || imageFailed || leaving) { element.pause(); return; }
+    if (!playing || !music || imageFailed || leaving) { element.pause(); return; }
     let active = true;
     void element.play().catch(() => {
-      if (active) failMusic(t('欣赏配乐未能播放，已按设定时间切换照片。可在设置中更换配乐。', 'Slideshow music could not play. Photos used the selected timing. Choose another track in Settings.'));
+      if (active) failMusic(t('未能播放', 'could not play'));
     });
     return () => { active = false; };
-  }, [playing, activeMusic, imageFailed, leaving]);
+  }, [playing, musicEntry, imageFailed, leaving]);
 
   function failMusic(message: string) {
     if (!music || notices.current.has(music.id)) return;
-    console.error(message);
-    notices.current.set(music.id, message);
-    setFailedMusic(music.id);
+    const feedback = t(`欣赏配乐「${music.name}」${message}，本次欣赏已跳过。`, `Slideshow track “${music.name}” ${message} and was skipped for this session.`);
+    console.error(feedback);
+    notices.current.set(music.id, feedback);
+    musicQueue.fail(music.id);
+    setMusicEntry({ track: musicQueue.next() });
   }
   function closePlayer() {
     if (leaving) return;
@@ -198,6 +203,11 @@ export function PhotoPlayer({ photos, photoIds, preferences, music, analysis, on
     {screen.error && <p className="player-fullscreen-error" role="alert">{screen.error} {screen.fullscreen
       ? t('按 Escape 重试退出。', 'Press Escape to retry leaving full screen.')
       : t('按 Escape 返回。', 'Press Escape to return.')}</p>}
-    <audio ref={audio} src={activeMusic?.url} loop onError={() => failMusic(t('欣赏配乐无法读取或格式不受支持，已按设定时间切换照片。可在设置中更换配乐。', 'Slideshow music could not be read or is unsupported. Photos used the selected timing. Choose another track in Settings.'))} />
+    <audio ref={audio} src={music?.url} onEnded={() => {
+      if (!music || !playing || imageFailed || leaving) return;
+      const next = musicQueue.next();
+      if (next?.id === music?.id) audio.current!.currentTime = 0;
+      setMusicEntry({ track: next });
+    }} onError={() => failMusic(t('无法读取或格式不受支持', 'could not be read or is unsupported'))} />
   </dialog>;
 }

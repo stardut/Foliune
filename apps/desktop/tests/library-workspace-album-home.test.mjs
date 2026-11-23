@@ -135,7 +135,7 @@ async function scenario(space, input, run, options = {}) {
   const showDetail = () => { container.scrollTop = 0; root.render(h('div', null, '详情')); };
   const renderSnapshot = (next = snapshot) => act(async () => root.render(h(space === 'search' ? SearchWorkspace : LibraryWorkspace, {
     ...(space === 'search' ? { session, onOpenBook: showDetail, onOpenModel: showDetail, onOpenPlan: showDetail } : { space }),
-    snapshot: next, onSnapshot: next => calls.push(next), onFeedback: options.onFeedback ?? (() => {}), onRelink: async (photo) => relinks.push(photo.id), onPlay: (ids) => { options.onPlay?.(ids, next); plays.push(ids); }, onBrowsingIdleChange,
+    snapshot: next, onSnapshot: next => calls.push(next), onFeedback: options.onFeedback ?? (() => {}), importDisabled: options.importDisabled, onRelink: async (photo) => relinks.push(photo.id), onPlay: (ids) => { options.onPlay?.(ids, next); plays.push(ids); }, onBrowsingIdleChange,
   })));
   try {
     await renderSnapshot(snapshot);
@@ -254,6 +254,84 @@ async function assertPhotoSort(trigger, label) {
 }
 
 for (const library of ['collection', 'work']) {
+  test(`${library} 首页欣赏全部按当前相簿及照片顺序播放、去重并保留首页`, async () => {
+    window.localStorage.setItem('foliune.photo-sort', 'name-asc');
+    const first = photo(library, '10');
+    const second = photo(library, '2');
+    const input = {
+      ...mixed, photos: [...mixed.photos, first, second],
+      groups: [...mixed.groups, { ...mixed.groups.find(({ id }) => id === `${library}-album`), id: `${library}-other`, name: 'A' }],
+      memberships: [...mixed.memberships,
+        { groupId: `${library}-album`, photoId: first.id, status: 'active', position: 2 },
+        { groupId: `${library}-album`, photoId: second.id, status: 'active', position: 3 },
+        { groupId: `${library}-other`, photoId: first.id, status: 'active', position: 0 },
+        { groupId: `${library}-other`, photoId: `${library}-discarded`, status: 'active', position: 1 },
+        { groupId: `${library}-other`, photoId: 'missing', status: 'active', position: 2 },
+        { groupId: `${library}-other`, photoId: `${library === 'work' ? 'collection' : 'work'}-active`, status: 'active', position: 3 },
+      ],
+    };
+    await scenario(library, input, async ({ container, plays, renderSnapshot }) => {
+      const play = () => container.querySelector('[aria-label="欣赏全部"]');
+      assert.equal(play().className, 'icon-button');
+      assert.equal(play().textContent, '');
+      assert.equal(play().title, '欣赏全部');
+      assert.equal(play().disabled, false);
+      const next = play().nextElementSibling;
+      if (library === 'work') {
+        assert.equal(next.getAttribute('aria-label'), '地图');
+        assert.equal(next.textContent, '');
+      }
+      else assert.ok(next === albumSortTrigger(container) || next.contains(albumSortTrigger(container)));
+      const actions = container.querySelector('.album-home-actions');
+      const icons = [...actions.querySelectorAll('.icon-button')];
+      assert.deepEqual(icons.map((button) => button.getAttribute('aria-label')), ['欣赏全部', ...(library === 'work' ? ['地图'] : []), '相簿排序 · 创建时间 · 由旧到新']);
+      for (const button of icons) {
+        assert.equal(button.title, button.getAttribute('aria-label'), '悬停名称与键盘可访问名称一致');
+        assert.equal(button.textContent, '');
+        assert.equal(button.querySelector('svg').getAttribute('width'), '17');
+        assert.equal(button.querySelector('svg').getAttribute('height'), '17');
+        assert.equal(button.querySelector('svg').getAttribute('stroke-width'), '2');
+      }
+      assert.equal(actions.nextElementSibling.textContent, '新建相簿');
+      assert.equal(actions.nextElementSibling.classList.contains('button'), true);
+      assert.equal(actions.nextElementSibling.classList.contains('album-home-create'), true);
+      const sort = albumSortTrigger(container);
+      const sortName = sort.getAttribute('aria-label');
+      await act(async () => sort.click());
+      assert.equal(sort.getAttribute('aria-expanded'), 'true');
+      assert.equal(sort.title, '', '展开时抑制原生悬停提示，避免覆盖菜单');
+      assert.equal(sort.getAttribute('aria-label'), sortName);
+      await pressKey(document.activeElement, 'Escape');
+      assert.equal(sort.getAttribute('aria-expanded'), 'false');
+      assert.equal(sort.title, sortName, '收起恢复当前排序名称');
+      assert.equal(document.activeElement, sort);
+      container.scrollTop = 240;
+      await act(async () => play().click());
+      assert.deepEqual(plays[0], [second.id, first.id, `${library}-active`, `${library}-discarded`], '跨相簿只播放首次遇见的有效照片；另一相簿仍有效的废弃照片保留');
+      assert.equal(container.scrollTop, 240);
+      assert.equal(container.querySelectorAll('.album-open').length, 3);
+      await changeSort(albumSortTrigger(container), '相簿名 · 升序');
+      assert.equal(albumSortTrigger(container).title, '相簿排序 · 相簿名 · 升序', '排序提示跟随当前方向更新');
+      await act(async () => play().click());
+      assert.deepEqual(plays[1], [first.id, `${library}-discarded`, second.id, `${library}-active`]);
+      await act(async () => [...container.querySelectorAll('.album-open')].find((card) => card.querySelector('h2').textContent === `${library}-album`).click());
+      assert.equal(play(), null, '相簿详情不重复增加首页入口');
+      await changePhotoSort(albumMore(container), '加入顺序');
+      await act(async () => container.querySelector(`[aria-label="返回${library === 'work' ? '作品' : '收藏'}相簿"]`).click());
+      await act(async () => play().click());
+      assert.deepEqual(plays[2], [first.id, `${library}-discarded`, `${library}-active`, second.id]);
+      await renderSnapshot({ ...input, memberships: [] });
+      assert.equal(play().disabled, true, '所有相簿无有效成员时禁用，即使图库仍有无归属照片');
+      await act(async () => play().click());
+      assert.equal(plays.length, 3);
+    }, { withMain: true });
+    await scenario(library, mixed, async ({ container, plays }) => {
+      assert.equal(container.querySelector('[aria-label="欣赏全部"]').disabled, true);
+      await act(async () => container.querySelector('[aria-label="欣赏全部"]').click());
+      assert.deepEqual(plays, []);
+    }, { importDisabled: true });
+  });
+
   test(`${library} 首页相簿菜单欣赏只播放目标有效成员，沿用排序并保留首页`, async () => {
     const first = { ...photo(library, '10'), capturedAt: '2025-01-01' };
     const second = { ...photo(library, '2'), capturedAt: '2026-01-01' };
@@ -344,6 +422,8 @@ test('作品首页欣赏沿用相簿详情的地点分组顺序', async () => {
       await act(async () => container.querySelector('.album-open').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
       await act(async () => actions.find(({ id }) => id === 'play').run());
       assert.deepEqual(plays, [expected]);
+      await act(async () => container.querySelector('[aria-label="欣赏全部"]').click());
+      assert.deepEqual(plays, [expected, expected]);
       assert.ok(container.querySelector('.album-open'));
     });
   } finally { delete globalThis.captureAlbumTestMenu; }
@@ -376,7 +456,9 @@ test('隔空投送区分整本相簿、选片和未选照片，取消后保留�
       await run('airdrop');
       assert.deepEqual(shares.pop(), [groupId, undefined]);
       assert.equal(card.disabled, true);
+      assert.equal(container.querySelector('[aria-label="欣赏全部"]').disabled, true, '准备投送期间不启动全部欣赏');
       await finishSharing();
+      assert.equal(container.querySelector('[aria-label="欣赏全部"]').disabled, false);
 
       await act(async () => card.click());
       await act(async () => container.querySelector('[aria-label="总览"]').click());

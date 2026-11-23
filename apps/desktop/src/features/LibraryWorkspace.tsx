@@ -436,6 +436,14 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onWorksMapRegion
       setPhotoRegionBatch({ groupId: album.group.id, albumName: requestedIds ? undefined : album.group.name, photos });
     }
   }
+  function albumPlaybackPhotoIds(album: LibraryAlbum) {
+    const sections = album.group.library === 'work' && workView !== 'none' && (photoSort === 'time-asc' || photoSort === 'time-desc')
+      ? workPhotoSections(album.photos, workView, photoSort, workView === 'location' ? t('未填写地点', 'No Location') : t('未归入项目', 'No Project')) : undefined;
+    return (sections ? sections.flatMap(([, items]) => items) : sortAlbumPhotos(album.photos, photoSort)).map((photo) => photo.id);
+  }
+  function playAllAlbums() {
+    onPlay([...new Set(orderedAlbums.flatMap(albumPlaybackPhotoIds))]);
+  }
   function showAlbumMenu(group: Group, at: ContextMenuPosition, trigger: HTMLElement) {
     const context = menuContext;
     const target = () => albumMenuState.current.albumIndex?.byGroupId.get(group.id);
@@ -449,9 +457,7 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onWorksMapRegion
       { id: 'play', text: t('欣赏', 'Slideshow'), disabled: !canPlay(), allowed: canPlay, run: () => {
         const current = target();
         if (!current) return;
-        const sections = group.library === 'work' && workView !== 'none' && (photoSort === 'time-asc' || photoSort === 'time-desc')
-          ? workPhotoSections(current.photos, workView, photoSort, workView === 'location' ? t('未填写地点', 'No Location') : t('未归入项目', 'No Project')) : undefined;
-        albumMenuState.current.onPlay((sections ? sections.flatMap(([, items]) => items) : sortAlbumPhotos(current.photos, photoSort)).map((photo) => photo.id));
+        albumMenuState.current.onPlay(albumPlaybackPhotoIds(current));
       } },
       { id: 'info', text: t('相簿信息…', 'Album Info…'), disabled: busy || importDisabled, allowed, run: () => { const current = target(); if (current) setGroupForm(current.group); } },
       ...(group.library === 'work' ? [{ id: 'shooting-region', text: albumPhotoRegionLabel, disabled: !canSetRegion(), allowed: canSetRegion, run: () => { const current = target(); if (current) openPhotoRegionBatch(current); } }] : []),
@@ -595,9 +601,12 @@ export function LibraryWorkspace({ space, snapshot, onSnapshot, onWorksMapRegion
       onBeforeMenuOpen={settleAlbumSlide}
       onFocusWall={() => wallRef.current?.focusViewportPhoto(photoCursor.current?.id) ?? false}
     /> : space !== 'search' ? <WorkspaceHeader title={albumHomeTitle} count={albumIndex?.albums.length || !hasPendingAlbum ? t(`${albumIndex?.albums.length ?? 0} 本相簿`, albumCount(albumIndex?.albums.length ?? 0)) : undefined}>
-      {space === 'work' && <button ref={mapEntry} type="button" className="text-button" onClick={openWorksMap}><MapIcon size={16} aria-hidden="true" />{t('地图', 'Map')}</button>}
-      <AlbumSortButton label={t('相簿排序', 'Sort Albums')} labels={albumSortLabels} value={albumSort} disabled={!orderedAlbums.length} onChange={changeAlbumSort} onBeforeOpen={settleAlbumSlide} onOpenChange={setAlbumSortOpen} />
-      <button type="button" className="button" disabled={busy} onClick={() => setGroupForm('new')}><FolderPlus size={15} />{t('新建相簿', 'New Album')}</button>
+      <div className="album-home-actions">
+        <button type="button" className="icon-button" aria-label={t('欣赏全部', 'Play All')} title={t('欣赏全部', 'Play All')} disabled={busy || importDisabled || !orderedAlbums.some((album) => album.photos.length)} onClick={playAllAlbums}><Play size={17} aria-hidden="true" /></button>
+        {space === 'work' && <button ref={mapEntry} type="button" className="icon-button" aria-label={t('地图', 'Map')} title={t('地图', 'Map')} onClick={openWorksMap}><MapIcon size={17} aria-hidden="true" /></button>}
+        <AlbumSortButton label={t('相簿排序', 'Sort Albums')} labels={albumSortLabels} value={albumSort} title={albumSortOpen ? '' : undefined} disabled={!orderedAlbums.length} onChange={changeAlbumSort} onBeforeOpen={settleAlbumSlide} onOpenChange={setAlbumSortOpen} />
+      </div>
+      <button type="button" className="button album-home-create" disabled={busy} onClick={() => setGroupForm('new')}><FolderPlus size={15} />{t('新建相簿', 'New Album')}</button>
     </WorkspaceHeader> : previewCount === undefined && <div className="search-group-heading">
       <h2>{t('照片', 'Photos')} <span className="photo-count">{photos.length}</span></h2>
       <div className="workspace-tools">
